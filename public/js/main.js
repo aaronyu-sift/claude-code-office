@@ -1,7 +1,7 @@
 import { t as msg, locale, fmtPct } from './i18n.js';
 import { CATS, STATUS, verbOf, actText, evName, evText, catColor, fmtDur, fmtShort, fmtClock, fmtTok, fmtUsd, pct, esc, icon } from './util.js';
 import { createPano } from './pano.js';
-import { createOfis } from './ofis.js';
+import { createPixelOffice } from './pixel/index.js';
 import { createAkis } from './akis.js';
 import { createMaliyet } from './maliyet.js';
 import './site.js';
@@ -143,9 +143,23 @@ function safeView(name, create) {
   const guard = fn => (...args) => { if (!v) return; try { return fn.apply(v, args); } catch (e) { fail(e); v = null; } };
   return { show: guard(function () { return this.show(); }), hide: guard(function () { return this.hide(); }), update: guard(function (...a) { return this.update(...a); }) };
 }
+// The Office view is the pixel scene. The original three.js scene stays available as ?scene=3d; it is loaded only then, so the
+// default view never fetches three.js.
+function createOffice(root) {
+  if (new URLSearchParams(location.search).get('scene') !== '3d') return createPixelOffice(root, ctx);
+  root.dataset.scene = '3d';
+  let real = null, visible = false;
+  import('./ofis.js').then(m => { real = m.createOfis(root, ctx); if (visible) real.show(); })
+    .catch(e => { console.error('[ofis]', e); root.innerHTML = `<div class="empty">${esc(msg('view.failed'))}<br><span class="faint mono">${esc(e && e.message || e)}</span></div>`; });
+  return {
+    show() { visible = true; if (real) real.show(); },
+    hide() { visible = false; if (real) real.hide(); },
+    update(...a) { if (real) real.update(...a); },
+  };
+}
 const views = {
   pano: safeView('pano', root => createPano(root, ctx)),
-  ofis: safeView('ofis', root => createOfis(root, ctx)),
+  ofis: safeView('ofis', root => createOffice(root)),
   akis: safeView('akis', root => createAkis(root, ctx)),
   maliyet: safeView('maliyet', root => createMaliyet(root, ctx)),
 };
@@ -345,6 +359,7 @@ function openDrawer(id) {
   if (!store.agents.has(id)) return;
   if (drawerId !== id) logAll = false;
   drawerId = id;
+  drawer.dataset.id = id;
   renderDrawer(true);
   drawer.classList.add('on');
   scrim.classList.add('on');
