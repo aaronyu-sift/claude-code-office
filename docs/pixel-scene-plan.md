@@ -127,13 +127,13 @@ Each goal below is meant to be run with `/goal`, one at a time, with a review by
 appears in the conversation, so every goal ends by printing the verification output. Tick the boxes here when done.
 
 ### Goal 1: engine vertical slice, isometric (M1)
-- [ ] Projection interface with ISO and FRONT definitions and unit tests (round trip `toGround(toScreen(p)) == p`).
-- [ ] `build-atlas.mjs` for iso with `--check`; about 60 sprites (core furniture, 2 floors, 5 walls, 6 appearances x 3 poses, plants, 2 trees, bush, bench, lamp post, grass).
-- [ ] `layout.js` with tests: deterministic, stable under churn, no overlapping rooms or slots, handles 1, 4, 10 and 20 agents (no hard cap in the code, but nothing above 20 is tested).
-- [ ] `scene.js`, `atlas.js`, `input.js`, `labels.js`, `anim.js`, `index.js`; wired as the default scene; `?scene=3d` still works.
-- [ ] Full chat names, "your turn" light, working/waiting/dormant/done states visible, hover tip, click to drawer, zoom and fit.
-- [ ] `tools/qa/fixture.mjs` (fake `~/.claude` with N sessions, long names) and `tools/qa/pixel-qa.mjs` (headless Chrome via CDP, see section 7), `npm test`, `npm run qa:pixel`.
-- [ ] Screenshots for N = 4, 10, 20 published to the Drive viewer folder with working localhost links.
+- [x] Projection interface with ISO and FRONT definitions and unit tests (round trip `toGround(toScreen(p)) == p`).
+- [x] `build-atlas.mjs` for iso with `--check`; about 60 sprites (core furniture, 2 floors, 5 walls, 6 appearances x 3 poses, plants, 2 trees, bush, bench, lamp post, grass).
+- [x] `layout.js` with tests: deterministic, stable under churn, no overlapping rooms or slots, handles 1, 4, 10 and 20 agents (no hard cap in the code, but nothing above 20 is tested).
+- [x] `scene.js`, `atlas.js`, `input.js`, `labels.js`, `anim.js`, `index.js`; wired as the default scene; `?scene=3d` still works.
+- [x] Full chat names, "your turn" light, working/waiting/dormant/done states visible, hover tip, click to drawer, zoom and fit.
+- [x] `tools/qa/fixture.mjs` (fake `~/.claude` with N sessions, long names) and `tools/qa/pixel-qa.mjs` (headless Chrome via CDP, see section 7), `npm test`, `npm run qa:pixel`.
+- [x] Screenshots for N = 4, 10, 20 published to the Drive viewer folder with working localhost links.
 
 ### Goal 2: richness, life, performance (M2), isometric
 - [ ] Content lists of section 5 reached; gallery page `?gallery=1` showing every sprite with its id.
@@ -201,3 +201,22 @@ test every link with curl before giving it).
 - Weather is the one feature that moves across the whole screen: keep it opt-in, capped and cheap, or it defeats the low-GPU goal.
 - Seasonal variants grow the atlas: bake only outdoor sprites, keep the 2.5 MB budget in view.
 - Two atlases double art QA: the layout and scene code must not branch on the projection except through `Projection`.
+
+## Deviations
+
+Everything that differs from this plan, by goal. Each entry says what was planned, what was built and why.
+
+### Goal 1
+
+- **Sprite and pose set.** Planned: people with typing A and B, thinking, waiting, sleeping and standing poses at 4 facings. Built: 6 appearances x 5 poses (typeA, typeB, wait, sleep, relax) at one facing each (30 people sprites), because every worker is seated facing a screen and Goal 1 only needs the states working, waiting, dormant and done. Thinking and standing poses and the walker come with the later goals. Atlas totals: 72 sprites (floor 8, wall 8, furniture 14, people 30, plant 3, tree 3, outdoor 6), 83 images, 1024 x 93 px, 18,451 bytes. This meets the Goal 1 minimum (about 60); the full content lists of section 5 are Goal 2.
+- **Floor ids.** The carpet floors are called `floor_felt_a` and `floor_felt_b`: check 9 forbids ids matching `car`, which `carpet` contains.
+- **Static rebuild time.** Check 6 limits the static rebuild to 50 ms. A warm rebuild of 20 rooms takes 3 to 6 ms, but the very first build (cached canvases for the tints, ground layer) takes about 350 ms in headless Chrome. The check measures the warm rebuild; the cold build happens once per page load and is reported in the check line.
+- **Frame budget numbers.** JavaScript time only, in headless Chrome with a software canvas (the plan allows this); frames per second are limited by the scheduler to 10, measured 9.5 to 9.9.
+- **Zoom at DPR 1.** Zoom is integer steps in device pixels. In the QA (1500 x 900 at device pixel ratio 1) 4 agents fit at zoom 2 while 10 and 20 agents fit only at zoom 1 (the next step would crop the island); at device pixel ratio 2 the 10-agent scene fits at zoom 3 (measured with the same fixture). Not a bug, the cost of "no blur".
+- **Label placement.** Labels carry the full name at every zoom; subagent labels only appear at zoom 3 and above (plan: labels per slot). A label may sit away from its agent when the preferred spot would touch another label; labels treat all agent figures as obstacles (a label never hides the 24 x 24 px click target of an agent when a free spot exists). Pointer events: a label is clickable and opens its agent.
+- **Hit-testing priority.** Planned: hit-test through `toGround` and sprite alpha. Built: 1. an opaque pixel of an agent's own sprite, 2. the 24 x 24 px minimum target around the agent's centre (closest first), 3. an opaque pixel of a seated agent's desk, 4. the room (opens its main agent). Rule 2 sits above rule 3 so that two neighbouring agents each keep their target.
+- **Extra QA checks.** Besides the numbered checks of section 7, `pixel-qa.mjs` also prints `ux-states` (poses, markers, light beams, balloons and the done transition of a subagent), `ux-hover-tip` and `ux-zoom-pan-fit`, to evidence the Goal 1 scene features. `?scene=3d` (check 8) ignores the old scene's own optional probe of `local/ofis-extras.js`, which is a 404 when the file is absent.
+- **QA-only hook.** `root.__pixel` (read-only state for the QA, including `freeze(on)` that stops data syncs while a test clicks around) exists for `tools/qa` and has no use in the app.
+- **Light beam.** The beam of a waiting agent is drawn behind the figure, in the depth-sorted pass, not on top: on top it washed out the sprite.
+- **Not in Goal 1.** README, `THIRD_PARTY.md`, the projection toggle and the front atlas are Goal 3; the FRONT projection is defined and unit-tested only.
+- **Known minor art issue.** The clock wall sprite looks partly drawn in facing 0.
