@@ -1,5 +1,4 @@
-const VOXPIX = process.env.VOXPIX_DIR;
-if (!VOXPIX) throw new Error('set VOXPIX_DIR to a checkout of https://github.com/andyeswong/voxpix');
+const VOXPIX = process.env.VOXPIX_DIR || new URL('../../.tools/voxpix', import.meta.url).pathname;   // pinned checkout, see README
 const { camera } = await import(VOXPIX + '/src/core/index.ts');
 // A room: 66 x 62 voxels (2 desks wide, 2 rows), walls 30 high, 4 agents. Streets between rooms: 14 voxels.
 const W = 66, D = 62, G = 14, H = 38, AG = 38;           // AG: agent height in voxels incl. hair

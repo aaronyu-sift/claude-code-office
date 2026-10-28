@@ -1,7 +1,6 @@
-// usage: VOXPIX_DIR=<voxpix checkout> bun render.ts <sheet.png> <ppu> <yaw> <elev> model1.json model2.json ...
+// usage: bun render.ts <sheet.png> <ppu> <yaw> <elev> model1.json model2.json ...
 import { readFileSync, writeFileSync } from 'node:fs';
-const VOXPIX = process.env.VOXPIX_DIR;
-if (!VOXPIX) throw new Error('set VOXPIX_DIR to a checkout of https://github.com/andyeswong/voxpix');
+const VOXPIX = process.env.VOXPIX_DIR || new URL('../../.tools/voxpix', import.meta.url).pathname;   // pinned checkout, see README
 const { Model, render, camera } = await import(VOXPIX + '/src/core/index.ts');
 const { encodePNG } = await import(VOXPIX + '/src/core/png.ts');
 
