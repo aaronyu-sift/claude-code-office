@@ -10,6 +10,8 @@ Replace the low-poly three.js office (`public/js/ofis.js`, `ofis-env.js`) with a
 a cheerful chunky Two Point-like mood. It must stay **very readable**: the agents, their status and their full chat
 names stand out from the decoration. It must be **cheap to run**: pre-rendered sprites on a 2D canvas, no 3D, only small
 items animate. The user can switch between **isometric (2:1)** and **front three-quarter** views.
+It also has a **time-of-day light** that follows the local clock and, optionally, **seasons** and **weather** in the spirit of
+Animal Crossing: New Horizons. The clock and the seasons are cheap; weather is opt-in and capped.
 
 Out of scope for now: moving cars, the river, any road traffic. Mountains are optional later. The old 3D scene stays
 as a fallback (`?scene=3d`) until the user says to remove it.
@@ -26,6 +28,13 @@ as a fallback (`?scene=3d`) until the user says to remove it.
 - **Full chat names** are shown on every main agent's label (wrapped, never cut with an ellipsis up to 120 characters).
 - **Labels are the density limit, not sprites** (measured with `tools/sprites/density.ts`): give each agent a label slot.
 - **Test scale: up to 20 agents, typically 10.** If it works for 20 it is expected to work for more (other people may run more), so the code has no hard cap, but nothing above 20 is tested or tuned.
+- **Time, seasons, weather** (user, 2026-10-28). Time of day is always on and follows the browser's local clock: tinted light,
+  lit windows, lamps and monitors after dark, a soft sky gradient behind the island; agents and their labels must stay readable at
+  night. Seasons are optional and default to automatic by date (northern hemisphere unless set): foliage, flowers, ground and small
+  props change, **baked at build time as extra sprites**, not recoloured at runtime. Weather is optional and defaults to **off**:
+  clear, cloudy, rain, snow, fog, with a seeded automatic mode per date and season; no network calls and no real-weather API.
+  Weather and seasonal particles share one overlay canvas, at most 120 particles, at most 10 fps, zero cost when off, paused when
+  hidden, off with `prefers-reduced-motion`. `?time=HH:MM`, `?season=` and `?weather=` override everything for tests and demos.
 - Style proof exists: `tools/sprites/diorama.mjs` (iso and oblique renders). Keep the palette and proportions; improve them.
 - Commits: repo-local author is already `Aaron Yu <macbookproiceland@gmail.com>`. No Claude co-author trailer, no `#NNN`
   in messages. **Never push** and never open a PR; the user decides that. Do not touch `main`.
@@ -70,6 +79,11 @@ Runtime (`public/js/pixel/`, ES modules, no dependencies):
   butterflies and birds (tiny), window lights. No full-scene motion.
 - `labels.js` DOM overlay (crisp text, selectable): label slot per agent with the full chat name, tool line, say line,
   wall sign per room with the project name. Collision-free by construction (slots) plus a declutter pass.
+- `time.js` pure functions: local time to phase (night, dawn, day, golden hour, dusk), sunrise and sunset by month (simple model), `ambient(t)` colour and intensity.
+- `lighting.js` re-tints the cached static layer at most once a minute (multiply with a warm or cool ambient colour, weaker indoors than outdoors so rooms stay readable), then adds emissive lights (windows, lamps, monitors) in an additive pass only for sprites on screen, and draws a sky gradient behind the island. Sun-angle shadows are a stretch.
+- `season.js` season from date and hemisphere; picks sprite variants (`<id>@spring|summer|autumn|winter`) from the manifest.
+- `weather.js` weather state (seeded by date), one overlay canvas with capped particles (rain streaks, snowflakes, petals, leaves, fireflies), drifting cloud shadows, wet-ground and snow-cover overlays, a fog gradient, a rare rainbow after rain; shares the scheduler with `anim.js`.
+- `settings.js` persisted settings (localStorage) merged with URL overrides; a small popover in the header: projection, time (auto or slider), season (auto or fixed), weather (off, auto, fixed), hemisphere.
 - `input.js` integer zoom steps in device pixels (1, 2, 3, 4, 6), pan, fit, hit-test through `projection.toGround` and sprite alpha, hover, click.
 - `index.js` exports `createPixelOffice(root, ctx)` with the same interface as `createOfis`; `main.js` picks it by default,
   `?scene=3d` picks the old one, `?proj=iso|front` and a toggle button choose the projection (persisted in localStorage).
@@ -93,6 +107,9 @@ Content to build (counts are minimums per projection, as manifest ids with tags)
 - Plants 12 (pots, hanging, tall, flowers, cactus, bonsai), trees 6 species, bushes 4, hedges, flower beds 4, grass tufts, rocks 4.
 - Outdoor 14: bench, lamp post, picnic table, fence pieces, signpost, bike rack, fountain, pond (still water, no river), stepping stones, planters, well, tiny shed, mailbox.
 - Status effects drawn in code or small sprites: beam of light, balloons (working, waiting "!", done, sleeping "Zz", error), sparkles.
+- Season variants (baked, outdoor only, 4 each): trees (spring blossom pink and fresh green, summer lush, autumn orange and red, winter bare with snow caps), bushes, hedges, grass and ground tiles (flowers, lush, fallen leaves, snow), flower beds, rocks, bench and lamp post (snow caps in winter), plus a few seasonal props (snowman, pumpkin, leaf pile, bird bath).
+- Night variants: windows, lamps and monitors with lit emissive ramps; moon and star sprites.
+- Delights, all tiny and capped: butterflies and birds by day, petals in spring, fireflies on summer nights, falling leaves in autumn, flakes in winter, a rainbow after rain.
 
 ## 6. Milestones and goals
 
@@ -111,7 +128,8 @@ appears in the conversation, so every goal ends by printing the verification out
 ### Goal 2: richness, life, performance (M2), isometric
 - [ ] Content lists of section 5 reached; gallery page `?gallery=1` showing every sprite with its id.
 - [ ] Room theming per project colour, outdoor garden island with path, pond, trees, fences; no river, no cars.
-- [ ] Ambient animation (section 4) within the performance budget; day and night tint from local time with lit windows and lamps (stretch).
+- [ ] Ambient animation (section 4) within the performance budget.
+- [ ] Time of day (required): `time.js`, `lighting.js`, sky gradient, lit windows, lamps and monitors at night, `?time=HH:MM`; readable at every hour.
 - [ ] Occlusion budget and readability checks pass (section 7); label slots with 5-line names pass.
 
 ### Goal 3: front three-quarter, toggle, polish (M3)
@@ -120,7 +138,14 @@ appears in the conversation, so every goal ends by printing the verification out
 - [ ] README (features, options, how to regenerate art), `THIRD_PARTY.md` (VoxPix MIT, with the pinned commit), docs updated; old 3D scene still reachable.
 - [ ] Final screenshots (both projections, 4, 10, 20 agents, a waiting agent) and a short before and after.
 
-### Goal 4 (later, only after Goals 1 to 3 are reviewed): idle shelf and details
+### Goal 4: seasons, weather, settings (M4), both projections
+- [ ] Season variants baked for both projections (section 5), chosen by date and hemisphere, `?season=` override; atlases at most 2.5 MB each.
+- [ ] Weather (off by default): clear, cloudy, rain, snow, fog, seeded automatic mode per date and season; capped particles on one overlay; zero cost when off; reduced motion respected; no network calls.
+- [ ] Settings popover (projection, time, season, weather, hemisphere), persisted, URL overrides win.
+- [ ] Delights within budget: butterflies, birds, petals, fireflies, leaves, flakes, rainbow after rain.
+- [ ] QA checks 11 to 14 of section 7 pass in both projections; screenshots for the four seasons, clear and rain or snow, morning, evening and night.
+
+### Goal 5 (later, only after Goals 1 to 4 are reviewed): idle shelf and details
 Wanted by the user (2026-10-28), not part of the framework work. Idle and closed agents are not taken off the screen: they go to a side shelf, newest first, so a recently closed chat is easy to find.
 - [ ] Server: also list recently closed sessions (a transcript with no live process, last 14 days, configurable) with id, name or title, project, last activity time. Read only the tail of each transcript, cache by size and mtime, cap the count, never rescan an unchanged file (a shared-system-style load check applies to the user's disk too).
 - [ ] Shelf: a lane at the side of the scene (right side), independent scroll, for sessions that are dormant (idle long) or closed; each is a small sleeping or leaning pixel figure, the full chat name and "closed 12 min ago"; ordered by last activity, newest first; waiting ("your turn") sessions never go to the shelf, they stay in their rooms.
@@ -143,6 +168,10 @@ protocol in a throw-away profile (never the user's live Chrome, never a visible 
 8. `?scene=3d` renders the old scene without errors.
 9. Manifest has no id matching `river|car|road|traffic`.
 10. Determinism: `node tools/sprites/build-atlas.mjs --check` passes.
+11. Time of day: for `?time=` 06:00, 09:00, 12:00, 18:30, 22:00 and 02:00 the page renders without errors; at every hour each agent sprite's mean luminance is at least 60 percent of its noon value, label contrast is unchanged, and windows, lamps and monitors are lit after dark; the static layer is re-tinted at most once a minute (measure it, at most 15 ms).
+12. Seasons: for `?season=spring|summer|autumn|winter` every outdoor sprite id with a seasonal variant resolves in the manifest; the automatic season follows the date and the hemisphere setting (unit test with fake dates, both hemispheres).
+13. Weather: with weather off nothing runs on the overlay (zero callbacks); with each weather on, at most 120 particles, at most 1 ms of JavaScript per frame at N = 20, nothing runs while hidden or with reduced motion; the same date and season always give the same automatic weather (unit test); no network request comes from any weather code.
+14. Settings: changes apply without a reload, persist across a reload, and URL overrides win over stored settings.
 
 `npm test` (node --test, no browser, no VoxPix) covers projection, layout, scheduler, manifest consistency (every sprite id used by
 the code exists), label wrapping.
@@ -158,4 +187,7 @@ test every link with curl before giving it).
 - Depth sorting of large sprites: keep walls in segments of at most 32 voxels and sort by footprint; test with the occlusion check.
 - Pixel scale vs screen size: integer zoom only; at fit zoom very large scenes may need pan. Say so rather than blur.
 - Label density with full names: slots, wrapping and the declutter pass; if 20 agents cannot fit labels at fit zoom, allow scroll and report it.
+- Night readability: agents stay the brightest, most saturated items after dark; rooms are lit and the tint is stronger outdoors; check 11 enforces a luminance floor.
+- Weather is the one feature that moves across the whole screen: keep it opt-in, capped and cheap, or it defeats the low-GPU goal.
+- Seasonal variants grow the atlas: bake only outdoor sprites, keep the 2.5 MB budget in view.
 - Two atlases double art QA: the layout and scene code must not branch on the projection except through `Projection`.
