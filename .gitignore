@@ -13,3 +13,5 @@ start-ajan-ofisi.vbs
 
 .DS_Store
 Thumbs.db
+tools/sprites/models/
+tools/sprites/out/
