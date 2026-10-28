@@ -128,7 +128,7 @@ function toolLabel(name, inp) {
   try {
     switch (name) {
       case 'Bash': case 'PowerShell': return inp.description || firstLine(inp.command);
-      case 'Monitor': return inp.description || firstLine(inp.command) || 'İzleniyor';
+      case 'Monitor': return inp.description || firstLine(inp.command) || 'Monitoring';
       case 'Read': return baseName(inp.file_path);
       case 'Edit': case 'MultiEdit': case 'Write': return baseName(inp.file_path);
       case 'NotebookEdit': return baseName(inp.notebook_path);
@@ -136,14 +136,14 @@ function toolLabel(name, inp) {
       case 'Glob': return inp.pattern;
       case 'WebFetch': try { return new URL(inp.url).hostname; } catch { return inp.url; }
       case 'WebSearch': return inp.query;
-      case 'Agent': case 'Task': return inp.description || inp.subagent_type || 'Alt ajan';
+      case 'Agent': case 'Task': return inp.description || inp.subagent_type || 'Subagent';
       case 'Skill': return inp.skill;
       case 'ToolSearch': return inp.query;
       case 'SendMessage': return '→ ' + (inp.to || '');
-      case 'AskUserQuestion': return (inp.questions && inp.questions[0] && inp.questions[0].question) || 'Soru';
-      case 'ExitPlanMode': return 'Plan onayı';
-      case 'TodoWrite': return 'Görev listesi';
-      case 'ScheduleWakeup': return inp.reason || 'Uyanma planı';
+      case 'AskUserQuestion': return (inp.questions && inp.questions[0] && inp.questions[0].question) || 'Question';
+      case 'ExitPlanMode': return 'Plan approval';
+      case 'TodoWrite': return 'Task list';
+      case 'ScheduleWakeup': return inp.reason || 'Wake-up plan';
       case 'Artifact': return inp.action || 'Artifact';
     }
   } catch { /* unexpected input shape */ }
