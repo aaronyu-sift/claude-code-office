@@ -25,6 +25,7 @@ as a fallback (`?scene=3d`) until the user says to remove it.
 - **Both projections are supported from the start** through one `Projection` interface (section 4). Isometric is the default.
 - **Full chat names** are shown on every main agent's label (wrapped, never cut with an ellipsis up to 120 characters).
 - **Labels are the density limit, not sprites** (measured with `tools/sprites/density.ts`): give each agent a label slot.
+- **Test scale: up to 20 agents, typically 10.** If it works for 20 it is expected to work for more (other people may run more), so the code has no hard cap, but nothing above 20 is tested or tuned.
 - Style proof exists: `tools/sprites/diorama.mjs` (iso and oblique renders). Keep the palette and proportions; improve them.
 - Commits: repo-local author is already `Aaron Yu <macbookproiceland@gmail.com>`. No Claude co-author trailer, no `#NNN`
   in messages. **Never push** and never open a PR; the user decides that. Do not touch `main`.
@@ -60,7 +61,7 @@ Runtime (`public/js/pixel/`, ES modules, no dependencies):
 - `projection.js` exports `ISO` and `FRONT`: `toScreen(x, y, z)`, `toGround(sx, sy)` (inverse, used for hit-testing),
   `depthKey(footprint, z)`, visible wall sides (iso: north and west; front: north only), tile size, facings.
 - `atlas.js` loads PNG and manifest, hands out sprite draw info, caches recoloured variants.
-- `layout.js` pure function: agents in, rooms and desk slots and label slots out, deterministic and stable (rooms keep
+- `layout.js` pure function: agents in, `{ rooms, shelf, bounds }` out (rooms with desk slots and label slots; `shelf` is an ordered list that stays empty until Goal 4, so the interface does not change later), deterministic and stable (rooms keep
   their place when others come and go), island bounds including garden. Unit-tested without a browser.
 - `scene.js` two layers: a cached static layer (floors, walls, furniture, outdoors; rebuilt only when the layout or zoom
   changes) and a dynamic layer (workers, status effects, ambient animation, redrawn only where needed).
@@ -101,11 +102,11 @@ appears in the conversation, so every goal ends by printing the verification out
 ### Goal 1: engine vertical slice, isometric (M1)
 - [ ] Projection interface with ISO and FRONT definitions and unit tests (round trip `toGround(toScreen(p)) == p`).
 - [ ] `build-atlas.mjs` for iso with `--check`; about 60 sprites (core furniture, 2 floors, 5 walls, 6 appearances x 3 poses, plants, 2 trees, bush, bench, lamp post, grass).
-- [ ] `layout.js` with tests: deterministic, stable under churn, no overlapping rooms or slots, handles 1, 4, 16, 40, 60 agents.
+- [ ] `layout.js` with tests: deterministic, stable under churn, no overlapping rooms or slots, handles 1, 4, 10 and 20 agents (no hard cap in the code, but nothing above 20 is tested).
 - [ ] `scene.js`, `atlas.js`, `input.js`, `labels.js`, `anim.js`, `index.js`; wired as the default scene; `?scene=3d` still works.
 - [ ] Full chat names, "your turn" light, working/waiting/dormant/done states visible, hover tip, click to drawer, zoom and fit.
 - [ ] `tools/qa/fixture.mjs` (fake `~/.claude` with N sessions, long names) and `tools/qa/pixel-qa.mjs` (headless Chrome via CDP, see section 7), `npm test`, `npm run qa:pixel`.
-- [ ] Screenshots for N = 4, 16, 40 published to the Drive viewer folder with working localhost links.
+- [ ] Screenshots for N = 4, 10, 20 published to the Drive viewer folder with working localhost links.
 
 ### Goal 2: richness, life, performance (M2), isometric
 - [ ] Content lists of section 5 reached; gallery page `?gallery=1` showing every sprite with its id.
@@ -117,7 +118,14 @@ appears in the conversation, so every goal ends by printing the verification out
 - [ ] `build-atlas.mjs --proj front`; same layout engine; wall rules for the front view; toggle in the header, `?proj=front`, persisted.
 - [ ] Whole QA suite passes in both projections; both atlases at most 1.5 MB.
 - [ ] README (features, options, how to regenerate art), `THIRD_PARTY.md` (VoxPix MIT, with the pinned commit), docs updated; old 3D scene still reachable.
-- [ ] Final screenshots (both projections, 4, 16, 40, 60 agents, a waiting agent) and a short before and after.
+- [ ] Final screenshots (both projections, 4, 10, 20 agents, a waiting agent) and a short before and after.
+
+### Goal 4 (later, only after Goals 1 to 3 are reviewed): idle shelf and details
+Wanted by the user (2026-10-28), not part of the framework work. Idle and closed agents are not taken off the screen: they go to a side shelf, newest first, so a recently closed chat is easy to find.
+- [ ] Server: also list recently closed sessions (a transcript with no live process, last 14 days, configurable) with id, name or title, project, last activity time. Read only the tail of each transcript, cache by size and mtime, cap the count, never rescan an unchanged file (a shared-system-style load check applies to the user's disk too).
+- [ ] Shelf: a lane at the side of the scene (right side), independent scroll, for sessions that are dormant (idle long) or closed; each is a small sleeping or leaning pixel figure, the full chat name and "closed 12 min ago"; ordered by last activity, newest first; waiting ("your turn") sessions never go to the shelf, they stay in their rooms.
+- [ ] Details: click a figure (room or shelf) opens a polished details panel: full name, project, status, time since, last prompt and reply, tool mix, a clear "Open in VS Code" button (`vscode://anthropic.claude-code/open?session=<id>`) and "Copy session id".
+- [ ] QA: closed fixture sessions appear sorted by last activity; the shelf list is stable between refreshes; the scan has a time budget; clicking a shelf entry opens its details.
 
 ## 7. QA harness and budgets (what "done" means)
 
@@ -125,12 +133,12 @@ appears in the conversation, so every goal ends by printing the verification out
 protocol in a throw-away profile (never the user's live Chrome, never a visible second Chrome), and prints one line per check
 `CHECK <name> PASS|FAIL <detail>` and a final `QA PASS` or `QA FAIL`. Checks:
 
-1. No console errors or failed requests on load, at N = 4, 16, 40, 60 (long, wrapped and plain names, emoji, 120 characters).
+1. No console errors or failed requests on load, at N = 4, 10, 20 (long, wrapped and plain names, emoji, 120 characters).
 2. Label text equals the agent's full name for every main agent; no two label boxes intersect; no label leaves the viewport at fit zoom.
 3. Every agent has a click target of at least 24 x 24 CSS px at default zoom and the click opens the drawer for that id.
 4. Occlusion: for every agent at default layout, at most 15 percent of its sprite pixels are covered by sprites drawn after it.
 5. Hit-test round trip: clicking the centre of every agent returns that agent.
-6. Frame budget, N = 40, 1500 x 900, 10 seconds: p95 JavaScript time per dynamic frame at most 4 ms; at most 10 frames per second; zero animation callbacks while `document.hidden` (stub `visibilityState`); static rebuild at most 50 ms. These are first targets: if software GL in headless Chrome makes a number meaningless, measure JavaScript time only and say so.
+6. Frame budget, N = 20, 1500 x 900, 10 seconds: p95 JavaScript time per dynamic frame at most 4 ms; at most 10 frames per second; zero animation callbacks while `document.hidden` (stub `visibilityState`); static rebuild at most 50 ms. These are first targets: if software GL in headless Chrome makes a number meaningless, measure JavaScript time only and say so.
 7. Idle: with all agents dormant and nothing animating on screen, zero frames per second.
 8. `?scene=3d` renders the old scene without errors.
 9. Manifest has no id matching `river|car|road|traffic`.
@@ -149,5 +157,5 @@ test every link with curl before giving it).
 - VoxPix is young and single-author: pin the commit, commit the atlases, keep the models as our own data.
 - Depth sorting of large sprites: keep walls in segments of at most 32 voxels and sort by footprint; test with the occlusion check.
 - Pixel scale vs screen size: integer zoom only; at fit zoom very large scenes may need pan. Say so rather than blur.
-- Label density with full names: slots, wrapping and the declutter pass; if 60 agents cannot fit labels at fit zoom, allow scroll and report it.
+- Label density with full names: slots, wrapping and the declutter pass; if 20 agents cannot fit labels at fit zoom, allow scroll and report it.
 - Two atlases double art QA: the layout and scene code must not branch on the projection except through `Projection`.
