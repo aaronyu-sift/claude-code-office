@@ -107,6 +107,16 @@ Content to build (counts are minimums per projection, as manifest ids with tags)
 - Plants 12 (pots, hanging, tall, flowers, cactus, bonsai), trees 6 species, bushes 4, hedges, flower beds 4, grass tufts, rocks 4.
 - Outdoor 14: bench, lamp post, picnic table, fence pieces, signpost, bike rack, fountain, pond (still water, no river), stepping stones, planters, well, tiny shed, mailbox.
 - Status effects drawn in code or small sprites: beam of light, balloons (working, waiting "!", done, sleeping "Zz", error), sparkles.
+- **Status language, with The Sims 4 as a design reference** (user, 2026-10-28; reference for patterns only, no copied art or UI): a Sim shows state
+  through a thought bubble above its head (icon first) and a diamond marker (plumbob) whose colour follows mood, and clicking a Sim opens a small
+  radial menu and an info panel with bars. Our version, applied in Goal 2 (bubbles and markers) and Goal 5 (click menu and details):
+  - One thought bubble per agent, icon first, at most two words: pencil (editing), terminal (shell), magnifier (web or search), book (reading), brain (thinking),
+    question mark (asking you), check (done), Zz (asleep). The full text stays in the label's tool line and the hover tip.
+  - One status marker over each main agent: a small diamond, calm green-teal while working, bouncing amber with a soft glow when it is your turn, blue and still when done,
+    red on error, grey when dormant. The light beam of a waiting agent stays the strongest cue.
+  - Restraint: never more than one marker and one bubble per agent; a bubble may not cover an agent or a label; at far zoom only waiting agents keep their bubble.
+  - Goal 5 may use a small radial menu on click (Details, Open in VS Code, Copy session id) in place of the plain drawer, and the details panel may borrow the info-panel idea:
+    bars for context fill, cost today and time since last activity. Decide this with the user when Goal 5 starts.
 - Season variants (baked, outdoor only, 4 each): trees (spring blossom pink and fresh green, summer lush, autumn orange and red, winter bare with snow caps), bushes, hedges, grass and ground tiles (flowers, lush, fallen leaves, snow), flower beds, rocks, bench and lamp post (snow caps in winter), plus a few seasonal props (snowman, pumpkin, leaf pile, bird bath).
 - Night variants: windows, lamps and monitors with lit emissive ramps; moon and star sprites.
 - Delights, all tiny and capped: butterflies and birds by day, petals in spring, fireflies on summer nights, falling leaves in autumn, flakes in winter, a rainbow after rain.
