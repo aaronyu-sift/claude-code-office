@@ -426,6 +426,7 @@ function renderDrawer(first) {
         <span class="sw" style="background:${a.color}"></span>
         <span class="dw-proj">${esc(a.kind === 'sub' ? (parent ? parent.project : a.project) : a.project)}</span>
         <span class="c-name">${esc(a.kind === 'sub' ? '↳ ' + a.atype : a.name)}</span>
+        ${a.kind === 'main' ? `<a id="dw-vscode" class="icon-btn" style="width:auto;padding:0 8px;text-decoration:none" href="vscode://anthropic.claude-code/open?session=${encodeURIComponent(a.id)}" title="Open this chat in VS Code">VS Code ↗</a>` : ''}
         ${statusPill(a, t)}
         <button class="icon-btn x-btn" id="dw-close" title="${esc(msg('dw.close'))}">${icon('close')}</button>
       </div>
