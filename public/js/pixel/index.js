@@ -411,10 +411,11 @@ export function createPixelOffice(root, ctx, opts = {}) {
   // read-only state for verification: document.querySelector('#view-ofis').__pixel
   root.__pixel = {
     get zoom() { return view.zoom; }, get dpr() { return view.dpr; }, get size() { return [view.w, view.h]; }, get autoFit() { return autoFit; },
-    get proj() { return proj.name; }, get buildMs() { return +lastBuildMs.toFixed(2); },
+    get pan() { return [view.panX, view.panY]; }, get proj() { return proj.name; }, get buildMs() { return +lastBuildMs.toFixed(2); },
     get stats() { return { ...sched.stats }; }, resetStats() { sched.resetStats(); frameTimes.length = 0; },
     get active() { return sched.activeSources; }, get pending() { return sched.pending; },
     get counts() { return scene ? scene.counts : null; },
+    get effects() { return scene ? scene.effects : null; },
     get layout() { return layout; },
     frameP95() { if (!frameTimes.length) return 0; const s = [...frameTimes].sort((a, b) => a - b); return +s[Math.min(s.length - 1, Math.floor(s.length * 0.95))].toFixed(3); },
     get frames() { return frameTimes.length; },
@@ -422,7 +423,7 @@ export function createPixelOffice(root, ctx, opts = {}) {
     agentCss(id) {
       const f = scene && scene.figureInfo(id);
       if (!f) return null;
-      return { x: (f.cx * view.zoom + view.panX) / view.dpr, y: (f.cy * view.zoom + view.panY) / view.dpr, w: f.w * view.zoom / view.dpr, h: f.h * view.zoom / view.dpr, main: f.main, status: f.status };
+      return { x: (f.cx * view.zoom + view.panX) / view.dpr, y: (f.cy * view.zoom + view.panY) / view.dpr, w: f.w * view.zoom / view.dpr, h: f.h * view.zoom / view.dpr, main: f.main, status: f.status, sprite: f.sprite };
     },
     labelRects() {
       const base = root.getBoundingClientRect(), out = [];

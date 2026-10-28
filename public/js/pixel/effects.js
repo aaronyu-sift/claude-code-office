@@ -72,11 +72,11 @@ export function drawBalloon(g, cx, bottom, kind, glyph = '!') {
 
 // light cone from above down to the floor at (cx, floorY); pulse in 0..1 drives the glow
 export function drawBeam(g, cx, floorY, height, pulse) {
-  g.fillStyle = '#ffd36b';
-  const a0 = 0.10 + 0.10 * pulse;
+  g.fillStyle = '#ffbf3a';
+  const a0 = 0.24 + 0.14 * pulse;
   for (let r = 0; r < height; r++) {
     const k = r / height, w = 6 + Math.round(k * 24);
-    g.globalAlpha = a0 + 0.14 * k;
+    g.globalAlpha = a0 + 0.22 * k;
     g.fillRect(cx - (w >> 1), floorY - height + r, w, 1);
   }
   // pool of light on the floor: a flat diamond

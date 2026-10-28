@@ -26,6 +26,8 @@ export function poseOf(a, t, anim) {
 }
 
 export function createScene({ atlas, proj }) {
+  // what the last draw() put on screen (QA reads it through the `effects` getter)
+  const fx = { beams: 0, markers: 0, waitBalloons: 0, zzBalloons: 0, doneBalloons: 0, rings: 0 };
   const img = atlas.image;
   let layout = null, ground = null, gx = 0, gy = 0, bounds = { x0: 0, y0: 0, x1: 1, y1: 1 }, fitBox = bounds;
   let entries = [], figs = [], roomById = new Map(), sortMs = 0;
@@ -148,6 +150,7 @@ export function createScene({ atlas, proj }) {
     g.globalAlpha = 1;
     g.fillStyle = BG;
     g.fillRect(0, 0, w, h);
+    fx.beams = fx.markers = fx.waitBalloons = fx.zzBalloons = fx.doneBalloons = fx.rings = 0;
     if (!layout) return;
     g.setTransform(zoom, 0, 0, zoom, panX, panY);
     const vx0 = -panX / zoom, vy0 = -panY / zoom, vx1 = (w - panX) / zoom, vy1 = (h - panY) / zoom;
@@ -156,17 +159,18 @@ export function createScene({ atlas, proj }) {
       const e = entries[i];
       if (e.x1 < vx0 || e.x0 > vx1 || e.y1 < vy0 || e.y0 > vy1) continue;
       if (e.kind === 's') { put(g, e.s); continue; }
-      const s = dynSrc(e, actorOf(e), t, anim);
+      const a = actorOf(e);
+      // the light of a waiting agent shines behind its figure and behind everything nearer, so it never washes out the sprite
+      if (e.kind === 'c' && a && a.main && (a.status === 'waiting' || a.status === 'ask')) fx.beams++, drawBeam(g, Math.round(e.px), Math.round(e.py) + 2, 64, anim ? 0.5 + 0.5 * Math.sin(t / 420) : 1);
+      const s = dynSrc(e, a, t, anim);
       if (s) put(g, s);
     }
     // effects
     for (let i = 0; i < figs.length; i++) {
-      const f = figs[i], a = f.actor, e = f.seat;
+      const f = figs[i], e = f.seat;
       const cx = Math.round(e.px), fy = Math.round(e.py);
       if (cx < vx0 - 40 || cx > vx1 + 40 || fy < vy0 || fy > vy1 + 90) continue;
-      const wait = a.status === 'waiting' || a.status === 'ask';
-      if (f.id === hoverId) drawRing(g, cx, fy + 2);
-      if (wait && a.main) drawBeam(g, cx, fy + 2, 64, anim ? 0.5 + 0.5 * Math.sin(t / 420) : 1);
+      if (f.id === hoverId) { fx.rings++; drawRing(g, cx, fy + 2); }
     }
     for (let i = 0; i < figs.length; i++) {
       const f = figs[i], a = f.actor, e = f.seat;
@@ -177,11 +181,12 @@ export function createScene({ atlas, proj }) {
       const headTop = fy - 40;
       if (a.main) {
         const top = headTop - 15 + bob;
+        fx.markers++;
         drawMarker(g, cx, top, a.status === 'ask' ? 'waiting' : a.status);
-        if (wait) drawBalloon(g, cx, top - 1, 'wait', a.status === 'ask' ? '?' : '!');
-        else if (a.status === 'dormant') drawBalloon(g, cx, top - 1, 'zz');
-      } else if (a.status === 'done') drawBalloon(g, cx, headTop - 1, 'done');
-      else if (a.status === 'stale') drawBalloon(g, cx, headTop - 1, 'zz');
+        if (wait) { fx.waitBalloons++; drawBalloon(g, cx, top - 1, 'wait', a.status === 'ask' ? '?' : '!'); }
+        else if (a.status === 'dormant') { fx.zzBalloons++; drawBalloon(g, cx, top - 1, 'zz'); }
+      } else if (a.status === 'done') { fx.doneBalloons++; drawBalloon(g, cx, headTop - 1, 'done'); }
+      else if (a.status === 'stale') { fx.zzBalloons++; drawBalloon(g, cx, headTop - 1, 'zz'); }
     }
     g.setTransform(1, 0, 0, 1, 0, 0);
   }
@@ -251,6 +256,7 @@ export function createScene({ atlas, proj }) {
     setHover(id) { hoverId = id; },
     get bounds() { return bounds; },
     get fitBox() { return fitBox; },
+    get effects() { return { ...fx }; },
     get sortMs() { return +sortMs.toFixed(2); },
     get layout() { return layout; },
     get counts() { return { entries: entries.length, figures: figs.length, ground: layout ? layout.outdoor.tiles.length : 0 }; },
@@ -258,7 +264,7 @@ export function createScene({ atlas, proj }) {
       const f = figs.find(x => x.id === id);
       if (!f) return null;
       const s = dynSrc(f.seat, f.actor, t, false);
-      return { id, roomId: f.roomId, slot: f.slot, main: f.main, status: f.actor.status, cx: s.dx + s.w / 2, cy: s.dy + s.h / 2, x0: s.dx, y0: s.dy, w: s.w, h: s.h, px: f.seat.px, py: f.seat.py };
+      return { id, roomId: f.roomId, slot: f.slot, main: f.main, status: f.actor.status, sprite: s.id, cx: s.dx + s.w / 2, cy: s.dy + s.h / 2, x0: s.dx, y0: s.dy, w: s.w, h: s.h, px: f.seat.px, py: f.seat.py };
     },
     figureIds() { return figs.map(f => f.id); },
   };

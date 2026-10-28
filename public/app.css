@@ -536,6 +536,7 @@ main { flex: 1; min-height: 0; position: relative; }
 }
 .of-ctl button:hover { color: var(--text); background: var(--panel-2); }
 .of-empty { position: absolute; inset: 0; display: grid; place-items: center; color: var(--muted); pointer-events: none; }
+.of-empty[hidden] { display: none; }
 .of-tip .of-tn { font: 500 11px var(--mono); color: var(--faint); margin-left: 4px; }
 .of-tip .of-tp { margin: 7px 0 7px; }
 .of-tip .act { margin-top: 2px; }
