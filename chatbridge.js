@@ -6,8 +6,8 @@
 // addressed recipient's room (from @sender: text). The newest line also lives on `agent.say` for 30 s so the
 // office can show it next to the avatar.
 //
-// Mapping chat agent -> office session: agent_keys rows 'session:<sessionId>' (what `chat join --auto` writes),
-// else the office agent whose id, name or project equals the chat agent's name (used by the demo).
+// Mapping chat agent -> office session: agent_keys rows 'session:<sessionId>' (written when a Claude Code session joins the board),
+// else the office agent whose id, name or project equals the chat agent's name.
 
 let DatabaseSync = null;
 try { ({ DatabaseSync } = require('node:sqlite')); } catch { /* Node without node:sqlite: bridge stays off */ }

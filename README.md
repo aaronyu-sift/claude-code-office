@@ -18,6 +18,11 @@ That's it: the server starts on <http://127.0.0.1:7321> and your browser opens. 
 
 > Just want to look? Run `npx github:azorkai/claude-code-office --demo` for a fictional, self-running office.
 
+> **About this fork.** This is a fork of [azorkai/claude-code-office](https://github.com/azorkai/claude-code-office) (MIT) with these additions:
+> an optional [agent chat bridge](#agent-chat-bridge-optional), optional [Vertex AI pricing](#pricing-like-a-vertex-ai-bill-optional) for the cost tab (and each message id counted once across transcript files),
+> the current tool and its description on the avatar tag, an "Open in VS Code" link in the session drawer, and English fallback labels for tool events.
+> Run it with `npx github:aaronyu-sift/claude-code-office`. Everything below is the upstream README, extended where the fork differs.
+
 ---
 
 ## Why
@@ -71,7 +76,7 @@ npx github:azorkai/claude-code-office --demo    # fictional demo office
 **From source / double-click:**
 
 ```bash
-git clone https://github.com/azorkai/claude-code-office.git
+git clone https://github.com/aaronyu-sift/claude-code-office.git
 cd claude-code-office
 npm start            # or double-click start-windows.bat  (macOS/Linux: ./start-macos-linux.sh)
 ```
@@ -85,6 +90,7 @@ npm start            # or double-click start-windows.bat  (macOS/Linux: ./start-
 | `--demo` | off | Fictional data; does not read `~/.claude` |
 | `--claude-dir <dir>` | `~/.claude` or `$CLAUDE_CONFIG_DIR` | Where Claude Code keeps its data |
 | `--data-dir <dir>` | `~/.claude-code-office` | Where the cost cache is stored |
+| `--chat-db <file>` | off | SQLite message board to show next to the avatars, read-only (or `CCO_CHAT_DB`; see [Agent chat bridge](#agent-chat-bridge-optional)) |
 
 ## How it works
 
@@ -101,9 +107,10 @@ The server tails these files once per second. It reads only the last few MB of l
 The cost view shows what your token usage **would cost at Anthropic API list prices**. If you use Claude Code with a Pro/Max subscription, this is **not your bill**. It is a way to see how heavy your usage is and where it goes.
 
 - Every assistant message's `usage` is priced as input + output + cache writes (5 min = 1.25× input, 1 h = 2× input) + cache reads, per model.
-- Messages are de-duplicated by message id, so streamed records are not double-counted.
+- Messages are de-duplicated by message id across all transcript files, so streamed records are not double-counted, and neither is the history that a resumed or forked chat copies into a new file.
 - Transcripts that Claude Code has already deleted cannot be counted, so totals start at your oldest transcript.
 - Prices are in [`cost-worker.js`](cost-worker.js); update them there if Anthropic changes its pricing.
+- Using Claude Code through Google Vertex AI? Its prices and discounts differ, see [Pricing like a Vertex AI bill](#pricing-like-a-vertex-ai-bill-optional).
 
 ## Configuration (optional)
 
@@ -121,6 +128,63 @@ Create `~/.claude-code-office/config.json`, or `config.local.json` next to `serv
 ```
 
 `cswapUrl` is optional. It points to a local endpoint that reports per-account 5-hour/7-day usage, and the header shows it as small bars. Leave it out if you do not have one.
+
+The fork adds four more optional keys: `chatDb` (same as `--chat-db`), `costPrices`, `costDiscount` and `costExtraLogs`, described next.
+
+## Pricing like a Vertex AI bill (optional)
+
+Claude Code on Google Vertex AI records token counts but no cost, and Vertex prices differ from the Anthropic API: cache reads and writes are priced per model, some models have a long-context tier, and an organisation may have a discount. Three config keys turn the cost tab into a Vertex-style estimate. With none of them set it prices at Anthropic API list prices, as before.
+
+```json
+{
+  "costPrices": "~/vertex-claude-prices.json",
+  "costDiscount": 0.168,
+  "costExtraLogs": [{ "file": "~/review-hook.log.jsonl", "key": "cost_usd" }]
+}
+```
+
+**`costPrices`** is a JSON file you provide, with the values from [Google's Vertex AI pricing page](https://cloud.google.com/vertex-ai/generative-ai/pricing):
+
+```json
+{
+  "fetched": 1793220902,
+  "prices": {
+    "claude-sonnet-5-5": { "low": [2, 10, 2.5, 4, 0.1], "high": null, "threshold": 200000 },
+    "claude-sonnet-4-5": { "low": [3, 15, 3.75, 6, 0.3], "high": [6, 22.5, 7.5, 12, 0.6], "threshold": 200000 }
+  }
+}
+```
+
+- Each array is USD per million tokens in the order input, output, cache write (5 min), cache write (1 h), cache read.
+- `high` applies to a message whose prompt (input + cache read + cache writes) reaches `threshold` tokens; `null` means one price.
+- A model id such as `claude-haiku-4-5-20251001` uses the longest key it starts with, here `claude-haiku-4-5`. A few models are built in as a fallback; a model with no price counts as $0 and is listed under `unpriced` in `/api/cost`.
+- `fetched` (epoch seconds) is shown as "as of" in the Cost tab, which warns when the file is more than a week old. The file is re-read when it changes, and a different table makes the worker read every transcript again, because the dollar figures are cached per message.
+- The API-only extras (fast-mode multiplier, web-search fee) are not applied in this mode.
+
+**`costDiscount`** is a fraction off list price, applied to every figure (`0.168` is 16.8%).
+
+**`costExtraLogs`** lists JSON-lines logs of model calls that leave no transcript, for example a hook that runs `claude -p --no-session-persistence`. Each line is `{ "ts": "<ISO time>", "<key>": <usd> }`. Those calls are counted as the model `hooks` and the project `hooks (claude -p)`, with the discount applied.
+
+The Cost tab prints which prices, date, discount and extra calls its figures use. Not counted: aborted streams and calls that leave neither a transcript nor a log.
+
+## Agent chat bridge (optional)
+
+If your agents talk to each other through a local SQLite message board, the office can show it: each new message becomes an `AgentChat` event in the sender's room and in every recipient's room (drawer event log and timeline), and the newest line sits next to the avatar for 30 seconds (`→` sent, `←` received). On start the last 6 hours are replayed, at most 60 messages.
+
+```bash
+node server.js --chat-db ~/chat.db      # or CCO_CHAT_DB=~/chat.db, or "chatDb" in the config file
+```
+
+The database is opened read-only with Node's built-in [`node:sqlite`](https://nodejs.org/api/sqlite.html) (Node 22.13 or newer; on an older Node the bridge stays off and logs one line). Nothing is ever written to it. The bridge reads two tables:
+
+| Table | Columns it uses |
+|---|---|
+| `messages` | `seq` (increasing integer), `ts_ms` (epoch milliseconds), `channel`, `author`, `to_list` (comma-separated recipient names, empty for a channel post), `body` |
+| `agent_keys` | `key` (`session:<Claude Code session id>`), `agent` (the board's name for that agent) |
+
+A board agent is matched to a session through `agent_keys`; without a row, to the session whose id, name or project equals the agent's name.
+
+Independent of the bridge, the avatar tag of a working session shows its newest tool call with the description, for example `Bash · run the tests`, while it runs and for 20 seconds after.
 
 ## Embed it into your own site
 
