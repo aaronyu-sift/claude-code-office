@@ -52,6 +52,7 @@ export function createMaliyet(root, ctx) {
       <div>
         <h2>${esc(msg('m.title'))}</h2>
         <p class="mly-note">${msg('m.note')}</p>
+        <p class="mly-note" id="m-pricing"></p>
       </div>
       <div class="mly-scan" id="m-scan"></div>
     </div>
@@ -149,6 +150,14 @@ export function createMaliyet(root, ctx) {
   }
 
   // ------------------------------------------------------------ top section
+
+  function renderPricing() {
+    const p = data && data.pricing, box = $('#m-pricing');
+    box.textContent = p ? msg('m.pricing', {
+      label: p.label, date: p.fetched ? dayKey(p.fetched) : '', builtin: p.builtin, stale: p.stale,
+      discount: p.discount ? `${Math.round(p.discount * 1000) / 10}%` : '', hooks: p.hookCalls,
+    }) : '';
+  }
 
   function renderScan() {
     const c = ctx.cost || (data && { progress: data.progress, scannedAt: data.scannedAt });
@@ -461,7 +470,7 @@ export function createMaliyet(root, ctx) {
 
   function renderAll() {
     lastTotalsKey = '';
-    renderScan(); renderTiles(); renderDaily(); renderModels(); renderHourly(); renderProjects();
+    renderPricing(); renderScan(); renderTiles(); renderDaily(); renderModels(); renderHourly(); renderProjects();
   }
 
   // redraw the charts when the width changes

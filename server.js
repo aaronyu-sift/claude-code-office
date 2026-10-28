@@ -28,6 +28,7 @@ let COLORS_FILE = null;
 let INLINE_COLORS = {};
 let CSWAP_URL = null;
 let CHAT = null;   // optional read-only bridge from the agentchat database
+let COST_OPTS = {};   // pricesFile, discount, extraLogs for the cost worker
 let DEMO = false;
 let SITE = null;
 let demo = null;
@@ -50,6 +51,12 @@ function configure(o) {
   CSWAP_URL = o.cswapUrl || null;
   const chatDb = o.chatDb || process.env.CCO_CHAT_DB;
   CHAT = chatDb ? createChatBridge(path.resolve(expandHome(chatDb))) : null;
+  COST_OPTS = {
+    pricesFile: o.costPrices ? path.resolve(expandHome(o.costPrices)) : null,
+    discount: Number(o.costDiscount) || 0,
+    extraLogs: (Array.isArray(o.costExtraLogs) ? o.costExtraLogs : [])
+      .filter(l => l && l.file && l.key).map(l => ({ file: path.resolve(expandHome(l.file)), key: String(l.key) })),
+  };
   DEMO = !!o.demo;
   SITE = o.site || null;
 }
@@ -614,7 +621,7 @@ function costPayload() {
 
 function startCostWorker() {
   const w = new Worker(path.join(__dirname, 'cost-worker.js'), {
-    workerData: { projDir: PROJ_DIR, cacheFile: path.join(DATA_DIR, 'cost-cache.json') },
+    workerData: { projDir: PROJ_DIR, cacheFile: path.join(DATA_DIR, 'cost-cache.json'), ...COST_OPTS },
   });
   w.on('message', m => {
     if (m.type === 'progress') cost.progress = m;
@@ -759,6 +766,7 @@ function start() {
 /**
  * Create the office. Options (all optional; local config files are merged underneath):
  *   claudeDir, dataDir, demo, cswapUrl, projectColorsFile, projectColors,
+ *   costPrices (Vertex price table file), costDiscount (0.168 = 16.8%), costExtraLogs ([{ file, key }]),
  *   site: { name, home, links: [{ label, href }] }  – shown in the header when mounted into another site
  * Returns { handler(req, res, next), start(), listen(port, host, cb) }.
  */
