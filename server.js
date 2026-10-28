@@ -6,6 +6,7 @@
 // into an existing Express/Connect app via createOffice().handler.
 
 const http = require('http');
+const { createChatBridge } = require('./chatbridge');
 const fs = require('fs');
 const path = require('path');
 const os = require('os');
@@ -26,6 +27,7 @@ let DATA_DIR = path.join(HOME, '.claude-code-office');
 let COLORS_FILE = null;
 let INLINE_COLORS = {};
 let CSWAP_URL = null;
+let CHAT = null;   // optional read-only bridge from the agentchat database
 let DEMO = false;
 let SITE = null;
 let demo = null;
@@ -46,6 +48,8 @@ function configure(o) {
   COLORS_FILE = o.projectColorsFile ? path.resolve(expandHome(o.projectColorsFile)) : null;
   INLINE_COLORS = o.projectColors || {};
   CSWAP_URL = o.cswapUrl || null;
+  const chatDb = o.chatDb || process.env.CCO_CHAT_DB;
+  CHAT = chatDb ? createChatBridge(path.resolve(expandHome(chatDb))) : null;
   DEMO = !!o.demo;
   SITE = o.site || null;
 }
@@ -526,6 +530,17 @@ function activityOf(a, status, t, subsWorking) {
   return { c: 'think', n: 'Model', code: 'working', l: 'Çalışıyor', since: a.updated || t, k: 1 };
 }
 
+const DOING_SKIP = new Set(['think', 'wait', 'prompt', 'compact']);
+// What the agent is doing right now: its newest tool call, while it runs and for 20 s after.
+function doingOf(a, t) {
+  for (let i = a.events.length - 1; i >= 0 && i >= a.events.length - 40; i--) {
+    const ev = a.events[i];
+    if (DOING_SKIP.has(ev.c) || ev.n === 'AgentChat') continue;
+    return ev.e == null || t - ev.e < 20e3 ? { n: ev.n, l: ev.l } : null;
+  }
+  return null;
+}
+
 function summarize(a, t) {
   const subs = [...agents.values()].filter(x => x.parent === a.id);
   const subsWorking = subs.filter(x => statusOf(x, t)[0] === 'working').length;
@@ -547,6 +562,7 @@ function summarize(a, t) {
     status, since: since || t, act: activityOf(a, status, t, subsWorking),
     model: prettyModel(a.model), effort: a.effort, ctx: a.ctx, ctxMax,
     lastText: a.lastText, lastPrompt: a.lastPrompt, summary: a.summary, thought: a.thought,
+    doing: doingOf(a, t), say: a.say && t - a.say.ts < 30e3 ? { text: a.say.text, dir: a.say.dir } : null,
     tools: a.tools, cats: a.cats, calls: a.calls, prompts: a.prompts,
     spark, sparkT, hourOut, tokOut: a.tokOut,
     started: a.kind === 'main' ? (s.startedAt || a.started) : a.started, updated: a.updated,
@@ -636,6 +652,7 @@ function tick() {
   try {
     if (demo) demo.step(now());
     else { refreshSessions(); locateAndRead(); discoverSubs(); }
+    if (CHAT) CHAT.step(agents, pushEvent, now());
   } catch (e) { console.error('tick', e); }
   const t = now();
   const forceAll = Math.floor(t / 60e3) !== minuteMark;
@@ -786,6 +803,7 @@ function cli(argv) {
   --demo              Fictional demo data; does not read ~/.claude
   --claude-dir <dir>  Claude config dir (default ~/.claude or $CLAUDE_CONFIG_DIR)
   --data-dir <dir>    Where the cost cache is kept (default ~/.claude-code-office)
+  --chat-db <file>    agentchat SQLite database to show (read-only; or set CCO_CHAT_DB)
 `);
     return;
   }
@@ -794,6 +812,7 @@ function cli(argv) {
   if (has('demo') || process.env.CCO_DEMO === '1') opts.demo = true;
   if (val('claude-dir')) opts.claudeDir = val('claude-dir');
   if (val('data-dir')) opts.dataDir = val('data-dir');
+  if (val('chat-db')) opts.chatDb = val('chat-db');
   const port = Number(val('port') || process.env.CCO_PORT || files.port) || 7321;
   const office = createOffice(opts);
   office.listen(port, HOST, url => {

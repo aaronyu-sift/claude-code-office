@@ -480,6 +480,11 @@ main { flex: 1; min-height: 0; position: relative; }
 .of-tag .sw { width: 7px; height: 7px; border-radius: 2px; flex: none; }
 .of-tag.waiting, .of-tag.ask { color: var(--warn); }
 .of-tag.done, .of-tag.stale, .of-tag.dormant { color: var(--muted); }
+.of-tag.more { max-width: 230px; }
+.of-tag .of-doing, .of-tag .of-say { display: block; overflow: hidden; text-overflow: ellipsis; font-weight: 400; font-size: 9px; line-height: 1.35; }
+.of-tag .of-doing { color: var(--text-2); }
+.of-tag .of-say { color: #7dd3c0; }
+.of-tag .of-say.in { color: #f0b86e; }
 
 .of-bal {
   position: relative; display: flex; align-items: center; justify-content: center; gap: 3px;

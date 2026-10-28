@@ -1930,6 +1930,8 @@ export function createOfis(root, ctx) {
     return `<div class="of-bal${sm}" style="--c:${catColor(cat)}">${icon(cat)}</div>`;
   }
 
+  const clipTxt = (s, n) => { s = String(s || ''); return s.length > n ? s.slice(0, n - 1) + '…' : s; };
+
   function refreshLabels() {
     const t = store.now();
     for (const room of world.rooms.values()) {
@@ -1953,7 +1955,11 @@ export function createOfis(root, ctx) {
       if (!a) continue;
       const wait = c.main && (a.status === 'waiting' || a.status === 'ask');
       const txt = c.main ? a.name || a.project : shortDesc(a);
-      setLabel(c.tag, `<div class="of-tag ${c.main ? 'chef' : ''} ${a.status}">${esc(txt)}</div>`);
+      const doing = c.main && a.status === 'working' && a.doing
+        ? `<span class="of-doing">${esc(a.doing.n)} · ${esc(clipTxt(a.doing.l, 46))}</span>` : '';
+      const say = c.main && a.say
+        ? `<span class="of-say ${a.say.dir}">${a.say.dir === 'in' ? '← ' : '→ '}${esc(clipTxt(a.say.text, 56))}</span>` : '';
+      setLabel(c.tag, `<div class="of-tag ${c.main ? 'chef' : ''} ${a.status}${doing || say ? ' more' : ''}">${esc(txt)}${doing}${say}</div>`);
       const bh = balloonHtml(a, c);
       setLabel(c.bal, bh, undefined, wait ? 100 : c.main ? 60 : a.status === 'done' ? 50 : 30);
       c.bal.want = !!bh;
