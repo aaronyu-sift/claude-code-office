@@ -1,0 +1,2361 @@
+{
+ "version": 1,
+ "tile": 16,
+ "sprites": {
+  "floor_felt_a": {
+   "cat": "floor",
+   "fp": [
+    0,
+    0,
+    16,
+    16
+   ],
+   "h": 0,
+   "facings": 1,
+   "frames": 1,
+   "tags": [
+    "carpet",
+    "tint"
+   ]
+  },
+  "floor_felt_b": {
+   "cat": "floor",
+   "fp": [
+    0,
+    0,
+    16,
+    16
+   ],
+   "h": 0,
+   "facings": 1,
+   "frames": 1,
+   "tags": [
+    "carpet",
+    "tint"
+   ]
+  },
+  "floor_wood": {
+   "cat": "floor",
+   "fp": [
+    0,
+    0,
+    16,
+    16
+   ],
+   "h": 0,
+   "facings": 1,
+   "frames": 1,
+   "tags": [
+    "wood",
+    "tint"
+   ]
+  },
+  "floor_tile": {
+   "cat": "floor",
+   "fp": [
+    0,
+    0,
+    16,
+    16
+   ],
+   "h": 0,
+   "facings": 1,
+   "frames": 1,
+   "tags": [
+    "tile"
+   ]
+  },
+  "floor_path": {
+   "cat": "floor",
+   "fp": [
+    0,
+    0,
+    16,
+    16
+   ],
+   "h": 0,
+   "facings": 1,
+   "frames": 1,
+   "tags": [
+    "path"
+   ]
+  },
+  "floor_grass_a": {
+   "cat": "floor",
+   "fp": [
+    0,
+    0,
+    16,
+    16
+   ],
+   "h": 0,
+   "facings": 1,
+   "frames": 1,
+   "tags": [
+    "grass"
+   ]
+  },
+  "floor_grass_b": {
+   "cat": "floor",
+   "fp": [
+    0,
+    0,
+    16,
+    16
+   ],
+   "h": 0,
+   "facings": 1,
+   "frames": 1,
+   "tags": [
+    "grass"
+   ]
+  },
+  "floor_grass_c": {
+   "cat": "floor",
+   "fp": [
+    0,
+    0,
+    16,
+    16
+   ],
+   "h": 0,
+   "facings": 1,
+   "frames": 1,
+   "tags": [
+    "grass"
+   ]
+  },
+  "wall_plain": {
+   "cat": "wall",
+   "fp": [
+    0,
+    0,
+    32,
+    2
+   ],
+   "h": 30,
+   "facings": 2,
+   "frames": 1,
+   "tags": [
+    "tint"
+   ]
+  },
+  "wall_window": {
+   "cat": "wall",
+   "fp": [
+    0,
+    0,
+    32,
+    2
+   ],
+   "h": 30,
+   "facings": 2,
+   "frames": 1,
+   "tags": [
+    "tint"
+   ]
+  },
+  "wall_poster_a": {
+   "cat": "wall",
+   "fp": [
+    0,
+    0,
+    32,
+    2
+   ],
+   "h": 30,
+   "facings": 2,
+   "frames": 1,
+   "tags": [
+    "tint"
+   ]
+  },
+  "wall_poster_b": {
+   "cat": "wall",
+   "fp": [
+    0,
+    0,
+    32,
+    2
+   ],
+   "h": 30,
+   "facings": 2,
+   "frames": 1,
+   "tags": [
+    "tint"
+   ]
+  },
+  "wall_clock": {
+   "cat": "wall",
+   "fp": [
+    0,
+    0,
+    32,
+    2
+   ],
+   "h": 30,
+   "facings": 2,
+   "frames": 1,
+   "tags": [
+    "tint"
+   ]
+  },
+  "wall_whiteboard": {
+   "cat": "wall",
+   "fp": [
+    0,
+    0,
+    32,
+    2
+   ],
+   "h": 30,
+   "facings": 2,
+   "frames": 1,
+   "tags": [
+    "tint"
+   ]
+  },
+  "wall_low": {
+   "cat": "wall",
+   "fp": [
+    0,
+    0,
+    32,
+    2
+   ],
+   "h": 7,
+   "facings": 2,
+   "frames": 1,
+   "tags": [
+    "tint",
+    "low"
+   ]
+  },
+  "wall_corner": {
+   "cat": "wall",
+   "fp": [
+    0,
+    0,
+    2,
+    2
+   ],
+   "h": 30,
+   "facings": 1,
+   "frames": 1,
+   "tags": [
+    "tint"
+   ]
+  },
+  "desk_on": {
+   "cat": "furniture",
+   "fp": [
+    0,
+    0,
+    28,
+    14
+   ],
+   "h": 32,
+   "facings": 1,
+   "frames": 1,
+   "tags": [
+    "desk",
+    "on"
+   ]
+  },
+  "desk_idle": {
+   "cat": "furniture",
+   "fp": [
+    0,
+    0,
+    28,
+    14
+   ],
+   "h": 32,
+   "facings": 1,
+   "frames": 1,
+   "tags": [
+    "desk",
+    "idle"
+   ]
+  },
+  "desk_off": {
+   "cat": "furniture",
+   "fp": [
+    0,
+    0,
+    28,
+    14
+   ],
+   "h": 32,
+   "facings": 1,
+   "frames": 1,
+   "tags": [
+    "desk",
+    "off"
+   ]
+  },
+  "deskchief_on": {
+   "cat": "furniture",
+   "fp": [
+    0,
+    0,
+    44,
+    16
+   ],
+   "h": 32,
+   "facings": 1,
+   "frames": 1,
+   "tags": [
+    "desk",
+    "chief",
+    "on"
+   ]
+  },
+  "deskchief_idle": {
+   "cat": "furniture",
+   "fp": [
+    0,
+    0,
+    44,
+    16
+   ],
+   "h": 32,
+   "facings": 1,
+   "frames": 1,
+   "tags": [
+    "desk",
+    "chief",
+    "idle"
+   ]
+  },
+  "deskchief_off": {
+   "cat": "furniture",
+   "fp": [
+    0,
+    0,
+    44,
+    16
+   ],
+   "h": 32,
+   "facings": 1,
+   "frames": 1,
+   "tags": [
+    "desk",
+    "chief",
+    "off"
+   ]
+  },
+  "chair": {
+   "cat": "furniture",
+   "fp": [
+    0,
+    0,
+    10,
+    10
+   ],
+   "h": 20,
+   "facings": 1,
+   "frames": 1,
+   "tags": []
+  },
+  "sofa": {
+   "cat": "furniture",
+   "fp": [
+    0,
+    0,
+    30,
+    12
+   ],
+   "h": 18,
+   "facings": 2,
+   "frames": 1,
+   "tags": []
+  },
+  "shelf": {
+   "cat": "furniture",
+   "fp": [
+    0,
+    0,
+    20,
+    6
+   ],
+   "h": 37,
+   "facings": 2,
+   "frames": 1,
+   "tags": []
+  },
+  "cooler": {
+   "cat": "furniture",
+   "fp": [
+    0,
+    0,
+    8,
+    8
+   ],
+   "h": 28,
+   "facings": 1,
+   "frames": 1,
+   "tags": []
+  },
+  "lamp": {
+   "cat": "furniture",
+   "fp": [
+    -3,
+    -3,
+    6,
+    6
+   ],
+   "h": 33,
+   "facings": 1,
+   "frames": 1,
+   "tags": []
+  },
+  "table": {
+   "cat": "furniture",
+   "fp": [
+    0,
+    0,
+    22,
+    12
+   ],
+   "h": 13,
+   "facings": 1,
+   "frames": 1,
+   "tags": []
+  },
+  "rug_a": {
+   "cat": "furniture",
+   "fp": [
+    0,
+    0,
+    32,
+    20
+   ],
+   "h": 1,
+   "facings": 1,
+   "frames": 1,
+   "tags": []
+  },
+  "rug_b": {
+   "cat": "furniture",
+   "fp": [
+    0,
+    0,
+    24,
+    24
+   ],
+   "h": 1,
+   "facings": 1,
+   "frames": 1,
+   "tags": []
+  },
+  "worker_0_typeA": {
+   "cat": "people",
+   "fp": [
+    0,
+    0,
+    10,
+    10
+   ],
+   "h": 38,
+   "facings": 1,
+   "frames": 1,
+   "tags": [
+    "worker",
+    "typeA"
+   ]
+  },
+  "worker_0_typeB": {
+   "cat": "people",
+   "fp": [
+    0,
+    0,
+    10,
+    10
+   ],
+   "h": 38,
+   "facings": 1,
+   "frames": 1,
+   "tags": [
+    "worker",
+    "typeB"
+   ]
+  },
+  "worker_0_wait": {
+   "cat": "people",
+   "fp": [
+    0,
+    0,
+    10,
+    10
+   ],
+   "h": 38,
+   "facings": 1,
+   "frames": 1,
+   "tags": [
+    "worker",
+    "wait"
+   ]
+  },
+  "worker_0_sleep": {
+   "cat": "people",
+   "fp": [
+    0,
+    0,
+    10,
+    10
+   ],
+   "h": 38,
+   "facings": 1,
+   "frames": 1,
+   "tags": [
+    "worker",
+    "sleep"
+   ]
+  },
+  "worker_0_relax": {
+   "cat": "people",
+   "fp": [
+    0,
+    0,
+    10,
+    10
+   ],
+   "h": 38,
+   "facings": 1,
+   "frames": 1,
+   "tags": [
+    "worker",
+    "relax"
+   ]
+  },
+  "worker_1_typeA": {
+   "cat": "people",
+   "fp": [
+    0,
+    0,
+    10,
+    10
+   ],
+   "h": 38,
+   "facings": 1,
+   "frames": 1,
+   "tags": [
+    "worker",
+    "typeA"
+   ]
+  },
+  "worker_1_typeB": {
+   "cat": "people",
+   "fp": [
+    0,
+    0,
+    10,
+    10
+   ],
+   "h": 38,
+   "facings": 1,
+   "frames": 1,
+   "tags": [
+    "worker",
+    "typeB"
+   ]
+  },
+  "worker_1_wait": {
+   "cat": "people",
+   "fp": [
+    0,
+    0,
+    10,
+    10
+   ],
+   "h": 38,
+   "facings": 1,
+   "frames": 1,
+   "tags": [
+    "worker",
+    "wait"
+   ]
+  },
+  "worker_1_sleep": {
+   "cat": "people",
+   "fp": [
+    0,
+    0,
+    10,
+    10
+   ],
+   "h": 38,
+   "facings": 1,
+   "frames": 1,
+   "tags": [
+    "worker",
+    "sleep"
+   ]
+  },
+  "worker_1_relax": {
+   "cat": "people",
+   "fp": [
+    0,
+    0,
+    10,
+    10
+   ],
+   "h": 38,
+   "facings": 1,
+   "frames": 1,
+   "tags": [
+    "worker",
+    "relax"
+   ]
+  },
+  "worker_2_typeA": {
+   "cat": "people",
+   "fp": [
+    0,
+    0,
+    10,
+    10
+   ],
+   "h": 38,
+   "facings": 1,
+   "frames": 1,
+   "tags": [
+    "worker",
+    "typeA"
+   ]
+  },
+  "worker_2_typeB": {
+   "cat": "people",
+   "fp": [
+    0,
+    0,
+    10,
+    10
+   ],
+   "h": 38,
+   "facings": 1,
+   "frames": 1,
+   "tags": [
+    "worker",
+    "typeB"
+   ]
+  },
+  "worker_2_wait": {
+   "cat": "people",
+   "fp": [
+    0,
+    0,
+    10,
+    10
+   ],
+   "h": 38,
+   "facings": 1,
+   "frames": 1,
+   "tags": [
+    "worker",
+    "wait"
+   ]
+  },
+  "worker_2_sleep": {
+   "cat": "people",
+   "fp": [
+    0,
+    0,
+    10,
+    10
+   ],
+   "h": 38,
+   "facings": 1,
+   "frames": 1,
+   "tags": [
+    "worker",
+    "sleep"
+   ]
+  },
+  "worker_2_relax": {
+   "cat": "people",
+   "fp": [
+    0,
+    0,
+    10,
+    10
+   ],
+   "h": 38,
+   "facings": 1,
+   "frames": 1,
+   "tags": [
+    "worker",
+    "relax"
+   ]
+  },
+  "worker_3_typeA": {
+   "cat": "people",
+   "fp": [
+    0,
+    0,
+    10,
+    10
+   ],
+   "h": 38,
+   "facings": 1,
+   "frames": 1,
+   "tags": [
+    "worker",
+    "typeA"
+   ]
+  },
+  "worker_3_typeB": {
+   "cat": "people",
+   "fp": [
+    0,
+    0,
+    10,
+    10
+   ],
+   "h": 38,
+   "facings": 1,
+   "frames": 1,
+   "tags": [
+    "worker",
+    "typeB"
+   ]
+  },
+  "worker_3_wait": {
+   "cat": "people",
+   "fp": [
+    0,
+    0,
+    10,
+    10
+   ],
+   "h": 38,
+   "facings": 1,
+   "frames": 1,
+   "tags": [
+    "worker",
+    "wait"
+   ]
+  },
+  "worker_3_sleep": {
+   "cat": "people",
+   "fp": [
+    0,
+    0,
+    10,
+    10
+   ],
+   "h": 38,
+   "facings": 1,
+   "frames": 1,
+   "tags": [
+    "worker",
+    "sleep"
+   ]
+  },
+  "worker_3_relax": {
+   "cat": "people",
+   "fp": [
+    0,
+    0,
+    10,
+    10
+   ],
+   "h": 38,
+   "facings": 1,
+   "frames": 1,
+   "tags": [
+    "worker",
+    "relax"
+   ]
+  },
+  "worker_4_typeA": {
+   "cat": "people",
+   "fp": [
+    0,
+    0,
+    10,
+    10
+   ],
+   "h": 38,
+   "facings": 1,
+   "frames": 1,
+   "tags": [
+    "worker",
+    "typeA"
+   ]
+  },
+  "worker_4_typeB": {
+   "cat": "people",
+   "fp": [
+    0,
+    0,
+    10,
+    10
+   ],
+   "h": 38,
+   "facings": 1,
+   "frames": 1,
+   "tags": [
+    "worker",
+    "typeB"
+   ]
+  },
+  "worker_4_wait": {
+   "cat": "people",
+   "fp": [
+    0,
+    0,
+    10,
+    10
+   ],
+   "h": 38,
+   "facings": 1,
+   "frames": 1,
+   "tags": [
+    "worker",
+    "wait"
+   ]
+  },
+  "worker_4_sleep": {
+   "cat": "people",
+   "fp": [
+    0,
+    0,
+    10,
+    10
+   ],
+   "h": 38,
+   "facings": 1,
+   "frames": 1,
+   "tags": [
+    "worker",
+    "sleep"
+   ]
+  },
+  "worker_4_relax": {
+   "cat": "people",
+   "fp": [
+    0,
+    0,
+    10,
+    10
+   ],
+   "h": 38,
+   "facings": 1,
+   "frames": 1,
+   "tags": [
+    "worker",
+    "relax"
+   ]
+  },
+  "worker_5_typeA": {
+   "cat": "people",
+   "fp": [
+    0,
+    0,
+    10,
+    10
+   ],
+   "h": 38,
+   "facings": 1,
+   "frames": 1,
+   "tags": [
+    "worker",
+    "typeA"
+   ]
+  },
+  "worker_5_typeB": {
+   "cat": "people",
+   "fp": [
+    0,
+    0,
+    10,
+    10
+   ],
+   "h": 38,
+   "facings": 1,
+   "frames": 1,
+   "tags": [
+    "worker",
+    "typeB"
+   ]
+  },
+  "worker_5_wait": {
+   "cat": "people",
+   "fp": [
+    0,
+    0,
+    10,
+    10
+   ],
+   "h": 38,
+   "facings": 1,
+   "frames": 1,
+   "tags": [
+    "worker",
+    "wait"
+   ]
+  },
+  "worker_5_sleep": {
+   "cat": "people",
+   "fp": [
+    0,
+    0,
+    10,
+    10
+   ],
+   "h": 38,
+   "facings": 1,
+   "frames": 1,
+   "tags": [
+    "worker",
+    "sleep"
+   ]
+  },
+  "worker_5_relax": {
+   "cat": "people",
+   "fp": [
+    0,
+    0,
+    10,
+    10
+   ],
+   "h": 38,
+   "facings": 1,
+   "frames": 1,
+   "tags": [
+    "worker",
+    "relax"
+   ]
+  },
+  "plant_bushy": {
+   "cat": "plant",
+   "fp": [
+    -5,
+    -5,
+    10,
+    10
+   ],
+   "h": 24,
+   "facings": 1,
+   "frames": 1,
+   "tags": []
+  },
+  "plant_tall": {
+   "cat": "plant",
+   "fp": [
+    -5,
+    -5,
+    10,
+    10
+   ],
+   "h": 30,
+   "facings": 1,
+   "frames": 1,
+   "tags": []
+  },
+  "plant_flower": {
+   "cat": "plant",
+   "fp": [
+    -5,
+    -5,
+    10,
+    10
+   ],
+   "h": 22,
+   "facings": 1,
+   "frames": 1,
+   "tags": []
+  },
+  "tree_a": {
+   "cat": "tree",
+   "fp": [
+    -4,
+    -4,
+    8,
+    8
+   ],
+   "h": 36,
+   "facings": 1,
+   "frames": 1,
+   "tags": []
+  },
+  "tree_b": {
+   "cat": "tree",
+   "fp": [
+    -4,
+    -4,
+    8,
+    8
+   ],
+   "h": 36,
+   "facings": 1,
+   "frames": 1,
+   "tags": []
+  },
+  "pine": {
+   "cat": "tree",
+   "fp": [
+    -4,
+    -4,
+    8,
+    8
+   ],
+   "h": 30,
+   "facings": 1,
+   "frames": 1,
+   "tags": []
+  },
+  "bush_a": {
+   "cat": "outdoor",
+   "fp": [
+    -9,
+    -5,
+    18,
+    10
+   ],
+   "h": 12,
+   "facings": 1,
+   "frames": 1,
+   "tags": []
+  },
+  "bush_b": {
+   "cat": "outdoor",
+   "fp": [
+    -9,
+    -5,
+    18,
+    10
+   ],
+   "h": 12,
+   "facings": 1,
+   "frames": 1,
+   "tags": []
+  },
+  "bench": {
+   "cat": "outdoor",
+   "fp": [
+    0,
+    0,
+    26,
+    7
+   ],
+   "h": 16,
+   "facings": 2,
+   "frames": 1,
+   "tags": []
+  },
+  "lamppost": {
+   "cat": "outdoor",
+   "fp": [
+    -3,
+    -3,
+    7,
+    7
+   ],
+   "h": 38,
+   "facings": 1,
+   "frames": 1,
+   "tags": []
+  },
+  "flowerbed": {
+   "cat": "outdoor",
+   "fp": [
+    0,
+    0,
+    24,
+    8
+   ],
+   "h": 10,
+   "facings": 2,
+   "frames": 1,
+   "tags": []
+  },
+  "rock": {
+   "cat": "outdoor",
+   "fp": [
+    -6,
+    -4,
+    14,
+    10
+   ],
+   "h": 7,
+   "facings": 1,
+   "frames": 1,
+   "tags": []
+  }
+ },
+ "projections": {
+  "iso": {
+   "atlas": "atlas-iso.png",
+   "width": 1024,
+   "height": 93,
+   "sha": "4631baba76345f10",
+   "sprites": {
+    "floor_felt_a": {
+     "rects": [
+      [
+       737,
+       52,
+       24,
+       14
+      ]
+     ],
+     "pivots": [
+      [
+       12.5,
+       6
+      ]
+     ]
+    },
+    "floor_felt_b": {
+     "rects": [
+      [
+       762,
+       52,
+       24,
+       14
+      ]
+     ],
+     "pivots": [
+      [
+       12.5,
+       6
+      ]
+     ]
+    },
+    "floor_wood": {
+     "rects": [
+      [
+       912,
+       52,
+       24,
+       14
+      ]
+     ],
+     "pivots": [
+      [
+       12.5,
+       6
+      ]
+     ]
+    },
+    "floor_tile": {
+     "rects": [
+      [
+       887,
+       52,
+       24,
+       14
+      ]
+     ],
+     "pivots": [
+      [
+       12.5,
+       6
+      ]
+     ]
+    },
+    "floor_path": {
+     "rects": [
+      [
+       862,
+       52,
+       24,
+       14
+      ]
+     ],
+     "pivots": [
+      [
+       12.5,
+       6
+      ]
+     ]
+    },
+    "floor_grass_a": {
+     "rects": [
+      [
+       787,
+       52,
+       24,
+       14
+      ]
+     ],
+     "pivots": [
+      [
+       12.5,
+       6
+      ]
+     ]
+    },
+    "floor_grass_b": {
+     "rects": [
+      [
+       812,
+       52,
+       24,
+       14
+      ]
+     ],
+     "pivots": [
+      [
+       12.5,
+       6
+      ]
+     ]
+    },
+    "floor_grass_c": {
+     "rects": [
+      [
+       837,
+       52,
+       24,
+       14
+      ]
+     ],
+     "pivots": [
+      [
+       12.5,
+       6
+      ]
+     ]
+    },
+    "wall_plain": {
+     "rects": [
+      [
+       258,
+       0,
+       27,
+       46
+      ],
+      [
+       286,
+       0,
+       27,
+       46
+      ]
+     ],
+     "pivots": [
+      [
+       13.5,
+       39
+      ],
+      [
+       13.5,
+       39
+      ]
+     ]
+    },
+    "wall_window": {
+     "rects": [
+      [
+       482,
+       0,
+       27,
+       46
+      ],
+      [
+       510,
+       0,
+       27,
+       46
+      ]
+     ],
+     "pivots": [
+      [
+       13.5,
+       39
+      ],
+      [
+       13.5,
+       39
+      ]
+     ]
+    },
+    "wall_poster_a": {
+     "rects": [
+      [
+       314,
+       0,
+       27,
+       46
+      ],
+      [
+       342,
+       0,
+       27,
+       46
+      ]
+     ],
+     "pivots": [
+      [
+       13.5,
+       39
+      ],
+      [
+       13.5,
+       39
+      ]
+     ]
+    },
+    "wall_poster_b": {
+     "rects": [
+      [
+       370,
+       0,
+       27,
+       46
+      ],
+      [
+       398,
+       0,
+       27,
+       46
+      ]
+     ],
+     "pivots": [
+      [
+       13.5,
+       39
+      ],
+      [
+       13.5,
+       39
+      ]
+     ]
+    },
+    "wall_clock": {
+     "rects": [
+      [
+       202,
+       0,
+       27,
+       46
+      ],
+      [
+       230,
+       0,
+       27,
+       46
+      ]
+     ],
+     "pivots": [
+      [
+       13.5,
+       39
+      ],
+      [
+       13.5,
+       39
+      ]
+     ]
+    },
+    "wall_whiteboard": {
+     "rects": [
+      [
+       426,
+       0,
+       27,
+       46
+      ],
+      [
+       454,
+       0,
+       27,
+       46
+      ]
+     ],
+     "pivots": [
+      [
+       13.5,
+       39
+      ],
+      [
+       13.5,
+       39
+      ]
+     ]
+    },
+    "wall_low": {
+     "rects": [
+      [
+       492,
+       52,
+       27,
+       22
+      ],
+      [
+       520,
+       52,
+       27,
+       22
+      ]
+     ],
+     "pivots": [
+      [
+       13.5,
+       15
+      ],
+      [
+       13.5,
+       15
+      ]
+     ]
+    },
+    "wall_corner": {
+     "rects": [
+      [
+       331,
+       52,
+       5,
+       36
+      ]
+     ],
+     "pivots": [
+      [
+       2.5,
+       34
+      ]
+     ]
+    },
+    "desk_on": {
+     "rects": [
+      [
+       606,
+       0,
+       33,
+       45
+      ]
+     ],
+     "pivots": [
+      [
+       16.5,
+       37
+      ]
+     ]
+    },
+    "desk_idle": {
+     "rects": [
+      [
+       538,
+       0,
+       33,
+       45
+      ]
+     ],
+     "pivots": [
+      [
+       16.5,
+       37
+      ]
+     ]
+    },
+    "desk_off": {
+     "rects": [
+      [
+       572,
+       0,
+       33,
+       45
+      ]
+     ],
+     "pivots": [
+      [
+       16.5,
+       37
+      ]
+     ]
+    },
+    "deskchief_on": {
+     "rects": [
+      [
+       140,
+       0,
+       47,
+       49
+      ]
+     ],
+     "pivots": [
+      [
+       23.5,
+       38
+      ]
+     ]
+    },
+    "deskchief_idle": {
+     "rects": [
+      [
+       44,
+       0,
+       47,
+       49
+      ]
+     ],
+     "pivots": [
+      [
+       23.5,
+       38
+      ]
+     ]
+    },
+    "deskchief_off": {
+     "rects": [
+      [
+       92,
+       0,
+       47,
+       49
+      ]
+     ],
+     "pivots": [
+      [
+       23.5,
+       38
+      ]
+     ]
+    },
+    "chair": {
+     "rects": [
+      [
+       548,
+       52,
+       17,
+       21
+      ]
+     ],
+     "pivots": [
+      [
+       8.5,
+       18
+      ]
+     ]
+    },
+    "sofa": {
+     "rects": [
+      [
+       263,
+       52,
+       33,
+       36
+      ],
+      [
+       297,
+       52,
+       33,
+       36
+      ]
+     ],
+     "pivots": [
+      [
+       16.5,
+       28
+      ],
+      [
+       16.5,
+       28
+      ]
+     ]
+    },
+    "shelf": {
+     "rects": [
+      [
+       0,
+       0,
+       21,
+       51
+      ],
+      [
+       22,
+       0,
+       21,
+       51
+      ]
+     ],
+     "pivots": [
+      [
+       10.5,
+       45
+      ],
+      [
+       10.5,
+       45
+      ]
+     ]
+    },
+    "cooler": {
+     "rects": [
+      [
+       248,
+       52,
+       14,
+       36
+      ]
+     ],
+     "pivots": [
+      [
+       7.5,
+       32
+      ]
+     ]
+    },
+    "lamp": {
+     "rects": [
+      [
+       914,
+       0,
+       11,
+       41
+      ]
+     ],
+     "pivots": [
+      [
+       4.5,
+       38
+      ]
+     ]
+    },
+    "table": {
+     "rects": [
+      [
+       449,
+       52,
+       27,
+       24
+      ]
+     ],
+     "pivots": [
+      [
+       13.5,
+       18
+      ]
+     ]
+    },
+    "rug_a": {
+     "rects": [
+      [
+       620,
+       52,
+       39,
+       20
+      ]
+     ],
+     "pivots": [
+      [
+       19.5,
+       11
+      ]
+     ]
+    },
+    "rug_b": {
+     "rects": [
+      [
+       660,
+       52,
+       36,
+       19
+      ]
+     ],
+     "pivots": [
+      [
+       18.5,
+       10
+      ]
+     ]
+    },
+    "worker_0_typeA": {
+     "rects": [
+      [
+       926,
+       0,
+       18,
+       41
+      ]
+     ],
+     "pivots": [
+      [
+       8.5,
+       38
+      ]
+     ]
+    },
+    "worker_0_typeB": {
+     "rects": [
+      [
+       945,
+       0,
+       18,
+       41
+      ]
+     ],
+     "pivots": [
+      [
+       8.5,
+       38
+      ]
+     ]
+    },
+    "worker_0_wait": {
+     "rects": [
+      [
+       964,
+       0,
+       17,
+       41
+      ]
+     ],
+     "pivots": [
+      [
+       8.5,
+       38
+      ]
+     ]
+    },
+    "worker_0_sleep": {
+     "rects": [
+      [
+       172,
+       52,
+       18,
+       38
+      ]
+     ],
+     "pivots": [
+      [
+       8.5,
+       35
+      ]
+     ]
+    },
+    "worker_0_relax": {
+     "rects": [
+      [
+       838,
+       0,
+       17,
+       42
+      ]
+     ],
+     "pivots": [
+      [
+       8.5,
+       39
+      ]
+     ]
+    },
+    "worker_1_typeA": {
+     "rects": [
+      [
+       982,
+       0,
+       19,
+       41
+      ]
+     ],
+     "pivots": [
+      [
+       9.5,
+       38
+      ]
+     ]
+    },
+    "worker_1_typeB": {
+     "rects": [
+      [
+       1002,
+       0,
+       19,
+       41
+      ]
+     ],
+     "pivots": [
+      [
+       9.5,
+       38
+      ]
+     ]
+    },
+    "worker_1_wait": {
+     "rects": [
+      [
+       0,
+       52,
+       18,
+       41
+      ]
+     ],
+     "pivots": [
+      [
+       9.5,
+       38
+      ]
+     ]
+    },
+    "worker_1_sleep": {
+     "rects": [
+      [
+       191,
+       52,
+       18,
+       38
+      ]
+     ],
+     "pivots": [
+      [
+       8.5,
+       35
+      ]
+     ]
+    },
+    "worker_1_relax": {
+     "rects": [
+      [
+       856,
+       0,
+       19,
+       42
+      ]
+     ],
+     "pivots": [
+      [
+       10.5,
+       39
+      ]
+     ]
+    },
+    "worker_2_typeA": {
+     "rects": [
+      [
+       708,
+       0,
+       18,
+       43
+      ]
+     ],
+     "pivots": [
+      [
+       8.5,
+       40
+      ]
+     ]
+    },
+    "worker_2_typeB": {
+     "rects": [
+      [
+       727,
+       0,
+       18,
+       43
+      ]
+     ],
+     "pivots": [
+      [
+       8.5,
+       40
+      ]
+     ]
+    },
+    "worker_2_wait": {
+     "rects": [
+      [
+       746,
+       0,
+       17,
+       43
+      ]
+     ],
+     "pivots": [
+      [
+       8.5,
+       40
+      ]
+     ]
+    },
+    "worker_2_sleep": {
+     "rects": [
+      [
+       134,
+       52,
+       18,
+       40
+      ]
+     ],
+     "pivots": [
+      [
+       8.5,
+       37
+      ]
+     ]
+    },
+    "worker_2_relax": {
+     "rects": [
+      [
+       690,
+       0,
+       17,
+       43
+      ]
+     ],
+     "pivots": [
+      [
+       8.5,
+       40
+      ]
+     ]
+    },
+    "worker_3_typeA": {
+     "rects": [
+      [
+       19,
+       52,
+       19,
+       41
+      ]
+     ],
+     "pivots": [
+      [
+       9.5,
+       38
+      ]
+     ]
+    },
+    "worker_3_typeB": {
+     "rects": [
+      [
+       39,
+       52,
+       19,
+       41
+      ]
+     ],
+     "pivots": [
+      [
+       9.5,
+       38
+      ]
+     ]
+    },
+    "worker_3_wait": {
+     "rects": [
+      [
+       59,
+       52,
+       18,
+       41
+      ]
+     ],
+     "pivots": [
+      [
+       9.5,
+       38
+      ]
+     ]
+    },
+    "worker_3_sleep": {
+     "rects": [
+      [
+       210,
+       52,
+       18,
+       38
+      ]
+     ],
+     "pivots": [
+      [
+       8.5,
+       35
+      ]
+     ]
+    },
+    "worker_3_relax": {
+     "rects": [
+      [
+       876,
+       0,
+       19,
+       42
+      ]
+     ],
+     "pivots": [
+      [
+       10.5,
+       39
+      ]
+     ]
+    },
+    "worker_4_typeA": {
+     "rects": [
+      [
+       78,
+       52,
+       18,
+       41
+      ]
+     ],
+     "pivots": [
+      [
+       8.5,
+       38
+      ]
+     ]
+    },
+    "worker_4_typeB": {
+     "rects": [
+      [
+       97,
+       52,
+       18,
+       41
+      ]
+     ],
+     "pivots": [
+      [
+       8.5,
+       38
+      ]
+     ]
+    },
+    "worker_4_wait": {
+     "rects": [
+      [
+       116,
+       52,
+       17,
+       41
+      ]
+     ],
+     "pivots": [
+      [
+       8.5,
+       38
+      ]
+     ]
+    },
+    "worker_4_sleep": {
+     "rects": [
+      [
+       229,
+       52,
+       18,
+       38
+      ]
+     ],
+     "pivots": [
+      [
+       8.5,
+       35
+      ]
+     ]
+    },
+    "worker_4_relax": {
+     "rects": [
+      [
+       896,
+       0,
+       17,
+       42
+      ]
+     ],
+     "pivots": [
+      [
+       8.5,
+       39
+      ]
+     ]
+    },
+    "worker_5_typeA": {
+     "rects": [
+      [
+       782,
+       0,
+       18,
+       43
+      ]
+     ],
+     "pivots": [
+      [
+       8.5,
+       40
+      ]
+     ]
+    },
+    "worker_5_typeB": {
+     "rects": [
+      [
+       801,
+       0,
+       18,
+       43
+      ]
+     ],
+     "pivots": [
+      [
+       8.5,
+       40
+      ]
+     ]
+    },
+    "worker_5_wait": {
+     "rects": [
+      [
+       820,
+       0,
+       17,
+       43
+      ]
+     ],
+     "pivots": [
+      [
+       8.5,
+       40
+      ]
+     ]
+    },
+    "worker_5_sleep": {
+     "rects": [
+      [
+       153,
+       52,
+       18,
+       40
+      ]
+     ],
+     "pivots": [
+      [
+       8.5,
+       37
+      ]
+     ]
+    },
+    "worker_5_relax": {
+     "rects": [
+      [
+       764,
+       0,
+       17,
+       43
+      ]
+     ],
+     "pivots": [
+      [
+       8.5,
+       40
+      ]
+     ]
+    },
+    "plant_bushy": {
+     "rects": [
+      [
+       434,
+       52,
+       14,
+       30
+      ]
+     ],
+     "pivots": [
+      [
+       6.5,
+       27
+      ]
+     ]
+    },
+    "plant_tall": {
+     "rects": [
+      [
+       337,
+       52,
+       17,
+       35
+      ]
+     ],
+     "pivots": [
+      [
+       7.5,
+       32
+      ]
+     ]
+    },
+    "plant_flower": {
+     "rects": [
+      [
+       477,
+       52,
+       14,
+       23
+      ]
+     ],
+     "pivots": [
+      [
+       6.5,
+       20
+      ]
+     ]
+    },
+    "tree_a": {
+     "rects": [
+      [
+       640,
+       0,
+       24,
+       43
+      ]
+     ],
+     "pivots": [
+      [
+       11.5,
+       40
+      ]
+     ]
+    },
+    "tree_b": {
+     "rects": [
+      [
+       665,
+       0,
+       24,
+       43
+      ]
+     ],
+     "pivots": [
+      [
+       11.5,
+       40
+      ]
+     ]
+    },
+    "pine": {
+     "rects": [
+      [
+       355,
+       52,
+       22,
+       33
+      ]
+     ],
+     "pivots": [
+      [
+       10.5,
+       31
+      ]
+     ]
+    },
+    "bush_a": {
+     "rects": [
+      [
+       697,
+       52,
+       19,
+       16
+      ]
+     ],
+     "pivots": [
+      [
+       8.5,
+       12
+      ]
+     ]
+    },
+    "bush_b": {
+     "rects": [
+      [
+       717,
+       52,
+       19,
+       16
+      ]
+     ],
+     "pivots": [
+      [
+       8.5,
+       12
+      ]
+     ]
+    },
+    "bench": {
+     "rects": [
+      [
+       378,
+       52,
+       27,
+       30
+      ],
+      [
+       406,
+       52,
+       27,
+       30
+      ]
+     ],
+     "pivots": [
+      [
+       13.5,
+       24
+      ],
+      [
+       13.5,
+       24
+      ]
+     ]
+    },
+    "lamppost": {
+     "rects": [
+      [
+       188,
+       0,
+       13,
+       46
+      ]
+     ],
+     "pivots": [
+      [
+       6.5,
+       44
+      ]
+     ]
+    },
+    "flowerbed": {
+     "rects": [
+      [
+       566,
+       52,
+       26,
+       21
+      ],
+      [
+       593,
+       52,
+       26,
+       20
+      ]
+     ],
+     "pivots": [
+      [
+       13.5,
+       14
+      ],
+      [
+       13.5,
+       13
+      ]
+     ]
+    },
+    "rock": {
+     "rects": [
+      [
+       937,
+       52,
+       16,
+       13
+      ]
+     ],
+     "pivots": [
+      [
+       7.5,
+       10
+      ]
+     ]
+    }
+   }
+  }
+ }
+}

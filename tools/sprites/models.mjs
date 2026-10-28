@@ -8,7 +8,7 @@ export function makePalette() {
   p.add('steel', '#b3bdd0').add('plastic', '#4a5272').add('kb', '#eef2fa');
   p.add('screen', null, { colors: ['#1c6fc0', '#3fb8f5', '#9fe8ff', '#ffffff'], emissive: true, mid: 1 });
   p.add('mug', '#ef5b50').add('coffee', '#6b4128', { n: 3, mid: 1 }).add('paper', '#fdf9ef');
-  p.add('chairBlue', '#4f86ee').add('rubber', '#2d3148', { n: 3, mid: 1 });
+  p.add('chairBlue', '#4f86ee').add('chairSlate', '#59668c', { shift: 0.6 }).add('rubber', '#2d3148', { n: 3, mid: 1 });
   // people
   p.add('skin1', '#f7cfaa', { shift: 0.5 }).add('skin2', '#dc9f70', { shift: 0.5 }).add('skin3', '#9a6340', { shift: 0.5 });
   p.add('hairBrown', '#5a3524', { shift: 0.5 }).add('hairBlond', '#f2c75c', { shift: 0.15 }).add('hairBlack', '#2a2a40').add('hairRed', '#cf5a30', { shift: 0.4 });
@@ -22,6 +22,11 @@ export function makePalette() {
   for (const [n, c] of [['bkR', '#e8564d'], ['bkB', '#4a7be0'], ['bkG', '#43b26f'], ['bkY', '#f4c542'], ['bkP', '#9b6ae0'], ['bkO', '#f08a38']]) p.add(n, c, { n: 4, mid: 1 });
   // rooms
   p.add('wallCream', '#f7e6c4').add('trim', '#fff6e2').add('carpetTeal', '#43b8ae').add('carpetGold', '#f4b84c').add('tile', '#e9eef5');
+  // neutral surfaces that the scene tints with the project colour at runtime
+  p.add('carpetN', '#ddd6ca', { shift: 0.4 }).add('wallN', '#f4ead6', { shift: 0.6 }).add('plank', '#d9a566').add('stone', '#c7bfb0', { shift: 0.5 });
+  p.add('screenOff', '#2b3347', { n: 3, mid: 1 }).add('boardWhite', '#f6f8fb', { n: 4, mid: 2 }).add('rock', '#9aa0ad', { shift: 0.7 });
+  p.add('bark', '#8a5a36').add('leafPine', '#2f8a5c', { material: 'follaje' }).add('flowerW', '#fff4e8', { material: 'follaje' }).add('flowerB', '#6fa3ff', { material: 'follaje' });
+  p.add('hairGrey', '#9aa1b5', { shift: 0.3 }).add('skin4', '#f0b98f', { shift: 0.5 });
   return p;
 }
 
