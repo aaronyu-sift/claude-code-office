@@ -1,0 +1,126 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import { layoutOffice, G, roomWidth, roomCap } from '../public/js/pixel/layout.js';
+import { FP, fpSize } from '../public/js/pixel/ids.js';
+
+const agents = (n, classes = [0]) => Array.from({ length: n }, (_, i) => ({ id: 'sess-' + String(i).padStart(3, '0'), cls: classes[i % classes.length], project: 'p' + (i % 5), color: '#5B9BD5' }));
+const overlap = (a, b) => a.x0 < b.x1 && a.x1 > b.x0 && a.y0 < b.y1 && a.y1 > b.y0;
+const box = o => ({ x0: o.x, y0: o.y, x1: o.x + o.w, y1: o.y + o.d });
+const roomBox = r => ({ x0: r.x - G.WALL_T, y0: r.y - G.WALL_T, x1: r.x + r.w + G.WALL_T, y1: r.y + r.d + G.WALL_T });
+
+for (const n of [1, 4, 10, 20]) {
+  const list = agents(n, n === 10 ? [0, 1, 2] : [0]);
+
+  test(`layout is deterministic for ${n} agents`, () => {
+    assert.equal(JSON.stringify(layoutOffice(list)), JSON.stringify(layoutOffice(list.map(a => ({ ...a })))));
+  });
+
+  test(`no overlapping rooms, desks, seats or furniture for ${n} agents`, () => {
+    const L = layoutOffice(list);
+    assert.equal(L.rooms.length, n);
+    for (let i = 0; i < L.rooms.length; i++) for (let j = i + 1; j < L.rooms.length; j++) {
+      assert.ok(!overlap(roomBox(L.rooms[i]), roomBox(L.rooms[j])), `rooms ${i} and ${j} overlap`);
+    }
+    for (const r of L.rooms) {
+      const parts = [];
+      for (const s of r.slots) { parts.push(['desk' + s.index, box(s.desk)], ['seat' + s.index, box(s.seat)]); }
+      for (const it of r.items) if (it.layer === 'stand' && !it.wall) parts.push([it.id, box(it)]);
+      for (let i = 0; i < parts.length; i++) for (let j = i + 1; j < parts.length; j++) {
+        assert.ok(!overlap(parts[i][1], parts[j][1]), `${r.id}: ${parts[i][0]} overlaps ${parts[j][0]}`);
+      }
+      const inner = { x0: r.x, y0: r.y, x1: r.x + r.w, y1: r.y + r.d };
+      for (const [name, b] of parts) {
+        assert.ok(b.x0 >= inner.x0 && b.x1 <= inner.x1 && b.y0 >= inner.y0 && b.y1 <= inner.y1, `${r.id}: ${name} sticks out of its room`);
+      }
+      // walls: the pieces tile their side without overlapping each other or the furniture
+      const walls = r.items.filter(i => i.wall).map(box);
+      for (let i = 0; i < walls.length; i++) for (let j = i + 1; j < walls.length; j++) assert.ok(!overlap(walls[i], walls[j]), `${r.id}: wall pieces ${i} and ${j} overlap`);
+      for (const w of walls) for (const [name, b] of parts) assert.ok(!overlap(w, b), `${r.id}: a wall overlaps ${name}`);
+    }
+  });
+
+  test(`desk slots of ${n} agents are distinct and match the room class`, () => {
+    for (const r of layoutOffice(list).rooms) {
+      assert.equal(r.slots.length, 1 + roomCap(r.cls));
+      assert.equal(new Set(r.slots.map(s => s.index)).size, r.slots.length);
+      assert.equal(r.slots[0].kind, 'chief');
+      assert.equal(r.w, roomWidth(r.cls));
+    }
+  });
+
+  test(`outdoors of ${n} agents: nothing stands on a room and trees only on the far sides`, () => {
+    const L = layoutOffice(list);
+    const rbs = L.rooms.map(roomBox);
+    const outs = L.outdoor.items.map(box);
+    outs.forEach((b, i) => { for (const r of rbs) assert.ok(!overlap(b, r), `outdoor item ${L.outdoor.items[i].id} stands on a room`); });
+    for (let i = 0; i < outs.length; i++) for (let j = i + 1; j < outs.length; j++) assert.ok(!overlap(outs[i], outs[j]), 'outdoor items overlap');
+    for (const it of L.outdoor.items) if (/^(tree|pine)/.test(it.id)) assert.ok(it.y + it.d / 2 > L.building.y1 || it.x + it.w / 2 < L.building.x0, `${it.id} at ${it.x},${it.y} could hide a room`);
+    for (const t of L.outdoor.tiles) for (const r of rbs) assert.ok(!overlap({ x0: t.x + 1, y0: t.y + 1, x1: t.x + 15, y1: t.y + 15 }, { x0: r.x0 + 2, y0: r.y0 + 2, x1: r.x1 - 2, y1: r.y1 - 2 }), 'ground tile inside a room');
+    const b = L.bounds;
+    for (const it of [...L.outdoor.items, ...L.rooms.flatMap(r => r.items)]) assert.ok(it.x >= b.x0 && it.y >= b.y0 && it.x + it.w <= b.x1 && it.y + it.d <= b.y1, `${it.id} outside the island`);
+  });
+}
+
+test('rooms keep their place: appending an agent moves nobody, removing the last one moves nobody', () => {
+  const a = agents(10, [0, 1, 2]);
+  const before = layoutOffice(a).rooms;
+  const plus = layoutOffice([...a, { id: 'sess-new', cls: 1, project: 'x', color: '#fff' }]).rooms;
+  // the geometry of a room never depends on later rooms (only its wall heights may, when a room appears behind it)
+  const geo = r => JSON.stringify([r.id, r.x, r.y, r.w, r.d, r.slots, r.label, r.floor]);
+  for (let i = 0; i < before.length; i++) assert.equal(geo(plus[i]), geo(before[i]), `room ${i} moved when an agent was appended`);
+  const minus = layoutOffice(a.slice(0, 9)).rooms;
+  for (let i = 0; i < 9; i++) {
+    // walls depend on neighbours, so compare the places, not the wall heights
+    assert.deepEqual([minus[i].x, minus[i].y], [before[i].x, before[i].y]);
+  }
+});
+
+test('removing an agent from the middle keeps the order and the rooms before it in place', () => {
+  const a = agents(10, [0]);
+  const before = layoutOffice(a).rooms;
+  const gone = a[4].id;
+  const after = layoutOffice(a.filter(x => x.id !== gone)).rooms;
+  assert.deepEqual(after.map(r => r.id), before.map(r => r.id).filter(id => id !== gone));
+  for (let i = 0; i < 4; i++) assert.deepEqual([after[i].x, after[i].y], [before[i].x, before[i].y]);
+});
+
+test('rows break at ROW_MAX and later rows stand behind earlier ones', () => {
+  const L = layoutOffice(agents(20, [0]));
+  const rows = new Map();
+  for (const r of L.rooms) rows.set(r.y, [...(rows.get(r.y) || []), r]);
+  assert.ok(rows.size >= 2);
+  for (const [, list] of rows) assert.ok(Math.max(...list.map(r => r.x + r.w)) <= G.ROW_MAX);
+  assert.deepEqual([...rows.keys()], [...rows.keys()].sort((p, q) => p - q));
+});
+
+test('tall walls only where nothing stands in their shadow', () => {
+  const one = layoutOffice(agents(1)).rooms[0];
+  assert.deepEqual(one.walls, { north: 'tall', west: 'tall' });
+  const two = layoutOffice(agents(2)).rooms;
+  assert.deepEqual(two[0].walls, { north: 'tall', west: 'tall' });
+  assert.deepEqual(two[1].walls, { north: 'tall', west: 'low' });
+  const many = layoutOffice(agents(20)).rooms;
+  const first = many[0], inner = many[6];
+  assert.equal(first.walls.north, 'low');                     // another row stands behind it
+  assert.equal(inner.walls.west, 'low');
+  assert.ok(many[many.length - 1].walls.north === 'tall');    // the back row keeps its tall wall
+});
+
+test('layout interface: empty office, shelf stays empty, no hard cap, no river, cars or roads', () => {
+  const e = layoutOffice([]);
+  assert.deepEqual(e.rooms, []);
+  assert.deepEqual(e.shelf, []);
+  assert.ok(e.bounds.x1 > e.bounds.x0);
+  const big = layoutOffice(agents(45, [0, 1]));
+  assert.equal(big.rooms.length, 45);
+  assert.deepEqual(big.shelf, []);
+  const ids = new Set([...big.rooms.flatMap(r => [...r.items, ...r.floor]), ...big.outdoor.items, ...big.outdoor.tiles].map(i => i.id));
+  for (const id of ids) { assert.ok(FP[id], 'unknown sprite id ' + id); assert.doesNotMatch(id, /river|car|road|traffic/); }
+});
+
+test('item footprints rotate with the facing', () => {
+  assert.deepEqual(fpSize('sofa', 0), [30, 12]);
+  assert.deepEqual(fpSize('sofa', 1), [12, 30]);
+  const sofa = layoutOffice(agents(1)).rooms[0].items.find(i => i.id === 'sofa');
+  assert.deepEqual([sofa.w, sofa.d], [12, 30]);
+});
