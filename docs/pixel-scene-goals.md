@@ -50,7 +50,7 @@ Done when ALL of these appear in your own tool output in this conversation:
 1. `npm test` exits 0 with the passing count, including front-projection tests.
 2. `node tools/sprites/build-atlas.mjs --proj front --check` and `--proj iso --check` both exit 0; print both atlas file sizes in bytes (each at most 1,500,000) and sprite counts.
 3. `node tools/qa/pixel-qa.mjs --proj iso` and `node tools/qa/pixel-qa.mjs --proj front` both end with `QA PASS` (checks 1 to 11); print both full outputs.
-4. The header has a projection toggle; `?proj=front` and `?proj=iso` work; the choice persists across a reload (show the QA or CDP evidence). The layout and scene code do not branch on the projection except through the Projection interface (print the grep that shows it).
+4. `layoutOffice` takes the projection as an argument (tall wall sides and the row order come from it; today they are hard-coded for isometric). The header has a projection toggle; `?proj=front` and `?proj=iso` work; the choice persists across a reload (show the QA or CDP evidence). The layout and scene code do not branch on the projection except through the Projection interface (print the grep that shows it).
 5. README documents the pixel scene (features, options, regenerating art with the pinned VoxPix checkout) and THIRD_PARTY.md credits VoxPix (MIT) with the pinned commit; the old 3D scene is still reachable with `?scene=3d` (QA check 8 passes).
 6. Final screenshots in ".../My Drive/Agent Chat/pixel-scene/m3/": both projections at 4, 10 and 20 agents and a waiting agent; curl 200 for each link.
 7. Git as in Goal 1; Goal 3 checkboxes ticked; deviations noted. Do not push; list the commits and ask the user whether to push.
@@ -83,7 +83,7 @@ Done when ALL of these appear in your own tool output in this conversation:
 2. `node tools/qa/pixel-qa.mjs --proj iso` and `--proj front` both end with `QA PASS`, now also checking: a fixture with 10 live and 12 closed sessions shows the closed ones on the shelf sorted newest first with their full chat names and "closed N min ago"; waiting ("your turn") sessions never appear on the shelf; clicking a shelf entry and clicking a figure in a room both open the details panel for that id; the shelf scrolls on its own and does not overlap the scene or any label.
 3. The details panel shows full name, project, status, time since, last prompt and reply, tool mix, an "Open in VS Code" button whose href is vscode://anthropic.claude-code/open?session=<id> and a "Copy session id" button (print the DOM evidence from the QA run).
 4. Print the measured scan time and the number of transcript bytes read on a cold and on a warm run with the real ~/.claude/projects (read-only), and show that the warm run reads nothing.
-5. Screenshots (scene with shelf, details panel open, both projections) in ".../My Drive/Agent Chat/pixel-scene/m4/", each localhost link returning 200 by curl.
+5. Screenshots (scene with shelf, details panel open, both projections) in ".../My Drive/Agent Chat/pixel-scene/m5/", each localhost link returning 200 by curl.
 6. Git as in Goal 1 (clean tree, only commits by macbookproiceland@gmail.com, no trailer, nothing pushed); Goal 5 checkboxes ticked; deviations noted.
 Add nothing beyond the plan. Finish by printing the evidence, then stop. If a required check still fails after three genuine attempts to fix it, stop and report exactly what blocks it and what is missing.
 ```

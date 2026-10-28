@@ -117,6 +117,23 @@ Content to build (counts are minimums per projection, as manifest ids with tags)
   - Restraint: never more than one marker and one bubble per agent; a bubble may not cover an agent or a label; at far zoom only waiting agents keep their bubble.
   - Goal 5 may use a small radial menu on click (Details, Open in VS Code, Copy session id) in place of the plain drawer, and the details panel may borrow the info-panel idea:
     bars for context fill, cost today and time since last activity. Decide this with the user when Goal 5 starts.
+- **Counting rule for the minimums above** (added when Goal 2 started, because the manifest categories did not match the list; `test/manifest.test.mjs` enforces it). Every row is a number of manifest ids unless it says otherwise, seasonal variants excluded:
+
+  | row | minimum | manifest category |
+  | --- | --- | --- |
+  | floors | 8 | `floor` |
+  | walls | 14 | `wall` |
+  | furniture | 24 | `furniture` (a desk counts once per screen state) |
+  | desk props | 14 | `deskprop` (the monitor's 3 screen states are baked into the desks and not counted here) |
+  | people | 6 appearances x 6 poses (typing A, typing B, thinking, waiting, sleeping, standing) | `people`, every appearance has every pose; `relax` (done) is an extra |
+  | plants | 12 | `plant` |
+  | trees | 6 | `tree` |
+  | bushes | 4 | `bush` |
+  | hedges | 2 | `hedge` |
+  | flower beds | 4 | `flowerbed` |
+  | grass tufts | 2 | `tuft` |
+  | rocks | 4 | `rock` |
+  | outdoor | 14 | `outdoor` |
 - Season variants (baked, outdoor only, 4 each): trees (spring blossom pink and fresh green, summer lush, autumn orange and red, winter bare with snow caps), bushes, hedges, grass and ground tiles (flowers, lush, fallen leaves, snow), flower beds, rocks, bench and lamp post (snow caps in winter), plus a few seasonal props (snowman, pumpkin, leaf pile, bird bath).
 - Night variants: windows, lamps and monitors with lit emissive ramps; moon and star sprites.
 - Delights, all tiny and capped: butterflies and birds by day, petals in spring, fireflies on summer nights, falling leaves in autumn, flakes in winter, a rainbow after rain.
