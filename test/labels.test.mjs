@@ -34,3 +34,18 @@ test('declutter: the preferred spot is used when it is free and low priority lab
   assert.deepEqual([out.get('a').x, out.get('a').y], [350, 254]);
   assert.ok(out.get('b').ok === false || (out.get('b').x !== out.get('a').x || out.get('b').y !== out.get('a').y));
 });
+test('declutter: a label moves off a figure it would cover when a free spot exists', () => {
+  const figure = { x: 340, y: 230, w: 24, h: 40 };            // sits where the preferred spot of 'a' would be
+  const it = { id: 'a', ax: 400, ay: 300, w: 100, h: 40, pri: 100, force: true };
+  const free = placeLabels([it], 1500, 790);
+  assert.ok(hit(rect(free.get('a'), it), { x0: figure.x, y0: figure.y, x1: figure.x + figure.w, y1: figure.y + figure.h }), 'the fixture should cover the figure without obstacles');
+  const out = placeLabels([it], 1500, 790, 6, 3, [figure]);
+  assert.ok(!hit(rect(out.get('a'), it), { x0: figure.x, y0: figure.y, x1: figure.x + figure.w, y1: figure.y + figure.h }), 'label still covers the figure');
+  assert.equal(out.get('a').ok, true);
+});
+test('declutter: labels give way to each other before they give way to figures', () => {
+  // no spot is free of both: the label may cover the figure, but never another label
+  const items = [{ id: 'a', ax: 100, ay: 100, w: 90, h: 36, pri: 100, force: true }, { id: 'b', ax: 100, ay: 100, w: 90, h: 36, pri: 90, force: true }];
+  const out = placeLabels(items, 200, 150, 6, 3, [{ x: 0, y: 0, w: 200, h: 150 }]);
+  assert.ok(!hit(rect(out.get('a'), items[0]), rect(out.get('b'), items[1])) || out.get('b').ok === false);
+});

@@ -30,19 +30,26 @@ export function wrapText(text, maxCells) {
 
 // Declutter: items [{ id, ax, ay, w, h, pri, force }] in view px, anchor = bottom centre of the preferred spot (the label sits above it).
 // Returns Map id -> { x, y, ok }. Higher pri is placed first; a label that fits nowhere without touching another is `ok: false` unless
-// it is `force`d (main agents), in which case it takes the least bad spot.
-export function placeLabels(items, vw, vh, gap = 6, pad = 3) {
+// it is `force`d (main agents), in which case it takes the least bad spot. `obstacles` are rects [{ x, y, w, h }] (the figures of the
+// agents) that a label should not cover: covering one costs less than touching another label, so labels give way to each other first.
+const RING = [[0, -1], [1, 0], [-1, 0], [1, -1], [-1, -1], [0, 1], [1, 1], [-1, 1]];
+export function placeLabels(items, vw, vh, gap = 6, pad = 3, obstacles = []) {
   const order = [...items].sort((a, b) => b.pri - a.pri || a.ay - b.ay || (a.id < b.id ? -1 : 1));
   const placed = [], out = new Map();
-  const hit = (x, y, w, h) => { let area = 0; for (const p of placed) { const ox = Math.min(x + w, p.x + p.w) - Math.max(x, p.x) + pad, oy = Math.min(y + h, p.y + p.h) - Math.max(y, p.y) + pad; if (ox > 0 && oy > 0) area += ox * oy; } return area; };
+  const hit = (x, y, w, h) => {
+    let area = 0;
+    for (const p of placed) { const ox = Math.min(x + w, p.x + p.w) - Math.max(x, p.x) + pad, oy = Math.min(y + h, p.y + p.h) - Math.max(y, p.y) + pad; if (ox > 0 && oy > 0) area += ox * oy * 4; }
+    for (const p of obstacles) { const ox = Math.min(x + w, p.x + p.w) - Math.max(x, p.x), oy = Math.min(y + h, p.y + p.h) - Math.max(y, p.y); if (ox > 0 && oy > 0) area += ox * oy; }
+    return area;
+  };
   for (const it of order) {
     const { ax, ay, w, h } = it;
-    const cands = [];
-    for (const dy of [0, 1, 2, 3]) {
-      const up = ay - h - gap - dy * (h + 2);
-      cands.push([ax - w / 2, up], [ax - w / 2 + w * 0.55, up], [ax - w / 2 - w * 0.55, up]);
+    // the spot above the anchor first, then rings of spots around it, nearest first
+    const cands = [[ax - w / 2, ay - h - gap]];
+    for (let k = 1; k <= 7; k++) {
+      for (const [ux, uy] of RING) cands.push([ax - w / 2 + ux * k * (w * 0.55 + 2), ay - h - gap + uy * k * (h * 0.75 + 2)]);
+      if (k === 1) cands.push([ax - w / 2, ay + gap], [ax + gap, ay - h / 2], [ax - w - gap, ay - h / 2]);
     }
-    cands.push([ax - w / 2, ay + gap], [ax + gap, ay - h / 2], [ax - w - gap, ay - h / 2]);
     let best = null;
     for (const [cx, cy] of cands) {
       const x = Math.min(vw - w - 4, Math.max(4, cx)), y = Math.min(vh - h - 4, Math.max(4, cy));
