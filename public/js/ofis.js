@@ -851,7 +851,7 @@ export function createOfis(root, ctx, opts = {}) {
     return room;
   }
 
-  // The faces of the vacant signs: one grey "Vacant" plate painted once per build, drawn as one instanced mesh (one draw call) per sign width.
+  // The faces of the vacant signs: one blank grey plate (no text: nobody uses the office) painted once per build, drawn as one instanced mesh (one draw call) per sign width.
   function addVacantSigns(g) {
     const byW = new Map();
     for (const s of world.vacantSigns) {
@@ -863,7 +863,7 @@ export function createOfis(root, ctx, opts = {}) {
       const w = list[0].w, cv = document.createElement('canvas');
       cv.height = SIGN_PX;
       cv.width = Math.min(2048, Math.round(SIGN_PX * w / SIGN_H));
-      paintPlaque(cv, { name: msg('of.vacant'), title: '', color: '#8a93a3', status: '' });
+      paintPlaque(cv, { name: '', title: '', color: '#8a93a3', status: '' });
       const g2 = cv.getContext('2d');                      // a veil over it: quiet next to the signs of the chats
       g2.fillStyle = 'rgba(70,76,88,.5)';
       g2.fillRect(0, 0, cv.width, cv.height);
