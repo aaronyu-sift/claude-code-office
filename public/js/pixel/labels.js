@@ -32,10 +32,12 @@ export function wrapText(text, maxCells) {
 // Returns Map id -> { x, y, ok }. Higher pri is placed first; a label that fits nowhere without touching another is `ok: false` unless
 // it is `force`d (main agents), in which case it takes the least bad spot. `obstacles` are rects [{ x, y, w, h }] (the figures of the
 // agents) that a label should not cover: covering one costs less than touching another label, so labels give way to each other first.
+// `taken` are rects [{ x, y, w, h }] that are in place already (the three.js scene's balloons and cards): labels keep clear of them like of a label placed before, they
+// are neither moved nor in the result.
 const RING = [[0, -1], [1, 0], [-1, 0], [1, -1], [-1, -1], [0, 1], [1, 1], [-1, 1]];
-export function placeLabels(items, vw, vh, gap = 6, pad = 3, obstacles = []) {
+export function placeLabels(items, vw, vh, gap = 6, pad = 3, obstacles = [], taken = []) {
   const order = [...items].sort((a, b) => b.pri - a.pri || a.ay - b.ay || (a.id < b.id ? -1 : 1));
-  const placed = [], out = new Map();
+  const placed = taken.map(r => ({ x: r.x, y: r.y, w: r.w, h: r.h })), out = new Map();
   const hit = (x, y, w, h) => {
     let area = 0;
     for (const p of placed) { const ox = Math.min(x + w, p.x + p.w) - Math.max(x, p.x) + pad, oy = Math.min(y + h, p.y + p.h) - Math.max(y, p.y) + pad; if (ox > 0 && oy > 0) area += ox * oy * 4; }
