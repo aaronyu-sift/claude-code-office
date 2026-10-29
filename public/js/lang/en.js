@@ -148,6 +148,13 @@ export default {
     'dw.toolsSub': p => `${pl(p.calls, 'call', 'calls')} · ${pl(p.prompts, 'prompt', 'prompts')}`,
     'dw.subsH': 'Subagents',
     'dw.subsSub': '{w} working · {n} total',
+    // the progress bar of a chat's task list (progress.js, progress-bar.js)
+    'progress.done': '{done} of {total} done',
+    'progress.doing': '{n} doing',
+    'progress.blocked': '{n} blocked',
+    'progress.aria': 'Progress: {topic}',
+    'progress.now': 'Now',
+    'progress.next': 'Next',
     'dw.events': 'Events',
     'dw.newest': 'newest first',
     'dw.noEvents': 'No events yet',

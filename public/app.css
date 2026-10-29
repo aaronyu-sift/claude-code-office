@@ -629,6 +629,20 @@ main { flex: 1; min-height: 0; position: relative; }
 .oc-quote.r { -webkit-line-clamp: 4; }
 .oc-mix { display: flex; height: 6px; border-radius: 3px; overflow: hidden; gap: 2px; background: rgba(143, 176, 255, .12); }
 .oc-mix i { display: block; min-width: 3px; }
+/* the progress of a chat's task list (progress-bar.js): the bar like the tool mix above it, a line of text and the item being worked on */
+.cco-prog { margin: 10px 0; min-width: 0; }
+.cco-prog-track { display: flex; height: 8px; border-radius: 4px; overflow: hidden; gap: 2px; background: rgba(143, 176, 255, .12); }
+.cco-prog-seg { display: block; flex: 0 1 auto; min-width: 3px; }
+.cco-prog-seg.done { background: var(--ok); }
+.cco-prog-seg.doing { background: #8fb0ff; }
+.cco-prog-seg.blocked { background: var(--warn); }
+.cco-prog-seg.rest { background: transparent; }
+.cco-prog-text { margin-top: 6px; font: 12px/1.4 var(--mono); color: #a9b3d6; }
+.cco-prog-now { display: flex; align-items: baseline; flex-wrap: wrap; gap: 2px 8px; margin-top: 4px; font-size: 13px; line-height: 1.4; color: #d6dcf5; }
+.cco-prog-now .k { font: 600 12px/1.4 var(--mono); letter-spacing: .08em; text-transform: uppercase; color: #8fb0ff; }
+.cco-prog-now .id { font: 600 12px/1.4 var(--mono); color: #eaeeff; }
+.cco-prog-now .t { min-width: 0; overflow-wrap: anywhere; }
+.cco-prog-now .el { font: 12px/1.4 var(--mono); color: #a9b3d6; }
 .oc-tools { display: flex; flex-wrap: wrap; gap: 4px 12px; margin-top: 6px; font: 12px/1.4 var(--mono); color: #a9b3d6; }
 .oc-tools b { color: #eaeeff; font-weight: 600; }
 .oc-subs { display: flex; flex-wrap: wrap; gap: 6px; }
