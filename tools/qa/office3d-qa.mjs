@@ -1,6 +1,6 @@
 // QA of the 3D scene's models and polish (public/js/ofis*.js): headless Chrome with software WebGL in a throw-away profile, the server against a fake
 // ~/.claude, one `CHECK <name> PASS|FAIL <detail>` line per check and a final `QA PASS` or `QA FAIL`.
-//   node tools/qa/office3d-qa.mjs [--only boot|budget|agents|fallback|stable-layout|expand] [--shots <dir>] [--mutations [--group main|fallback|stable]]
+//   node tools/qa/office3d-qa.mjs [--only boot|budget|agents|fallback|stable|stable-layout|vacant|expand] [--shots <dir>] [--mutations [--group main|fallback|stable] [--mutation <words>]]
 //
 //   3d-boot      the canvas is not blank, no console error, every model file the scene asks for came back 200, nothing leaves 127.0.0.1
 //   3d-fallback  models blocked, corrupt, missing or empty: the scene still draws, every piece that fell back says so once; ?assets=procedural asks for nothing
@@ -8,13 +8,15 @@
 //   3d-agents    every agent has a figure, and its colour shows on screen (the figure's own pixels, found by drawing with and without it)
 //   3d-stable-layout  3, 7 and 10 chats open, 4 close, others come, one sleeps and wakes: no office changes its rectangle, no chat its slot, no seated
 //                figure its place, a new chat takes the lowest free slot, and the camera is not refitted while the building stays the same
+//   3d-vacant    3 chats in the 10 offices (7 vacant): the building as it is used stays inside its budget (triangles, draw calls, rebuild time), and every
+//                vacant office costs a fraction of an office with a chat (a vacant office is a shell with a few bare things, no meshes of its own)
 //   3d-expand    a chat whose sub-agents outgrow its 6 desks grows its room inside its cell and nothing else changes; the 11th chat appends a row
 //                (the first ten offices, their chats and the sub-agents still walking stay as they are)
 //
 // --mutations breaks the code in a copy of the repo, one line at a time, and runs the check that guards that line: every one must FAIL there
 // (a check that cannot fail guards nothing). Timing is the one thing a busy machine can bend: the rebuild time is the best of three, and a failing
-// check is worth running again on its own (--only budget) before concluding anything.
-import { cpSync, mkdtempSync, readFileSync, writeFileSync, mkdirSync, rmSync, renameSync, utimesSync } from 'node:fs';
+// check is worth running again on its own (--only budget) before concluding anything. --mutation <words> runs the mutations whose name has those words.
+import { cpSync, mkdtempSync, readFileSync, writeFileSync, mkdirSync, rmSync, renameSync, utimesSync, readdirSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { scenario3d, lookAt, o3, sleep, ROOT } from './harness3d.mjs';
@@ -25,11 +27,21 @@ const args = process.argv.slice(2);
 const val = f => { const i = args.indexOf('--' + f); return i >= 0 ? args[i + 1] : undefined; };
 const only = val('only'), shotsDir = val('shots');
 
-// ---- budgets: what the previous agent measured for 10 agents (225 draw calls, 137k triangles, with the packs and the polish) plus 10 percent;
-// the models may weigh 1.3 MB (they weigh 1.15 MB). Since the stable layout (public/js/ofis-layout.js) every office is built with 6 desks and a
-// lounge from the start: 10 rooms take 218k triangles (was 137k with 3 desks) and a rebuild takes about 150 ms (up to 190 on a busy machine; was 75),
-// so the budgets are those plus 10 percent for the triangles and a wide margin for the time. Draw calls did not change (they stayed at 185).
-const BUDGET = { calls: 253, tris: 240000, rebuildMs: 280, modelBytes: 1.3e6 };
+// ---- budgets. 3d-budget is the full building: 10 agents, which is 9 offices with a chat (one chat is asleep: it is on the shelf) and 1 vacant one.
+// The old limits (151k triangles, 120 ms) were set when a room had 3 desks and no lounge. Since the stable layout (public/js/ofis-layout.js) a
+// room with a chat has 6 desks and a lounge from the start, and a chat taking a vacant slot must build that full room: each of the 9 rooms costs
+// about 13k triangles (floor included), so 9 of them alone are 117k and the old limits cannot hold. Measured with vacant offices made cheap:
+// 204k triangles, 172 draw calls, a rebuild of 130 to 188 ms on a machine with a load of 30 (it was 218k, 185 calls, about 150 ms), so the limits
+// are the measurement plus 5 percent for the triangles (they do not vary between runs) and 10 percent for the calls. The time is the slowest
+// reading plus 15 percent: 9 of the 10 offices are full ones, so this building is not faster to build than before, and a loaded machine adds noise
+// (the time of the building as it is used is guarded by 3d-vacant). The models may weigh 1.3 MB (they weigh 1.15 MB).
+const BUDGET = { calls: 190, tris: 215000, rebuildMs: 220, modelBytes: 1.3e6 };
+// 3d-vacant is the building as it is used: 3 chats in the 10 offices, 7 of them vacant. The targets for it were 165k triangles and 100 ms. A vacant
+// office is a shell with a few bare desks, a plant and a sofa (about 1.1k triangles, one batch, no meshes of its own, one shared sign for all of
+// them): the scene takes 115k triangles and 63 draw calls, a rebuild takes 67 to 86 ms on a machine with a load of 30. The limits are the
+// measurement plus 10 percent (the time is the 100 ms of the target). A vacant office may cost at most 15 percent of an office with a chat (it
+// costs 8 to 9 percent; with its own door leaf, floor and sign meshes it is 20 percent and 79 draw calls: a mutation below).
+const TYPICAL = { calls: 70, tris: 126000, rebuildMs: 100, lighter: 0.15 };
 const COLOUR_MIN_PX = 40;                               // pixels of the agent's colour on a figure's own pixels at zoom 150
 const NOISE = /\/local\/ofis-extras\.js/;               // the old scene probes an optional file that is absent (a 404 by design)
 
@@ -213,15 +225,18 @@ const MUTATIONS = [
   { name: 'an expansion repacks the rows: the row size follows the number of chats', file: 'public/js/ofis.js', from: 'const P = buildingPlan(plan.rows, slots.perRow, leads);', to: 'const P = buildingPlan(plan.rows, Math.max(slots.perRow, Math.ceil(list.length / 2)), leads);', group: 'stable', fails: '3d-expand' },
   { name: 'the camera refits at every rebuild, not only when the building changed', file: 'public/js/ofis.js', from: 'const changed = key !== fitKey;', to: 'const changed = true;', group: 'stable', fails: ['3d-stable-layout', '3d-expand'] },
   { name: 'a room is built for 3 desks: the fourth sub-agent changes it', file: 'public/js/ofis-layout.js', from: 'export const BASE_CLS = 1;', to: 'export const BASE_CLS = 0;', group: 'stable', fails: '3d-stable-layout' },
+  // the vacant office: cheap, so the building stays light while few chats are open
+  { name: 'a vacant office is furnished and drawn like an office with a chat', file: 'public/js/ofis.js', from: 'it.vacant ? buildVacant(B, g, it) : buildRoom(B, g, it)', to: 'it.vacant ? Object.assign(buildRoom(B, g, { ...it, vacant: false }), { vacant: true }) : buildRoom(B, g, it)', group: 'stable', fails: '3d-vacant' },
+  { name: 'a vacant office has its own door leaf, floor and sign meshes again', file: 'public/js/ofis.js', from: 'buildShell(B, g, X, Z, W, D, th, it.door, true)', to: 'buildShell(B, g, X, Z, W, D, th, it.door, false)', group: 'stable', fails: '3d-vacant' },
   { name: 'a rebuild seats the sub-agents that are still walking', file: 'public/js/ofis.js', from: "if (c.mode === 'walk' && c.path && (c.slot < 0", to: "if (false && c.mode === 'walk' && c.path && (c.slot < 0", group: 'stable', fails: '3d-expand' },
 ];
 
 async function runMutations() {
   const rows = [];
-  for (const m of MUTATIONS.filter(x => !val('group') || x.group === val('group'))) {
+  for (const m of MUTATIONS.filter(x => (!val('group') || x.group === val('group')) && (!val('mutation') || x.name.includes(val('mutation'))))) {
     const dir = mkdtempSync(join(tmpdir(), 'cco-mut-'));
     try {
-      for (const f of ['server.js', 'cost-worker.js', 'demo.js', 'procident.js', 'recent.js', 'chatbridge.js', 'package.json']) cpSync(join(ROOT, f), join(dir, f));
+      for (const f of readdirSync(ROOT).filter(n => /\.(js|json)$/.test(n) && n !== 'package-lock.json')) cpSync(join(ROOT, f), join(dir, f));      // the server and every module it requires
       cpSync(join(ROOT, 'public'), join(dir, 'public'), { recursive: true });
       const file = join(dir, m.file), text = readFileSync(file, 'utf8');
       if (!text.includes(m.from)) { rows.push({ m, caught: false, detail: 'the line to break was not found' }); continue; }
@@ -313,10 +328,28 @@ async function runStable(ctx) {
     const problems = [], notes = [];
 
     // ---- 3 chats
+    await settle(3);
+    // the building as it is used: 3 of 10 offices have a chat (3d-vacant); the rebuilds change no layout, so the reading below is taken after them
+    const info3 = await page.evaluate(o3('o.draw()'));
+    const rebuilds3 = [];
+    for (let i = 0; i < 3; i++) rebuilds3.push(await page.evaluate(o3('o.rebuildNow()')));
+    const best3 = Math.min(...rebuilds3);
     const s3 = await settle(3);
     const first = s3.office.slots.map(rectKey);
     if (s3.office.slots.length !== 10 || s3.office.rows !== 2 || vacant(s3) !== 7) problems.push(`3 chats: ${s3.office.slots.length} offices in ${s3.office.rows} rows, ${vacant(s3)} vacant (want 10 in 2, 7 vacant)`);
     if (![0, 1, 2].every(i => slotOf(s3).get(id(i)) === i)) problems.push(`3 chats: slots ${[0, 1, 2].map(i => slotOf(s3).get(id(i)))} (want 0,1,2)`);
+    const occTris = s3.office.slots.filter(x => !x.vacant).map(x => x.tris), vacTris = s3.office.slots.filter(x => x.vacant).map(x => x.tris);
+    const heaviestVacant = Math.max(...vacTris), lightestOccupied = Math.min(...occTris);
+    const vacantProblems = [];
+    if (occTris.length !== 3 || vacTris.length !== 7) vacantProblems.push(`${occTris.length} offices with a chat and ${vacTris.length} vacant (want 3 and 7)`);
+    if (info3.tris > TYPICAL.tris) vacantProblems.push(`${info3.tris} triangles (budget ${TYPICAL.tris})`);
+    if (info3.calls > TYPICAL.calls) vacantProblems.push(`${info3.calls} draw calls (budget ${TYPICAL.calls})`);
+    if (best3 > TYPICAL.rebuildMs) vacantProblems.push(`a rebuild takes ${best3.toFixed(0)} ms at best (budget ${TYPICAL.rebuildMs})`);
+    if (!(heaviestVacant <= lightestOccupied * TYPICAL.lighter)) vacantProblems.push(`a vacant office costs ${heaviestVacant} triangles, an office with a chat ${lightestOccupied} (a vacant one may cost at most ${TYPICAL.lighter * 100} percent)`);
+    res.push(make('3d-vacant', S.ready.ok && vacantProblems.length === 0,
+      `3 chats in 10 offices (7 vacant): ${info3.tris} triangles (budget ${TYPICAL.tris}), ${info3.calls} draw calls (${TYPICAL.calls}), rebuild ${rebuilds3.map(r => r.toFixed(0)).join(', ')} ms, best ${best3.toFixed(0)} (${TYPICAL.rebuildMs}); `
+      + `an office costs ${Math.round(lightestOccupied)} to ${Math.round(Math.max(...occTris))} triangles with a chat and ${Math.round(Math.min(...vacTris))} to ${Math.round(heaviestVacant)} vacant (${(heaviestVacant / lightestOccupied * 100).toFixed(0)} percent of the lightest office with a chat, at most ${TYPICAL.lighter * 100})`
+      + (vacantProblems.length ? '; PROBLEMS: ' + vacantProblems.join(' | ') : '')));
     // ---- 7 chats
     [3, 4, 5, 6].forEach(open);
     const s7 = await settle(7);
@@ -417,7 +450,7 @@ if (args.includes('--mutations')) {
 }
 if (!only || ['boot', 'budget', 'agents'].includes(only)) for (const r of await runMain(ctx)) if (!only || r.name === '3d-' + only) show(r);
 if (!only || only === 'fallback') for (const r of await runFallback(ctx)) show(r);
-if (!only || only === 'stable-layout' || only === 'expand') for (const r of await runStable(ctx)) if (!only || r.name === '3d-' + only) show(r);
+if (!only || ['stable', 'stable-layout', 'vacant', 'expand'].includes(only)) for (const r of await runStable(ctx)) if (!only || only === 'stable' || r.name === '3d-' + only) show(r);   // one scene serves the three
 const bad = report.filter(r => !r.ok);
 console.log(bad.length ? `QA FAIL (${bad.length} of ${report.length} checks)` : `QA PASS (${report.length} checks)`);
 process.exit(bad.length ? 1 : 0);

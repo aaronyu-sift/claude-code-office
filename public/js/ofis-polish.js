@@ -111,8 +111,8 @@ export function vnoise(x, z, s) {
 }
 
 /** a room floor: vertex colours = base colour * (soft mottling) * (occlusion from furniture and walls) */
-export function floorMesh(X, Z, W, D, hex, occ, y = 0.012) {
-  const cell = 0.3, nx = Math.max(2, Math.round(W / cell)), nz = Math.max(2, Math.round(D / cell));
+export function floorMesh(X, Z, W, D, hex, occ, y = 0.012, cell = 0.3) {
+  const nx = Math.max(2, Math.round(W / cell)), nz = Math.max(2, Math.round(D / cell));
   const pos = new Float32Array((nx + 1) * (nz + 1) * 3), col = new Float32Array((nx + 1) * (nz + 1) * 3), nor = new Float32Array((nx + 1) * (nz + 1) * 3);
   const base = new THREE.Color(hex), c = new THREE.Color();
   for (let j = 0; j <= nz; j++) for (let i = 0; i <= nx; i++) {
