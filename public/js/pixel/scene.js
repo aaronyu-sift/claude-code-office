@@ -37,7 +37,7 @@ export function createScene({ atlas, proj }) {
   let baseColour = [96, 150, 70], outerDrawn = 0, outerDropped = 0;
   let entries = [], figs = [], roomById = new Map(), sortMs = 0, outdoorKey = '', pendingLight = null, ambientPts = { flowers: [], trees: [] };
   const actors = new Map();                     // `${roomId}:${slot}` -> { id, main, status, ap, name, since }
-  let hoverId = null, quiet = false;             // quiet: draw no status effects (QA measures the light on the figures alone)
+  let hoverId = null, selId = null, quiet = false;             // quiet: draw no status effects (QA measures the light on the figures alone)
   // The season only changes which sprites the garden is drawn with (baked variants, season.js); the layout is the same in every season.
   let season = 'summer', lastLight = null;
   const animals = { butterflies: true, birds: true };            // the view turns them off in winter and in rain, snow and fog
@@ -360,7 +360,7 @@ export function createScene({ atlas, proj }) {
       const f = figs[i], e = f.seat;
       const cx = Math.round(e.px), fy = Math.round(e.py);
       if (cx < vx0 - 40 || cx > vx1 + 40 || fy < vy0 || fy > vy1 + 90) continue;
-      if (f.id === hoverId) { fx.rings++; drawRing(g, cx, fy + 2); }
+      if (f.id === hoverId || f.id === selId) { fx.rings++; drawRing(g, cx, fy + 2); }
     }
     for (let i = 0; i < figs.length && !quiet; i++) {
       const f = figs[i], a = f.actor, e = f.seat;
@@ -446,6 +446,7 @@ export function createScene({ atlas, proj }) {
   return {
     setLayout, setActors, draw, pick, roomAt, toVirtual, occlusion, occlusionInfo,
     setHover(id) { hoverId = id; },
+    setSelected(id) { selId = id; },                  // the agent whose card is open keeps the ring the hover gives
     setQuiet(on) { quiet = !!on; },
     retint,
     // draw the garden in another season (the layout stays); `light` is the current light of the scene, for the garden's night tint

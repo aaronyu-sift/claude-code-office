@@ -80,14 +80,11 @@ for (const n of SIZES) {
     const ids = await S.page.evaluate(px('p.figures()'));
     const probs = [], miss = [], hidden = [];
     const base = await S.page.evaluate(`document.querySelector('#view-ofis .of-area').getBoundingClientRect().toJSON()`);
-    const free = (x, y) => S.page.evaluate(`(()=>{const e=document.elementFromPoint(${x},${y}); return !!e && !e.closest('.px-l, .of-ctl, .of-hud, #drawer, header, #attention')})()`);
-    // close the drawer and wait until it has slid out of the view, so it never covers the next agent
+    const free = (x, y) => S.page.evaluate(`(()=>{const e=document.elementFromPoint(${x},${y}); return !!e && !e.closest('.px-l, .of-ctl, .of-hud, .of-card, header, #attention')})()`);
+    // close the card, so it never covers the next agent
     const closeDrawer = async () => {
-      await S.page.evaluate(`document.querySelector('#scrim').click()`);
-      for (let k = 0; k < 40; k++) {
-        if (await S.page.evaluate(`document.querySelector('#drawer').getBoundingClientRect().left >= innerWidth - 1`)) return;
-        await sleep(50);
-      }
+      await S.page.evaluate(`(document.querySelector('.of-card:not([hidden]) .oc-x') || { click() {} }).click()`);
+      await S.page.evaluate(`document.querySelector('.of-card:not([hidden])') ? new Promise(r => setTimeout(r, 30)) : 0`);
     };
     await S.page.evaluate(px('p.freeze(true)'));        // labels and figures stay where they are while the clicks run
     for (const id of ids) {
@@ -96,7 +93,7 @@ for (const n of SIZES) {
         await closeDrawer();
         await S.page.mouse.click(base.left + c.x + dx, base.top + c.y + dy);
         await sleep(60);
-        return S.page.evaluate(`(()=>{const d=document.querySelector('#drawer'); return d.classList.contains('on') ? d.dataset.id : null})()`);
+        return S.page.evaluate(`(()=>{const d=document.querySelector('.of-card'); return d && !d.hidden ? d.dataset.id : null})()`);
       };
       // the agent has to be visible: some point on it must not sit under a label or a control
       await closeDrawer();
@@ -106,7 +103,7 @@ for (const n of SIZES) {
       const center = await clickAt(spot[0], spot[1]);
       if (center !== id) miss.push(`${id.slice(-12)}→${center ? center.slice(-12) : 'nothing'}`);
       for (const [dx, dy] of [[-11, 0], [11, 0], [0, -11], [0, 11]]) {
-        await closeDrawer();                                                               // the scrim of an open drawer would hide a label
+        await closeDrawer();                                                               // an open card would hide a label
         if (!(await free(base.left + c.x + dx, base.top + c.y + dy))) continue;           // covered by a label: that part is not clickable by design
         const got = await clickAt(dx, dy);
         if (got !== id) { probs.push(`${id.slice(-12)} at ${dx},${dy} → ${got ? got.slice(-12) : 'nothing'}`); break; }
@@ -115,7 +112,7 @@ for (const n of SIZES) {
     await closeDrawer();
     await S.page.evaluate(px('p.freeze(false)'));
     check(`03-targets-n${n}`, probs.length === 0 && hidden.length === 0, `${ids.length} agents, every uncovered click within 11 px of the centre (a 24 x 24 px target) opens that agent: ${probs.length ? 'misses ' + probs.slice(0, 4).join('; ') : 'all'}${hidden.length ? '; agents with no uncovered point: ' + hidden.join(',') : ''}`);
-    check(`05-hit-n${n}`, miss.length === 0, `clicking a visible point at the centre of ${ids.length - hidden.length} agents opened the right drawer for ${ids.length - hidden.length - miss.length}${miss.length ? ' (misses: ' + miss.slice(0, 4).join('; ') + ')' : ''}`);
+    check(`05-hit-n${n}`, miss.length === 0, `clicking a visible point at the centre of ${ids.length - hidden.length} agents opened the right card for ${ids.length - hidden.length - miss.length}${miss.length ? ' (misses: ' + miss.slice(0, 4).join('; ') + ')' : ''}`);
 
     // 4. occlusion
     const occ = await S.page.evaluate(px(`p.figures().map(id => [id, p.occlusion(id)])`));
@@ -229,7 +226,7 @@ if (want('ux')) {
     let tipOk = false, tipText = '', ring = 0, hoverId = null;
     for (const f of pf) {
       const x = base.left + f.x, y = base.top + f.y;
-      if (!(await S.page.evaluate(`(()=>{const e=document.elementFromPoint(${x},${y}); return !!e && !e.closest('.px-l, .of-ctl, #drawer, header, #attention')})()`))) continue;
+      if (!(await S.page.evaluate(`(()=>{const e=document.elementFromPoint(${x},${y}); return !!e && !e.closest('.px-l, .of-ctl, .of-card, header, #attention')})()`))) continue;
       await S.page.mouse.move(x, y);
       await sleep(250);
       tipText = await S.page.evaluate(`document.querySelector('#tip').classList.contains('on') ? document.querySelector('#tip').textContent : ''`);
@@ -539,32 +536,29 @@ if (want('shelf')) {
       api1 === api2 && reloaded.rows.map(r => r.id).join() === idsBefore,
       `${live.length} live + ${S.fx.closed.length} closed sessions: shelf "${sh.title}", ${sh.count} (${sh.rows.filter(r => r.kind === 'closed').length} closed, ${sh.rows.filter(r => r.kind === 'dormant').length} asleep); order newest first as expected ${orderOk}; full chat names ${namesOk} (longest ${Math.max(...sh.rows.map(r => r.name.length))} chars, emoji name included); times: ${sh.rows.slice(0, 4).map(r => `"${r.when}"`).join(', ')} … within tolerance of the fixture ages (off ${whenBad.length}); figures drawn in every row (${sh.rows.length - figBad.length}/${sh.rows.length}, ${sh.rows[0].figure.w}x${sh.rows[0].figure.h} px); waiting (${waiting.length}): on the shelf ${waitingOnShelf.length}, in rooms ${waitingInRooms.length}; asleep (${asleep.length}): on the shelf ${asleepOnShelf.length}, in rooms ${asleepInRooms.length}; lane x ${sh.rect.x.toFixed(0)}..${(sh.rect.x + sh.rect.w).toFixed(0)}, scene ends at ${A.right.toFixed(0)} (canvas ${canvasR.right.toFixed(0)}), overlap with ${labels.length} shown labels ${overLabels}, with figure targets ${overTargets}; own scroll: content ${sh.scroll.height} px in ${sh.scroll.client} px (${sh.scroll.overflowY}), wheel on the lane moved it to ${scrolled.scroll.top.toFixed(0)} and left the scene's zoom and pan alone ${sceneStill}; fold: ${folded.mode} (tab "${folded.tab}", saved "${foldedStore}", scene ${foldedArea.toFixed(0)} px wide against ${A.width.toFixed(0)}), unfold: ${unfolded.mode} (saved "${unfoldedStore}"); the server's list twice identical ${api1 === api2}; the shelf after a reload identical ${reloaded.rows.map(r => r.id).join() === idsBefore}`);
 
-    // ---- the details panel, from a shelf entry and from a figure in a room
-    const dw = () => ev(`(() => {
-      const d = document.querySelector('#drawer'), q = s => d.querySelector(s), t = s => (q(s) ? q(s).textContent.trim() : null), v = q('#dw-vscode'), c = q('#dw-copy');
-      return JSON.stringify({ on: d.classList.contains('on'), id: d.dataset.id, project: t('.dw-proj'), cname: t('.c-name'), title: t('.dw-title'), pill: t('.pill'), pillClass: q('.pill') && q('.pill').className, since: t('.pill .t'),
-        quotes: [...d.querySelectorAll('.quote')].map(x => x.textContent.trim()), heads: [...d.querySelectorAll('h6')].map(x => x.firstChild.textContent.trim()),
-        tools: [...d.querySelectorAll('.tbar')].map(x => x.querySelector('.nm').textContent + ':' + x.querySelector('.ct').textContent), mix: d.querySelectorAll('.mixbar i').length,
-        vscode: v && { href: v.getAttribute('href'), text: v.textContent.trim(), tag: v.tagName }, copy: c && { text: c.textContent.trim(), tag: c.tagName, id: c.dataset.id } });
-    })()`).then(JSON.parse);
-    const closeDrawer = async () => { await ev(`document.querySelector('#dw-close') && document.querySelector('#dw-close').click()`); await until(async () => !(JSON.parse(await ev(`JSON.stringify(document.querySelector('#drawer').classList.contains('on'))`)))); await sleep(400); };
+    // ---- the card, from a shelf entry and from a figure in a room
+    const card = () => P('p.card');
+    const closeCard = async () => { await ev(`document.querySelector('.of-card:not([hidden]) .oc-x') && document.querySelector('.of-card:not([hidden]) .oc-x').click()`); await sleep(150); };
     const rowCentre = id => ev(`(() => { const li = document.querySelector('.sh-list li[data-id="${id}"]'); li.scrollIntoView({ block: 'nearest' }); const b = li.getBoundingClientRect(); return { x: b.left + b.width / 2, y: b.top + b.height / 2 }; })()`);
 
     const target = expected.filter(e => e.kind === 'closed')[2];                                                                  // the third newest closed chat
     const tr = await rowCentre(target.id);
     await S.page.mouse.click(tr.x, tr.y);
-    const fromShelf = await until(async () => { const d = await dw(); return d.on && d.id === target.id ? d : null; }) || await dw();
+    const fromShelf = await until(async () => { const d = await card(); return d.open && d.id === target.id ? d : null; }) || await card();
     await sleep(500);
-    const shelfPanel = await dw();
-    // copy: the id lands on the clipboard and the button says so
+    const shelfPanel = await card();
+    // copy: from the menu of the open button; the id lands on the clipboard and the item says so
     await S.page.send('Emulation.setFocusEmulationEnabled', { enabled: true }).catch(() => {});                  // headless: the page counts as focused, so the clipboard can be read back
     await S.page.send('Browser.grantPermissions', { permissions: ['clipboardReadWrite', 'clipboardSanitizedWrite'], origin: `http://127.0.0.1:${S.srv.port}` }).catch(() => {});
-    const cp = await ev(`(() => { const b = document.querySelector('#dw-copy').getBoundingClientRect(); return { x: b.left + b.width / 2, y: b.top + b.height / 2 }; })()`);
-    await S.page.mouse.click(cp.x, cp.y);
+    const at = sel => ev(`(() => { const b = document.querySelector('${sel}').getBoundingClientRect(); return { x: b.left + b.width / 2, y: b.top + b.height / 2 }; })()`);
+    await S.page.mouse.click((await at('.of-card .oc-caret')).x, (await at('.of-card .oc-caret')).y);
+    await sleep(200);
+    const menuShown = await ev(`!document.querySelector('.of-card .oc-menu').hidden`);
+    await S.page.mouse.click((await at('.of-card [data-copy="id"]')).x, (await at('.of-card [data-copy="id"]')).y);
     await sleep(500);
-    const afterCopy = await ev(`JSON.stringify({ flag: document.querySelector('#drawer').dataset.copied || null, text: document.querySelector('#dw-copy').textContent.trim() })`).then(JSON.parse);
+    const afterCopy = await ev(`JSON.stringify({ flag: document.querySelector('.of-card').dataset.copied || null, text: document.querySelector('.of-card [data-copy="id"]').textContent.trim() })`).then(JSON.parse);
     const clip = await ev(`navigator.clipboard.readText().then(t => ({ ok: true, text: t }), e => ({ ok: false, err: String(e) }))`);
-    await closeDrawer();
+    await closeCard();
 
     // a figure in a room
     await P('p.freeze(true)');
@@ -575,31 +569,33 @@ if (want('shelf')) {
       const f = await P(`p.agentCss(${JSON.stringify(a.id)})`);
       if (!f || f.x < 20 || f.y < 20 || f.x > A2.width - 20 || f.y > A2.height - 20) continue;
       const x = A2.left + f.x, y = A2.top + f.y;
-      if (!(await ev(`(()=>{const e=document.elementFromPoint(${x},${y}); return !!e && !e.closest('.px-l, .of-ctl, .of-hud, .of-shelf, #drawer, header, #attention')})()`))) continue;
+      if (!(await ev(`(()=>{const e=document.elementFromPoint(${x},${y}); return !!e && !e.closest('.px-l, .of-ctl, .of-hud, .of-shelf, .of-card, header, #attention')})()`))) continue;
       fig = { agent: a, x, y };
       break;
     }
     if (!fig) throw new Error('no figure of a room can be clicked without a label or control over it');
     await S.page.mouse.click(fig.x, fig.y);
-    const fromRoom = await until(async () => { const d = await dw(); return d.on && d.id === fig.agent.id ? d : null; }) || await dw();
+    const fromRoom = await until(async () => { const d = await card(); return d.open && d.id === fig.agent.id ? d : null; }) || await card();
     await sleep(500);
-    const roomPanel = await dw();
-    await closeDrawer();
+    const roomPanel = await card();
+    await closeCard();
     await P('p.freeze(false)');
 
     const prompt = `Please continue with: ${target.name}`;
-    const closedOk = shelfPanel.on && shelfPanel.id === target.id && shelfPanel.title === target.name && /^[\w-]+$/.test(shelfPanel.project || '') && /^Closed\s*\d+(s|m|h|d)/.test(shelfPanel.pill || '') && /closed/.test(shelfPanel.pillClass || '') &&
+    const vs = id => `vscode://anthropic.claude-code/open?session=${id}`;
+    const closedOk = shelfPanel.open && shelfPanel.id === target.id && shelfPanel.title === target.name && /^[\w-]+/.test(shelfPanel.world || '') && /^Closed\s*\d+(s|m|h|d)/.test(shelfPanel.pill || '') && /closed/.test(shelfPanel.pillClass || '') &&
       /^\d+(s|m|h|d)/.test(shelfPanel.since || '') && shelfPanel.quotes.includes(prompt) && shelfPanel.quotes.some(q => q.startsWith(`Finished: ${target.name}`)) &&
-      ['Read:1', 'Edit:1', 'Bash:1'].every(x => shelfPanel.tools.includes(x)) && shelfPanel.mix >= 3 && shelfPanel.heads.length >= 3 &&
-      !!shelfPanel.vscode && shelfPanel.vscode.tag === 'A' && shelfPanel.vscode.href === `vscode://anthropic.claude-code/open?session=${target.id}` && shelfPanel.vscode.text === 'Open in VS Code' &&
-      !!shelfPanel.copy && shelfPanel.copy.tag === 'BUTTON' && shelfPanel.copy.id === target.id && /^Copy session id$/.test(shelfPanel.copy.text);
-    const liveOk = roomPanel.on && roomPanel.id === fig.agent.id && roomPanel.cname === fig.agent.name && !!roomPanel.title && /^[\w-]+$/.test(roomPanel.project || '') && /\d+(s|m|h|d)/.test(roomPanel.since || '') && !!roomPanel.pill &&
-      roomPanel.quotes.length >= 1 && roomPanel.tools.length >= 1 &&
-      !!roomPanel.vscode && roomPanel.vscode.href === `vscode://anthropic.claude-code/open?session=${fig.agent.id}` && roomPanel.vscode.text === 'Open in VS Code' && !!roomPanel.copy && roomPanel.copy.id === fig.agent.id;
-    const copyOk = afterCopy.flag === target.id && afterCopy.text === 'Copied' && clip.ok && clip.text === target.id;
+      ['Read 1', 'Edit 1', 'Bash 1'].every(x => shelfPanel.toolsList.includes(x)) && shelfPanel.mix >= 3 && shelfPanel.facts.includes('Folder') &&
+      shelfPanel.mainHref === vs(target.id) && shelfPanel.mainText === 'Open in VS Code' && shelfPanel.side === 'left' && !shelfPanel.hint &&
+      shelfPanel.items.map(i => i.kind).join() === 'vscode,desktop,terminal,copy-cmd,copy-id' && shelfPanel.items.find(i => i.kind === 'copy-id').copyText === target.id;
+    const liveOk = roomPanel.open && roomPanel.id === fig.agent.id && roomPanel.title === fig.agent.name && /^[\w-]+/.test(roomPanel.world || '') && /\d+(s|m|h|d)/.test(roomPanel.since || '') && !!roomPanel.pill &&
+      roomPanel.quotes.length >= 1 && roomPanel.toolsList.length >= 1 && roomPanel.mainHref === vs(fig.agent.id) && roomPanel.mainText === 'Open in VS Code' && roomPanel.hint;
+    const copyOk = menuShown && afterCopy.flag === target.id && afterCopy.text === 'Copied' && clip.ok && clip.text === target.id;
     check('16-details',
       closedOk && liveOk && copyOk && S.page.errors.length === 0,
-      `shelf entry "${target.name.slice(0, 40)}": panel opened for ${shelfPanel.id === target.id ? 'the same id' : 'ANOTHER id'}, title "${(shelfPanel.title || '').slice(0, 40)}", project ${shelfPanel.project}, status "${shelfPanel.pill}" (time since ${shelfPanel.since}), headings [${shelfPanel.heads.join(' | ')}], last prompt "${(shelfPanel.quotes[0] || '').slice(0, 44)}", last reply "${(shelfPanel.quotes[1] || '').slice(0, 44)}", tool mix ${shelfPanel.mix} segments [${shelfPanel.tools.join(', ')}], VS Code ${shelfPanel.vscode ? `<${shelfPanel.vscode.tag} href="${shelfPanel.vscode.href}"> "${shelfPanel.vscode.text}"` : 'missing'}, copy ${shelfPanel.copy ? `<${shelfPanel.copy.tag}> "${shelfPanel.copy.text}"` : 'missing'}; after the copy click the button says "${afterCopy.text}", flag ${afterCopy.flag === target.id}, clipboard ${clip.ok ? `"${clip.text}"` : 'unreadable: ' + clip.err}; figure in a room (${fig.agent.status}, "${fig.agent.name.slice(0, 30)}"): panel opened for ${roomPanel.id === fig.agent.id ? 'the same id' : 'ANOTHER id'}, chat name ${roomPanel.cname === fig.agent.name ? 'in full' : 'DIFFERENT'}, project ${roomPanel.project}, status "${roomPanel.pill}", ${roomPanel.quotes.length} quote(s), tools [${roomPanel.tools.slice(0, 3).join(', ')}], VS Code href ${roomPanel.vscode && roomPanel.vscode.href}, copy ${roomPanel.copy ? roomPanel.copy.text : 'missing'}; console errors ${S.page.errors.length}`);
+      `shelf entry "${target.name.slice(0, 40)}": card opened for ${shelfPanel.id === target.id ? 'the same id' : 'ANOTHER id'}, title "${(shelfPanel.title || '').slice(0, 40)}", ${shelfPanel.world}, status "${shelfPanel.pill}" (time since ${shelfPanel.since}), last prompt "${(shelfPanel.quotes[0] || '').slice(0, 44)}", last reply "${(shelfPanel.quotes[1] || '').slice(0, 44)}", tools [${(shelfPanel.toolsList || []).join(' | ')}], ${shelfPanel.mix} tool bar segments, main button "${shelfPanel.mainText}" ${shelfPanel.mainHref === vs(target.id) ? 'linking to the VS Code extension URL of the id' : 'WITH ANOTHER LINK ' + shelfPanel.mainHref}, menu [${(shelfPanel.items || []).map(i => i.kind).join(', ')}], to the left of its row (${shelfPanel.side}); ` +
+      `copy session id from the menu: ${afterCopy.text}, clipboard ${clip.ok ? (clip.text === target.id ? 'equals the id' : 'WRONG ' + clip.text) : 'unreadable ' + clip.err}; ` +
+      `figure in a room "${(fig.agent.name || '').slice(0, 30)}": card for ${roomPanel.id === fig.agent.id ? 'the same id' : 'ANOTHER id'}, title ${roomPanel.title === fig.agent.name}, status "${roomPanel.pill}", ${roomPanel.quotes.length} quotes, ${(roomPanel.toolsList || []).length} tools, link ${roomPanel.mainHref === vs(fig.agent.id)}, hint about a running chat ${roomPanel.hint}; errors ${S.page.errors.length}`);
 
     // a live session that closes while the page is open goes on the shelf at once and leaves its room
     const victim = live.find(a => a.status === 'working');
@@ -732,6 +728,153 @@ if (want('landscape')) {
   check('19-landscape', rows.every(r => r.bad.length === 0 && r.fills && r.noSky && r.errors === 0 && r.info.outer.drawn > 600 && r.info.build < 150),
     rows.map(r => `${r.n} agents: ${r.probes} views (${r.zooms.length} zooms, ${r.zooms.join(', ')}, x 5 pan positions, the four corners of the pan range among them) with ${r.bad.length ? 'UNCOVERED ' + r.bad.join('; ') : 'no uncovered pixel'}; the world (${r.info.world.x1 - r.info.world.x0} x ${r.info.world.y1 - r.info.world.y0} px) fills the canvas at the lowest zoom ${r.fills}; ${r.info.outer.drawn} decor sprites baked outside the garden (${r.info.outer.dropped} dropped where they touched it); build ${r.info.build} ms (limit 150); errors ${r.errors}`).join(' | ') +
     `; no sky element or sky function ${rows.every(r => r.noSky)}`);
+}
+
+// ---- 20. the card: a click on an agent opens a glass card next to it (no drawer, no dimming), with the Open button and its menu; it follows the
+// agent through pan and zoom, closes with Esc, its cross or a click on empty ground, and a click on another agent moves it
+if (want('card')) {
+  const S = await scenario(10, { tag: 'card', query: '?time=12:00', fixture: { closed: 12 } });
+  try {
+    const P = e => S.page.evaluate(px(e)), ev = e => S.page.evaluate(e);
+    const sleepFrames = () => sleep(450);                                           // the scheduler draws at most 10 frames a second
+    const area = await ev(`document.querySelector('#view-ofis .of-area').getBoundingClientRect().toJSON()`);
+    // a link of the card must never be followed in the QA browser: vscode://, claude:// and claude-cli:// would start real programs
+    await ev(`document.addEventListener('click', e => { if (e.target.closest && e.target.closest('.of-card a')) e.preventDefault(); }, true)`);
+    const free = (x, y) => ev(`(()=>{const e=document.elementFromPoint(${x},${y}); return !!e && !e.closest('.px-l, .of-ctl, .of-hud, .of-shelf, .of-card, header, #attention')})()`);
+    const roomed = S.agents.filter(a => a.kind === 'main' && a.status !== 'dormant');
+    const spots = [];
+    await P('p.freeze(true)');
+    for (const a of roomed) {
+      const f = await P(`p.agentCss(${JSON.stringify(a.id)})`);
+      if (!f || f.x < 60 || f.y < 60 || f.x > area.width - 60 || f.y > area.height - 60) continue;
+      if (await free(area.left + f.x, area.top + f.y)) spots.push({ agent: a, x: area.left + f.x, y: area.top + f.y });
+    }
+    if (spots.length < 2) throw new Error('fewer than two figures can be clicked without a label or control over them');
+    const [A] = spots;
+    const mouseAway = async () => { await S.page.mouse.move(area.left + 6, area.top + area.height - 6); await sleepFrames(); };
+    const card = () => P('p.card');
+    const closeCard = async () => { await ev(`document.querySelector('.of-card:not([hidden]) .oc-x') && document.querySelector('.of-card:not([hidden]) .oc-x').click()`); await sleep(150); };
+    const inside = (r, b, m = 0) => r.x >= b.left + m && r.y >= b.top + m && r.x + r.w <= b.left + b.width - m && r.y + r.h <= b.top + b.height - m;
+    const hits = (r, f) => r.x < area.left + f.x + 12 && r.x + r.w > area.left + f.x - 12 && r.y < area.top + f.y + 12 && r.y + r.h > area.top + f.y - 12;
+
+    // 1. a click opens the card next to the agent, in the Atlas style, with nothing dimmed and no drawer
+    const rings0 = await P('p.effects.rings'), pan0 = await P('p.pan'), zoomStart = await P('p.zoom');
+    await S.page.mouse.click(A.x, A.y);
+    await mouseAway();
+    const c1 = await card(), fA = await P(`p.agentCss(${JSON.stringify(A.agent.id)})`);
+    const look = await ev(`(() => {
+      const c = document.querySelector('.of-card'), cs = getComputedStyle(c), sc = document.querySelector('#scrim'), d = document.querySelector('#drawer');
+      const corner = (x, y) => { const e = document.elementFromPoint(x, y); return e ? (e.closest('.of-stage') ? 'stage' : e.className.toString().slice(0, 20) || e.tagName) : 'none'; };
+      const r = document.querySelector('#view-ofis .of-area').getBoundingClientRect();
+      return JSON.stringify({ bg: cs.backgroundColor, blur: cs.backdropFilter || cs.webkitBackdropFilter, border: cs.borderTopColor + ' ' + cs.borderTopWidth, radius: cs.borderTopLeftRadius,
+        scrim: sc.classList.contains('on'), drawer: d.classList.contains('on'), drawerOpen: d.getBoundingClientRect().left < innerWidth - 1 && d.classList.contains('on'),
+        corners: [corner(r.left + 4, r.top + 4), corner(r.right - 4, r.top + 4), corner(r.left + 4, r.bottom - 4)], role: c.getAttribute('role'), label: c.getAttribute('aria-label') });
+    })()`).then(JSON.parse);
+    const ringOn = await P('p.effects.rings');
+    const openOk = c1.open && c1.id === A.agent.id && ['right', 'left'].includes(c1.side) && inside(c1.rect, area, 0) && !hits(c1.rect, fA) && c1.title === A.agent.name && c1.mainText === 'Open in VS Code' && !c1.away;
+    const styleOk = /rgba\(9, 12, 28, 0\.8\)/.test(look.bg) && /blur\(10px\)/.test(look.blur) && /rgba\(196, 208, 255, 0\.32\) 1px/.test(look.border) && look.radius === '18px' && !look.scrim && !look.drawer && look.corners.every(c => c === 'stage') && look.role === 'dialog' && look.label === A.agent.name;
+
+    // 2. it follows the agent: pan the scene, then zoom; the card keeps its place beside the agent and never covers it
+    const rel0 = { dx: c1.rect.x - (area.left + fA.x), dy: c1.rect.y - (area.top + fA.y), side: c1.side };
+    await S.page.mouse.drag(area.left + 30, area.top + area.height - 30, area.left + 75, area.top + area.height - 55);
+    await sleepFrames(); await mouseAway();
+    const c2 = await card(), fA2 = await P(`p.agentCss(${JSON.stringify(A.agent.id)})`);
+    const moved = Math.hypot(fA2.x - fA.x, fA2.y - fA.y);
+    const followed = c2.open && !c2.away && (c2.side !== rel0.side || (Math.abs((c2.rect.x - (area.left + fA2.x)) - rel0.dx) <= 3 && Math.abs((c2.rect.y - (area.top + fA2.y)) - rel0.dy) <= 3 && moved > 5));
+    const zoom0 = await P('p.zoom');
+    await P(`p.setZoom(${zoom0 + 1}, ${area.width}, ${area.height})`);
+    await sleepFrames(); await mouseAway();
+    const c3 = await card(), fA3 = await P(`p.agentCss(${JSON.stringify(A.agent.id)})`);
+    const zoomOk = c3.open && inside(c3.rect, area, 0) && (c3.away || !hits(c3.rect, fA3));
+    await P(`p.setZoom(${zoomStart})`); await P(`p.setPan(${pan0[0]}, ${pan0[1]})`); await sleepFrames();      // back where the clicks below expect the agents
+
+    // 3. the Open button: the remembered choice is the main button, the menu lists the others; choosing one is remembered (across a reload too)
+    const caret = async () => ev(`(() => { const b = document.querySelector('.of-card .oc-caret').getBoundingClientRect(); return { x: b.left + b.width / 2, y: b.top + b.height / 2 }; })()`);
+    const cb = await caret();
+    await S.page.mouse.click(cb.x, cb.y);
+    await sleep(200);
+    const menu1 = await card();
+    await sleep(2200);                                                                   // the page refreshes the card while the chat runs: an open menu stays open
+    const menu2 = await card();
+    const termPos = await ev(`(() => { const b = document.querySelector('.of-card [data-kind="terminal"]').getBoundingClientRect(); return { x: b.left + b.width / 2, y: b.top + b.height / 2 }; })()`);
+    await S.page.mouse.click(termPos.x, termPos.y);
+    await sleep(500);
+    const stored = await ev(`localStorage.getItem('ajan-ofisi.open')`);
+    const c4 = await card();
+    const cwd = (S.agents.find(a => a.id === A.agent.id) || {}).cwd;
+    const termHref = `claude-cli://open?cwd=${encodeURIComponent(cwd)}&q=${encodeURIComponent('/resume ' + A.agent.id)}`;
+    const menuOk = menu1.menuOpen && menu2.menuOpen && menu1.items.map(i => i.kind).join() === 'vscode,desktop,terminal,copy-cmd,copy-id' && menu1.items[1].href === `claude://resume?session=${A.agent.id}` &&
+      menu1.items[3].copyText === `cd '${cwd}' && claude --resume ${A.agent.id}` && stored === 'terminal' && c4.mainKind === 'terminal' && c4.mainHref === termHref && /Terminal/.test(c4.mainText) && !c4.menuOpen;
+
+    // 4. closing: Esc closes the menu first and then the card; the cross; a click on empty ground; another agent moves the card
+    const cb2 = await caret();
+    await S.page.mouse.click(cb2.x, cb2.y); await sleep(150);
+    const menuAgain = (await card()).menuOpen;
+    const esc = () => S.page.send('Input.dispatchKeyEvent', { type: 'keyDown', key: 'Escape', code: 'Escape', windowsVirtualKeyCode: 27 }).then(() => S.page.send('Input.dispatchKeyEvent', { type: 'keyUp', key: 'Escape', code: 'Escape', windowsVirtualKeyCode: 27 }));
+    await esc(); await sleep(150);
+    const afterEsc1 = await card();
+    await esc(); await sleep(150);
+    const afterEsc2 = await card();
+    await sleepFrames();
+    const ringsOff = await P('p.effects.rings');
+    await S.page.mouse.click(A.x, A.y); await mouseAway();
+    const reopened = await card();
+    const x = await ev(`(() => { const b = document.querySelector('.of-card .oc-x').getBoundingClientRect(); return { x: b.left + b.width / 2, y: b.top + b.height / 2 }; })()`);
+    await S.page.mouse.click(x.x, x.y); await sleep(150);
+    const afterX = await card();
+    await S.page.mouse.click(A.x, A.y); await mouseAway();
+    await S.page.mouse.click(area.left + 8, area.top + area.height - 8); await sleep(400);
+    const afterEmpty = await card();
+    await S.page.mouse.click(A.x, A.y); await mouseAway();
+    let other = null;                                                                     // another agent that the open card does not cover
+    for (const sp of spots.filter(q => q.agent.id !== A.agent.id)) if (await free(sp.x, sp.y)) { other = sp; break; }
+    if (!other) throw new Error('every other agent is under the card');
+    await S.page.mouse.click(other.x, other.y); await mouseAway();
+    const afterOther = await card();
+    const closeOk = menuAgain && afterEsc1.open && !afterEsc1.menuOpen && !afterEsc2.open && reopened.open && !afterX.open && !afterEmpty.open && afterOther.open && afterOther.id === other.agent.id;
+
+    // 5. a subagent chip switches to the subagent's card, which opens its parent chat; "All details" still opens the side panel (the drawer)
+    let subOk = false, subInfo = 'no subagent chip';
+    const parents = new Set(S.agents.filter(a => a.kind === 'sub').map(a => a.id.split(':')[0]));
+    const withSubs = spots.find(q => parents.has(q.agent.id));
+    if (withSubs) {
+      await closeCard();
+      await P('p.freeze(true)');
+      await S.page.mouse.click(withSubs.x, withSubs.y); await mouseAway();
+    }
+    const subChip = await ev(`(() => { const b = document.querySelector('.of-card [data-sub]'); if (!b) return null; const r = b.getBoundingClientRect(); return { x: r.left + r.width / 2, y: r.top + r.height / 2, id: b.dataset.sub }; })()`);
+    if (subChip) {
+      await S.page.mouse.click(subChip.x, subChip.y); await sleep(300);
+      const cs = await card();
+      const parent = subChip.id.split(':')[0];
+      subOk = cs.open && cs.id === subChip.id && cs.title.startsWith('↳') && cs.mainText === 'Open the chat' && cs.mainKind === 'terminal' && cs.mainHref.includes(encodeURIComponent('/resume ' + parent));       // the remembered choice (Terminal, from step 3) opens the parent chat
+      subInfo = `${subChip.id.slice(-12)}: title "${cs.title}", button "${cs.mainText}" (${cs.mainKind}) → the parent ${parent.slice(-8)}`;
+    }
+    const more = await ev(`(() => { const b = document.querySelector('.of-card .oc-more').getBoundingClientRect(); return { x: b.left + b.width / 2, y: b.top + b.height / 2 }; })()`);
+    await S.page.mouse.click(more.x, more.y); await sleep(700);
+    const drawerOn = await ev(`JSON.stringify({ on: document.querySelector('#drawer').classList.contains('on'), id: document.querySelector('#drawer').dataset.id })`).then(JSON.parse);
+    await ev(`document.querySelector('#scrim').click()`); await sleep(500);
+    const moreOk = drawerOn.on && !!drawerOn.id;
+    await P('p.freeze(false)');
+
+    // 6. remembered after a reload; a chat that closes while its card is open closes the card
+    await S.page.goto(`http://127.0.0.1:${S.srv.port}/?time=12:00&proj=${proj}&season=${season}#ofis`, 1500);
+    await waitReady(S.page, 9);
+    await sleep(600);
+    const area2 = await ev(`document.querySelector('#view-ofis .of-area').getBoundingClientRect().toJSON()`);
+    const f2 = await P(`p.agentCss(${JSON.stringify(A.agent.id)})`);
+    await S.page.mouse.click(area2.left + f2.x, area2.top + f2.y); await sleep(500);
+    const afterReload = await card();
+    await P('p.freeze(false)');
+    const reloadOk = afterReload.open ? afterReload.mainKind === 'terminal' : false;
+
+    check('20-card', openOk && styleOk && followed && zoomOk && menuOk && closeOk && subOk && moreOk && reloadOk && ringOn > rings0 && ringsOff === rings0 && S.page.errors.length === 0,
+      `click on "${A.agent.name.slice(0, 30)}": card ${c1.open ? 'open' : 'NOT open'} on the ${c1.side} of the agent for the right id ${c1.id === A.agent.id}, inside the scene ${inside(c1.rect, area, 0)}, not covering the agent ${!hits(c1.rect, fA)}, title ${c1.title === A.agent.name}, button "${c1.mainText}"; ` +
+      `style: background ${look.bg}, blur ${look.blur}, border ${look.border}, radius ${look.radius}, role ${look.role}; no scrim ${!look.scrim}, no drawer ${!look.drawer}, the corners of the scene are still the scene (${look.corners.join(',')}); selection ring ${ringOn} drawn (${rings0} before, ${ringsOff} after closing); ` +
+      `pan: the agent moved ${moved.toFixed(0)} px and the card ${followed ? 'went with it' : 'DID NOT follow'}; zoom ${zoom0 + 1}: inside ${inside(c3.rect, area, 0)}, not covering ${!hits(c3.rect, fA3)}; ` +
+      `menu: ${menu1.menuOpen} open, still open after 2.2 s ${menu2.menuOpen}, items [${(menu1.items || []).map(i => i.kind).join(', ')}], choosing Terminal stored "${stored}" and the main button reads "${c4.mainText}" (${c4.mainHref === termHref}); after a reload the main button is ${afterReload.mainKind}; ` +
+      `Esc closes the menu then the card (${afterEsc1.open && !afterEsc1.menuOpen}, ${!afterEsc2.open}), cross ${!afterX.open}, empty ground ${!afterEmpty.open}, another agent moves it ${afterOther.open && afterOther.id === other.agent.id}; subagent: ${subInfo}; "All details" opens the side panel ${moreOk}; errors ${S.page.errors.length}`);
+  } finally { await S.done(); }
 }
 
 // ---- 12. seasons: every outdoor id resolves, the pictures differ, the automatic season follows the date and the hemisphere
@@ -965,7 +1108,7 @@ if (shotsDir) {
         const f = await P(`p.agentCss(${JSON.stringify(a.id)})`);
         if (!f || f.x < 20 || f.y < 20 || f.x > A.width - 20 || f.y > A.height - 20) continue;
         const x = A.left + f.x, y = A.top + f.y;
-        if (!(await ev(`(()=>{const e=document.elementFromPoint(${x},${y}); return !!e && !e.closest('.px-l, .of-ctl, .of-hud, .of-shelf, #drawer, header, #attention')})()`))) continue;
+        if (!(await ev(`(()=>{const e=document.elementFromPoint(${x},${y}); return !!e && !e.closest('.px-l, .of-ctl, .of-hud, .of-shelf, .of-card, header, #attention')})()`))) continue;
         hit = { x, y };
         break;
       }

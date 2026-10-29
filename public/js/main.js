@@ -139,6 +139,7 @@ export function evTipHtml(ev, agent) {
 const ctx = {
   store, tip, evTipHtml, statusPill, activityHtml, subRow, drawSpark, clockDur, counts,
   openDrawer: id => openDrawer(id),
+  closedAgent, copyText,                      // the card of the Office view shows closed chats like the drawer does and copies like it
   // extras: latest cost summary ({progress, scannedAt, totals}) and view switching
   cost: null,
   setView: name => setView(name),

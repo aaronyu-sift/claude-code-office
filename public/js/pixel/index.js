@@ -15,6 +15,7 @@ import { resolveWeather, planFor, createField, drawRainbow, rainbowFor, PARTICLE
 import { createLabelLayer, placeLabels } from './labels.js';
 import { shelfEntries, isShelved } from './shelf.js';
 import { createShelfView } from './shelf-view.js';
+import { createAgentCard } from './card.js';
 import { ZOOMS, fitZoom, minZoom, stepZoom, centerPan, clampPan, zoomAbout } from './input.js';
 
 const FIT_ICON = '<svg class="ic" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M2.5 6V2.5H6M10 2.5h3.5V6M13.5 10v3.5H10M6 13.5H2.5V10"/></svg>';
@@ -119,7 +120,7 @@ export function createPixelOffice(root, ctx, opts = {}) {
       if (wx.u !== unit() || wx.w !== wxCanvas.width || wx.h !== wxCanvas.height) { updateWeather(); drewWeather = true; }        // zoom or size changed
       if (moves) {
         scene.draw(g, view, t, anim, light);
-        if (labelsDirty) { labelsDirty = false; placeLabelsNow(); }
+        if (labelsDirty) { labelsDirty = false; placeLabelsNow(); card.place(); }
         const dt = performance.now() - t0;
         if (stats.awaitFrame) { stats.awaitFrame = false; stats.firstFrameMs = dt; }
         frameTimes.push(dt);
@@ -224,8 +225,31 @@ export function createPixelOffice(root, ctx, opts = {}) {
   // ---------------------------------------------------------- the shelf
   // Chats without a room: asleep ones (they leave their room) and closed ones (the server's list). shelf.js decides who and in which order,
   // shelf-view.js draws the lane beside the scene; a click opens the same details panel as a click on a figure.
-  const shelf = createShelfView({ root, area, msg, fmtShort, now: () => store.now(), open: id => { ctx.tip.hide(); ctx.openDrawer(id); }, storage });
+  const shelf = createShelfView({ root, area, msg, fmtShort, now: () => store.now(), open: (id, row) => { ctx.tip.hide(); card.open(id, row); }, storage });
   const syncShelf = () => shelf.update(shelfEntries({ agents: [...store.agents.values()], closed: store.closed || [] }));
+
+  // ---------------------------------------------------------- the card
+  // A click on an agent, on a room's floor (its main agent) or on a row of the shelf opens a card next to it (card.js): no drawer, no dimming. The
+  // card is placed in the coordinates of `root`; the agent's place comes from the scene (it follows pan and zoom), a shelf row's from the page.
+  const rel = r => { const b = root.getBoundingClientRect(); return { x: r.left - b.left, y: r.top - b.top, w: r.width, h: r.height }; };
+  function anchorOf(id, row) {
+    const shelfRow = el => ({ ...rel(el.getBoundingClientRect()), kind: 'shelf', prefer: 'left' });
+    if (row && row.isConnected) return shelfRow(row);
+    const f = scene && layout ? scene.figureInfo(id) : null;
+    if (f) {
+      const { zoom, panX, panY, dpr } = view, a = rel(area.getBoundingClientRect());
+      const w = Math.max(f.w * zoom / dpr, MIN_TARGET), h = Math.max(f.h * zoom / dpr, MIN_TARGET);
+      return { x: a.x + (f.cx * zoom + panX) / dpr - w / 2, y: a.y + (f.cy * zoom + panY) / dpr - h / 2, w, h, kind: 'scene', prefer: 'right' };
+    }
+    const own = root.querySelector(`.sh-list li[data-id="${CSS.escape(id)}"] button`);
+    return own ? shelfRow(own) : null;
+  }
+  const boundsOf = kind => {
+    const b = root.getBoundingClientRect(), a = rel(area.getBoundingClientRect());
+    return kind === 'shelf' ? { x0: 0, y0: 0, x1: b.width, y1: b.height } : { x0: a.x, y0: a.y, x1: a.x + a.w, y1: a.y + a.h };
+  };
+  const card = createAgentCard({ root, ctx, storage, anchorOf, boundsOf, onSelect: id => { if (scene) { scene.setSelected(id); redraw(false); } } });
+  const openAgent = id => { ctx.tip.hide(); card.open(id); };
 
   // ---------------------------------------------------------- store -> rooms and seats
   function mains() {
@@ -533,14 +557,14 @@ export function createPixelOffice(root, ctx, opts = {}) {
 
   function click(e, target) {
     const lab = target && target.closest ? target.closest('.px-l[data-id]') : null;
-    if (lab && area.contains(lab)) { ctx.tip.hide(); ctx.openDrawer(lab.dataset.id); return; }
+    if (lab && area.contains(lab)) { openAgent(lab.dataset.id); return; }
     const r = area.getBoundingClientRect();
     const h = pickAt(e.clientX - r.left, e.clientY - r.top);
-    if (!h) return;
-    if (h.t === 'agent') { ctx.tip.hide(); ctx.openDrawer(h.id); return; }
+    if (!h) { card.close(); return; }
+    if (h.t === 'agent') { openAgent(h.id); return; }
     // a single click on empty floor opens the main agent of the room; wait briefly so a double click can reset the view instead
     clearTimeout(clickTimer);
-    clickTimer = setTimeout(() => { ctx.tip.hide(); ctx.openDrawer(h.id); }, 240);
+    clickTimer = setTimeout(() => openAgent(h.id), 240);
   }
   area.addEventListener('dblclick', e => {
     if (e.target.closest('.of-ctl, .of-shelf-tab')) return;
@@ -571,6 +595,7 @@ export function createPixelOffice(root, ctx, opts = {}) {
     if (frozen) return;
     try {
       if (store.ready) syncShelf();
+      card.refresh();
       if (!scene) { renderSum(); return; }
       if (!store.ready) { renderSum(); return; }
       syncRooms();
@@ -609,6 +634,7 @@ export function createPixelOffice(root, ctx, opts = {}) {
   root.__pixel = {
     get zoom() { return view.zoom; }, get dpr() { return view.dpr; }, get size() { return [view.w, view.h]; }, get autoFit() { return autoFit; },
     get pan() { return [view.panX, view.panY]; }, get proj() { return proj.name; }, get buildMs() { return +lastBuildMs.toFixed(2); },
+    get card() { return card.read(); },
     get stats() { return { ...sched.stats }; }, resetStats() { sched.resetStats(); frameTimes.length = 0; stamps.length = 0; },
     // average frame rate between the first and the last frame since the last reset: n frames span n - 1 intervals
     frameRate() { const n = stamps.length; return n < 2 ? { frames: n, spanMs: 0, fps: 0 } : { frames: n, spanMs: +(stamps[n - 1] - stamps[0]).toFixed(1), fps: +(((n - 1) * 1000) / (stamps[n - 1] - stamps[0])).toFixed(2) }; },
@@ -745,6 +771,7 @@ export function createPixelOffice(root, ctx, opts = {}) {
       clearTimeout(clickTimer);
       clearTimeout(expiry);
       ctx.tip.hide();
+      card.close();
     },
     update() { if (visible) sync(); },
     get projection() { return proj.name; },
