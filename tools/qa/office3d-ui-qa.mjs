@@ -306,6 +306,15 @@ if (want('shelf')) {
     const TOTAL = expected.length, ids = sh => sh.rows.map(r => r.id).join(), want_ = n => expected.slice(0, n).map(e => e.id).join();
     await until(async () => (await T.shelf()).total === TOTAL, 15000, 250);
     const v0 = await T.view();
+    // where the zoom buttons are: their gaps to the right and bottom edges of the view, and (card open) the room between the card's bottom edge and the top of the buttons
+    const cornerOf = TT => TT.ev(`(() => { const v = document.querySelector('#view-ofis').getBoundingClientRect(), bs = [...document.querySelectorAll('.of-ctl button')].map(b => b.getBoundingClientRect()), last = bs[bs.length - 1], top = Math.min(...bs.map(b => b.top)), h = document.querySelector('.of-shelf'), hb = h.hidden ? null : h.getBoundingClientRect();
+      return JSON.stringify({ gapR: +(v.right - last.right).toFixed(2), gapB: +(v.bottom - last.bottom).toFixed(2), cardGap: hb ? +(top - hb.bottom).toFixed(2) : null }); })()`).then(JSON.parse);
+    const sameCorner = (what, open, folded, want) => {
+      if (Math.abs(open.gapR - folded.gapR) > 0.5 || Math.abs(open.gapB - folded.gapB) > 0.5) bad.push(`${what}: the zoom buttons are ${open.gapR}/${open.gapB} px from the right/bottom edge with the shelf open and ${folded.gapR}/${folded.gapB} folded (they must not move)`);
+      if (Math.abs(folded.gapR - want) > 1.5 || Math.abs(folded.gapB - want) > 1.5) bad.push(`${what}: the zoom buttons are ${folded.gapR}/${folded.gapB} px from the corner, not ${want}`);
+      if (open.cardGap == null || open.cardGap < 9.5) bad.push(`${what}: the card does not end above the buttons with the gap (${open.cardGap} px between them)`);
+    };
+    const cornerRows = [];
 
     // 1. ?shelf=5: exactly the 5 newest, the footer says so and offers ten more; the asleep chat has no room; waiting chats are in their rooms
     const a = await T.shelf();
@@ -325,7 +334,8 @@ if (want('shelf')) {
     // 2. the zoom buttons are right under the card in the same column, outside the scene's box
     const col = await T.ev(`(() => { const h = document.querySelector('.of-shelf'), c = document.querySelector('.of-ctl'), hb = h.getBoundingClientRect(), cb = c.getBoundingClientRect(), sb = document.querySelector('.of-side').getBoundingClientRect();
       return JSON.stringify({ sibling: h.nextElementSibling === c, inSide: h.parentElement.classList.contains('of-side') && c.parentElement === h.parentElement, inArea: !!document.querySelector('.of-area').contains(c), below: cb.top - hb.bottom, within: cb.left >= hb.left - 0.5 && cb.right <= hb.right + 0.5 && hb.right <= sb.right + 0.5 }); })()`).then(JSON.parse);
-    if (!col.sibling || !col.inSide || col.inArea || col.below < -0.5 || col.below > 24 || !col.within) bad.push(`the zoom buttons are not right under the card in its column: ${JSON.stringify(col)}`);
+    if (!col.sibling || !col.inSide || col.inArea || col.below < 9.5 || !col.within) bad.push(`the zoom buttons are not under the card in its column, with the gap: ${JSON.stringify(col)}`);
+    const openCorner = await cornerOf(T);
 
     // 3. the button adds ten rows (here the 8 that are left) and the footer is gone when nothing is left out
     await T.click('.sh-more-btn');
@@ -357,7 +367,8 @@ if (want('shelf')) {
     await T.settle();
     const folded = await T.shelf(), foldedGeo = await T.ev(`(() => { const v = document.querySelector('#view-ofis').getBoundingClientRect(), bs = [...document.querySelectorAll('.of-ctl button')].map(b => b.getBoundingClientRect()), last = bs[bs.length - 1], a = document.querySelector('.of-area').getBoundingClientRect(); return JSON.stringify({ gapR: v.right - last.right, gapB: v.bottom - last.bottom, area: a.width, view: v.width, inArea: bs.some(b => document.querySelector('.of-area').contains(document.elementFromPoint(b.left + b.width / 2, b.top + b.height / 2)) && !document.elementFromPoint(b.left + b.width / 2, b.top + b.height / 2).closest('.of-ctl')) }); })()`).then(JSON.parse);
     eq('folded', [folded.mode, folded.hidden, folded.tabHidden, folded.tab], ['collapsed', true, false, `Shelf · ${TOTAL}`]);
-    if (Math.abs(foldedGeo.gapR - 16) > 1.5 || Math.abs(foldedGeo.gapB - 16) > 1.5 || Math.abs(foldedGeo.area - foldedGeo.view) > 1) bad.push(`folded: the zoom buttons are ${foldedGeo.gapR.toFixed(1)} px from the right and ${foldedGeo.gapB.toFixed(1)} px from the bottom (want 16), the scene is ${foldedGeo.area.toFixed(0)} of ${foldedGeo.view.toFixed(0)} px wide`);
+    sameCorner('1500px', openCorner, await cornerOf(T), 16);
+    if (Math.abs(foldedGeo.area - foldedGeo.view) > 1) bad.push(`folded: the scene is ${foldedGeo.area.toFixed(0)} of ${foldedGeo.view.toFixed(0)} px wide`);
     eq('the map after folding', await T.view(), v0);
     eq('the fold is remembered', await T.ev(`localStorage.getItem('ajan-ofisi.shelf')`), 'closed');
     await T.click('.of-shelf-tab');
@@ -380,6 +391,12 @@ if (want('shelf')) {
       const hits = [...g.figs.map(o => ({ what: 'figure', o })), ...g.labels.map(o => ({ what: 'label', o }))].filter(({ o, what }) => under(o, what));
       if (g.mode !== 'open') bad.push(`${w}px: the shelf is ${g.mode}`);
       if (hits.length) bad.push(`${w}px: ${hits.length} figures or labels lie under the card, the buttons or the bar: ${hits.slice(0, 3).map(({ what, o }) => `${what}${o.cls ? ' ' + o.cls : ''} at ${o.x.toFixed(0)},${o.y.toFixed(0)} ${o.w.toFixed(0)}x${o.h.toFixed(0)} under ${under(o, what)}`).join('; ')}`);
+      const cOpen = await cornerOf(T);
+      await T.click('.sh-hide'); await until(async () => (await T.shelf()).mode === 'collapsed', 3000, 100); await T.settle();
+      const cFold = await cornerOf(T);
+      await T.click('.of-shelf-tab'); await until(async () => (await T.shelf()).mode === 'open', 3000, 100); await T.settle();
+      sameCorner(`${w}px`, cOpen, cFold, 16);
+      cornerRows.push(`${w}: ${cOpen.gapR}/${cOpen.gapB} open, ${cFold.gapR}/${cFold.gapB} folded`);
       geoRows.push(`${w}: card ${g.host.x.toFixed(0)}..${(g.host.x + g.host.w).toFixed(0)} x ${g.host.y.toFixed(0)}..${(g.host.y + g.host.h).toFixed(0)}, ${g.figs.length} figures and ${g.labels.length} labels shown, ${hits.length} of them under the card, the buttons or the bar, zoom ${g.zoom.toFixed(1)}`);
     }
     await S.page.setViewport(VIEW.w, VIEW.h, 1);
@@ -406,6 +423,8 @@ if (want('shelf')) {
         eq(`${w}px: the tab opens the card`, [g1.mode, g1.hidden, g1.tabHidden, g1.rows.length], ['open', false, true, 5]);
         if (!over.card || !over.buttons || over.x < -0.5 || over.r > over.vw + 0.5) bad.push(`${w}px: the opened card or the buttons are covered or leave the window: ${JSON.stringify(over)}`);
         eq(`${w}px: the map after unfolding`, await TN.view(), nv0);
+        sameCorner(`${w}px`, await cornerOf(TN), { gapR: corner.gapR, gapB: corner.gapB }, wantGap);
+        cornerRows.push(`${w}: ${corner.gapR.toFixed(0)}/${corner.gapB.toFixed(0)} folded, ${(await cornerOf(TN)).gapR}/${(await cornerOf(TN)).gapB} open`);
         narrowRows.push(`${w}: folded at first, tab "${g0.tab}", buttons ${corner.gapR.toFixed(0)}/${corner.gapB.toFixed(0)} px from the corner, the tab opens a card ${over.r - over.x > 0 ? (over.r - over.x).toFixed(0) : '?'} px wide over the scene`);
         if (errorsOf(N.page)) bad.push(`${w}px: ${errorsOf(N.page)} console errors`);
       } finally { await N.done(); }
@@ -413,7 +432,7 @@ if (want('shelf')) {
 
     check('3d-shelf', bad.length === 0 && errorsOf(S.page) === 0,
       `${bad.length ? 'FAILED: ' + bad.slice(0, 6).join('; ') + '; ' : ''}${live.length} live (${asleep.length} asleep) + ${S.fx.closed.length} closed chats = ${TOTAL} on the shelf; ?shelf=5: ${a.rows.length} rows, the 5 newest by time ${ids(a) === want_(5)}, "${a.count}", footer "${a.foot.text}" with "${a.foot.button}"; the asleep chat has no room (${inScene.rooms.length} rooms for ${live.length - asleep.length} awake chats), waiting chats stay in theirs; figures drawn in every row (${a.rows[0].figure.w}x${a.rows[0].figure.h} px); ` +
-      `the zoom buttons ${col.below.toFixed(0)} px under the card in the same column; "${a.foot.button}" → ${b.rows.length} rows, no footer; a row opens the card to its left (${rowCard.side}) for "${(rowCard.title || '').slice(0, 30)}" with the VS Code link of its id ${rowOk}; the wheel on the list scrolled it to ${scrolled.scroll.top.toFixed(0)} and left the map alone; folded: tab "${folded.tab}", buttons ${foldedGeo.gapR.toFixed(0)}/${foldedGeo.gapB.toFixed(0)} px from the corner, map unchanged by folding and unfolding; ${geoRows.join('; ')}; narrow windows: ${narrowRows.join('; ')}; console errors ${errorsOf(S.page)}`);
+      `the zoom buttons ${col.below.toFixed(0)} px below the card in the same column, always in the corner (${openCorner.gapR}/${openCorner.gapB} px from the right/bottom edge, open and folded); "${a.foot.button}" → ${b.rows.length} rows, no footer; a row opens the card to its left (${rowCard.side}) for "${(rowCard.title || '').slice(0, 30)}" with the VS Code link of its id ${rowOk}; the wheel on the list scrolled it to ${scrolled.scroll.top.toFixed(0)} and left the map alone; folded: tab "${folded.tab}", buttons ${foldedGeo.gapR.toFixed(0)}/${foldedGeo.gapB.toFixed(0)} px from the corner, map unchanged by folding and unfolding; ${geoRows.join('; ')}; narrow windows: ${narrowRows.join('; ')}; the zoom buttons' gaps to the right/bottom edge (px) do not change when the shelf opens or folds: ${cornerRows.join('; ')}; console errors ${errorsOf(S.page)}`);
   } finally { await S.done(); }
 }
 
@@ -577,6 +596,44 @@ if (want('motion')) {
     check('3d-motion', bad.length === 0 && errorsOf(S.page) === 0,
       bad.length ? `FAILED: ${bad.join('; ')}` :
       `tokens equal motion.js (${names.map(n => `${n} ${SPRING[n].duration} s/bounce ${SPRING[n].bounce} = ${SPRING[n].ms} ms`).join(', ')}); the card comes out of its agent (${side} side) on the enter spring: ${inMove.duration} ms, travel ${SLIDE} px and growth from ${SCALE}, a quarter of the way through the curve it is at ${pts[12].toFixed(2)} and it peaks at ${Math.max(...pts).toFixed(3)}, fade ${inFade.duration} ms; it glides to another agent on the glide spring (${SPRING.glide.ms} ms); the menu pops on the pop spring; the card leaves on the leave spring (${outMove.duration} ms, no bounce) and takes no clicks while it leaves; the details card and the shelf card use the same springs, as does the card of a shelf row; the camera (zoom and the place of the world on the screen, ${v0}) was identical after every one of these; reduced motion: ${fadeOf(inR).duration} ms fade, no travel, no menu pop; console errors ${errorsOf(S.page)}`);
+  } finally { await S.done(); }
+}
+
+// ---- --shots <dir>: pictures for a look by eye (the card beside an agent, the shelf and the buttons at 1024 and 1500 px, folded, narrow, the side card, the selection ring close up)
+if (shotsDir) {
+  mkdirSync(shotsDir, { recursive: true });
+  const S = await scenario3d(10, { tag: 'shots', query: '?shelf=10', fixture: { closed: 12 } });
+  try {
+    const T = tools(S);
+    const snap = async (file, clip) => { await sleep(500); await S.page.send('Page.captureScreenshot', { format: 'png', ...(clip ? { clip: { ...clip, scale: 1 } } : {}) }).then(r => import('node:fs').then(fs => fs.writeFileSync(join(shotsDir, file), Buffer.from(r.data, 'base64')))); console.log('SHOT', join(shotsDir, file)); };
+    if (!S.ready) throw new Error('the scene did not become ready');
+    await snap('3d-ui-1-fit-1500.png');
+    const waiting = S.roomed.find(a => a.status === 'waiting' || a.status === 'ask'), working = S.roomed.find(a => a.status === 'working');
+    const o = await T.openAgent((working || S.roomed[0]).id);
+    await T.settle(); await S.page.mouse.move(8, 880); await sleep(600);
+    await snap('3d-ui-2-card-beside-agent.png');
+    if (o) { const box = await T.O(`u.agentBox(${JSON.stringify((working || S.roomed[0]).id)})`); await snap('3d-ui-3-selection-ring-closeup.png', { x: Math.max(0, box.cx - 110), y: Math.max(0, box.cy - 90), width: 220, height: 200 }); }
+    await T.ev(`document.querySelector('.of-card .oc-caret').click()`); await sleep(500);
+    await snap('3d-ui-4-open-menu.png');
+    await T.esc(); await T.esc(); await sleep(400);
+    if (waiting) { await T.openAgent(waiting.id); await T.settle(); await S.page.mouse.move(8, 880); await sleep(500); await snap('3d-ui-5-waiting-agent-card.png'); }
+    const row = (await T.shelf()).rows[1];
+    await T.click(`.sh-list li[data-id="${row.id}"] .sh-item`); await T.settle(); await S.page.mouse.move(8, 880); await sleep(500);
+    await snap('3d-ui-6-shelf-row-card.png');
+    await T.ev(`document.querySelector('.of-card .oc-more').click()`); await sleep(900);
+    await snap('3d-ui-7-all-details-side-card.png');
+    await T.click('#dw-close'); await sleep(600);
+    await T.click('.sh-hide'); await T.settle(); await sleep(500);
+    await snap('3d-ui-8-shelf-folded-corner-buttons.png');
+    await T.click('.of-shelf-tab'); await T.settle();
+    await S.page.setViewport(1024, 900, 1); await sleep(1800);
+    await snap('3d-ui-9-shelf-1024.png');
+    await S.page.setViewport(700, 900, 1); await sleep(1800);
+    await T.ev(`document.querySelector('#view-ofis').__ofisUi.setShelfFolded(true)`); await sleep(900);
+    await snap('3d-ui-10-narrow-700-folded.png');
+    await T.ev(`document.querySelector('#view-ofis').__ofisUi.setShelfFolded(false)`); await sleep(900);
+    await snap('3d-ui-11-narrow-700-shelf.png');
+    await S.page.setViewport(VIEW.w, VIEW.h, 1);
   } finally { await S.done(); }
 }
 
