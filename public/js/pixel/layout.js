@@ -14,7 +14,7 @@ export const G = Object.freeze({
   COL_W: 48,                       //   about 8 voxels from the same sight line, so the pitches of the desk grid (COL_W here, the row pitch and
                                    //   the room depth in the Projection: 3 rows of desks and a 48 deep entrance) are chosen with
   EAST: 16,                        //   test/occlusion in tools/qa (at most 15 percent of an agent hidden)
-  ROWS: 3, FRONT: 32,
+  ROWS: 3, ENTRY: 32,
   COLS: [1, 2, 4],                 // desk columns per room class, 3 desks per column
   SHADOW: 44,                      // how far a tall wall hides the ground behind it (along the sight line), in voxels
   MARGIN: 80,                      // grass around the building (the garden island)
@@ -128,7 +128,7 @@ function buildRoom(r, rooms, proj) {
     let id = theme === 'lab' ? 'floor_tile' : theme === 'studio' ? 'floor_wood' : (tx + ty) % 2 ? 'floor_felt_b' : 'floor_felt_a';
     if (lx < G.CHIEF_W && theme !== 'lab') id = 'floor_wood';
     if (theme === 'lounge' && lx >= W - 32 && ly >= D - 80) id = 'floor_checker';              // the kitchenette
-    if (lx >= doorX0 && lx < doorX1 && ly < G.FRONT) id = 'floor_tile';
+    if (lx >= doorX0 && lx < doorX1 && ly < G.ENTRY) id = 'floor_tile';
     floor.push(item(id, ox + lx, oy + ly, 0, { layer: 'floor', tint: id === 'floor_felt_a' || id === 'floor_felt_b' || id === 'floor_wood' }));
   }
 

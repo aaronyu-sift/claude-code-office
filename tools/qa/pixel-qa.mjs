@@ -7,7 +7,7 @@ import { mkdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { launchChrome, sleep } from './cdp.mjs';
 import { makeFixture } from './fixture.mjs';
-import { ROOT, VIEW, startServer, px, scenario } from './harness.mjs';
+import { ROOT, VIEW, startServer, px, waitReady, scenario as baseScenario } from './harness.mjs';
 import { countRows } from '../sprites/content-minimums.mjs';
 import { tmpdir } from 'node:os';
 
@@ -15,11 +15,14 @@ const args = process.argv.slice(2);
 const val = f => { const i = args.indexOf('--' + f); return i >= 0 ? args[i + 1] : undefined; };
 const proj = val('proj') || 'iso';
 const shotsDir = val('shots');
+const shotSet = val('set') || 'm3';          // which pictures --shots writes: m3 (both projections at 4, 10, 20 agents, a waiting agent) or m2 (garden, room, times)
 const results = [];
 function check(name, ok, detail) {
   results.push({ name, ok });
   console.log(`CHECK ${name} ${ok ? 'PASS' : 'FAIL'} ${detail}`);
 }
+// every scenario of this run uses the projection under test
+const scenario = (n, o = {}) => baseScenario(n, { proj, ...o });
 const overlap = (a, b) => a.x < b.x + b.w && a.x + a.w > b.x && a.y < b.y + b.h && a.y + a.h > b.y;
 const NIGHT = '?time=22:00';              // the worst case for drawing: tint, glows, stars and every light on
 
@@ -38,8 +41,8 @@ if (want('manifest')) {
   check('09-manifest-ids', bad.length === 0 && Object.keys(man.sprites).length >= 60, `${Object.keys(man.sprites).length} sprites, matching river|car|road|traffic: ${bad.length ? bad.join(',') : 'none'}`);
   // the content lists of plan section 5 (counting rule in the plan) and the rule that only small items animate
   const rows = countRows(man), unmet = rows.filter(r => !r.met);
-  const P = man.projections[proj].sprites, big = Object.entries(man.sprites).filter(([id, s]) => (s.tags.includes('sway') || s.tags.includes('steam')) && P[id].rects.some(([, , w, h]) => w > 32 || h > 48));
-  check('09-content-minimums', unmet.length === 0 && big.length === 0, `${rows.length} rows of the section 5 table, met ${rows.length - unmet.length}${unmet.length ? ' (unmet: ' + unmet.map(r => `${r.row} ${r.actual}/${r.min}`).join('; ') + ')' : ''}; animated sprites (sway, steam) larger than 32 x 48 px: ${big.length ? big.map(b => b[0]).join(',') : 'none'}`);
+  const P = man.projections[proj].sprites, big = Object.entries(man.sprites).filter(([id, s]) => (s.tags.includes('sway') || s.tags.includes('steam')) && P[id].rects.some(([, , w, h]) => w > 36 || h > 48));
+  check('09-content-minimums', unmet.length === 0 && big.length === 0, `${rows.length} rows of the section 5 table, met ${rows.length - unmet.length}${unmet.length ? ' (unmet: ' + unmet.map(r => `${r.row} ${r.actual}/${r.min}`).join('; ') + ')' : ''}; animated sprites (sway, steam) larger than 36 x 48 px: ${big.length ? big.map(b => b[0]).join(',') : 'none'}`);
 }
 
 // ---- 1 to 5 at N = 4, 10, 20
@@ -150,7 +153,7 @@ if (perN[20]) {
     // ambient animation: only small things move, through the one scheduler; nothing at all in the picture is animated beyond these counts
     const nf = night.fx, df = noon.fx;
     check('06-ambient', df.steam > 0 && df.swayed > 0 && df.butterflies >= 1 && df.butterflies <= 4 && df.birds >= 1 && df.birds <= 2 && nf.butterflies === 0 && nf.birds === 0 && nf.steam > 0 && Object.keys(nf.lights).length >= 3 && night.active.includes('ambient'),
-      `N=20 at noon: ${df.steam} steam plumes, ${df.swayed} plants and trees swaying, ${df.butterflies} butterflies (limit 4), ${df.birds} birds (limit 2); at night ${nf.butterflies} butterflies, ${nf.birds} birds, ${nf.steam} steam plumes, monitor flicker over ${nf.lights.monitor || 0} monitors; every moving sprite is at most 32 x 48 px (check 09); sources ${JSON.stringify(night.active)}; frame rate and hidden behaviour in check 06-frame-budget`);
+      `N=20 at noon: ${df.steam} steam plumes, ${df.swayed} plants and trees swaying, ${df.butterflies} butterflies (limit 4), ${df.birds} birds (limit 2); at night ${nf.butterflies} butterflies, ${nf.birds} birds, ${nf.steam} steam plumes, monitor flicker over ${nf.lights.monitor || 0} monitors; every moving sprite is at most 36 x 48 px (check 09); sources ${JSON.stringify(night.active)}; frame rate and hidden behaviour in check 06-frame-budget`);
 
     // 11 (cost). Re-tint: a new time of day costs one re-tint, never more than one per minute, nothing on pan, zoom and redraws.
     // Sweep the evening, when the light changes every minute, and take the largest JavaScript time of the re-tint plus
@@ -352,36 +355,99 @@ if (want('gallery')) {
   } finally { await S.done(); }
 }
 
-// ---- pictures for the review folder (--shots <dir>): garden, a room at zoom 3, 20 agents at fit, a waiting agent, one scene at four times
+// ---- projection toggle: header buttons, ?proj=, and the choice persists across a reload
+if (want('projection')) {
+  const S = await baseScenario(4, { tag: 'projtoggle', query: '?time=12:00' });                  // no ?proj= and a fresh profile: nothing stored yet
+  try {
+    const P = e => S.page.evaluate(px(e));
+    const base = `http://127.0.0.1:${S.srv.port}/`;
+    const state = async () => S.page.evaluate(`(() => { const p = document.querySelector('#view-ofis').__pixel, seg = document.querySelector('#proj-seg'); return JSON.stringify({ proj: p.proj, attr: document.querySelector('#view-ofis').dataset.proj, shown: !seg.hidden, pressed: [...seg.querySelectorAll('button')].filter(b => b.getAttribute('aria-pressed') === 'true').map(b => b.dataset.proj), stored: localStorage.getItem('ajan-ofisi.proj'), figures: p.figures().length, westWall: p.layout ? p.layout.rooms[0].walls.west : null, url: location.search }); })()`).then(JSON.parse);
+    const settle = async want_ => { for (let k = 0; k < 60; k++) { const st = await state().catch(() => null); if (st && st.proj === want_ && st.figures > 0) { await sleep(300); return state(); } await sleep(150); } return state(); };
+    const load = async query => { await S.page.goto(base + query + '#ofis', 800); await waitReady(S.page, 4); return state(); };
+    const click = async which => { const r = await S.page.evaluate(`(() => { const b = document.querySelector('#proj-seg button[data-proj="${which}"]').getBoundingClientRect(); return { x: b.left + b.width / 2, y: b.top + b.height / 2 }; })()`); await S.page.mouse.click(r.x, r.y); };
+    const s0 = await state();
+    await click('front');
+    const s1 = await settle('front');
+    const drawn = await P('(p.redraw(), p.counts.entries)');
+    const s2 = await load('');                                                                   // reload without ?proj=: the stored choice
+    const s3 = await load('?proj=iso');                                                          // a URL override wins and is not stored
+    const s4 = await load('?proj=front');
+    await click('iso');
+    const s5 = await settle('iso');
+    const s6 = await load('');
+    const s7 = await load('?proj=front&time=12:00');
+    const errs = S.page.errors.length;
+    check('ux-projection', s0.proj === 'iso' && s0.shown && s0.pressed.join() === 'iso' && s0.westWall === 'tall' &&
+      s1.proj === 'front' && s1.attr === 'front' && s1.pressed.join() === 'front' && s1.stored === 'front' && s1.westWall === 'low' && s1.figures === s0.figures && drawn > 0 &&
+      s2.proj === 'front' && s2.pressed.join() === 'front' &&
+      s3.proj === 'iso' && s3.stored === 'front' && s4.proj === 'front' && s4.stored === 'front' &&
+      s5.proj === 'iso' && s5.stored === 'iso' && s6.proj === 'iso' && s6.pressed.join() === 'iso' &&
+      s7.proj === 'front' && s7.stored === 'iso' && errs === 0,
+      `fresh profile, no ?proj=: ${s0.proj} (toggle shown ${s0.shown}, pressed ${s0.pressed}, west wall ${s0.westWall}); click Front: ${s1.proj} (pressed ${s1.pressed}, stored "${s1.stored}", west wall ${s1.westWall}, ${s1.figures} figures, ${drawn} sprites drawn); reload with no ?proj=: ${s2.proj}; ?proj=iso: ${s3.proj} (stored stays "${s3.stored}"); ?proj=front: ${s4.proj}; click Isometric: ${s5.proj} (stored "${s5.stored}"); reload: ${s6.proj}; ?proj=front over stored iso: ${s7.proj} (stored "${s7.stored}"); console errors ${errs}`);
+  } finally { await S.done(); }
+}
+
+// ---- pictures for the review folder (--shots <dir> [--set m3|m2])
 if (shotsDir) {
   mkdirSync(shotsDir, { recursive: true });
   const snap = async (S, file) => { await S.page.mouse.move(2, 2); await sleep(900); await S.page.screenshot(join(shotsDir, file)); console.log('SHOT', file); };
-  const S10 = await scenario(10, { tag: 'shots', dpr: 2, query: '?time=12:00' });
-  try {
-    const P = e => S10.page.evaluate(px(e));
-    const mains = S10.agents.filter(a => a.kind === 'main'), waiting = mains.find(a => a.status === 'waiting' || a.status === 'ask');
-    for (const [t, file] of [['06:00', 'm2-0600.png'], ['12:00', 'm2-1200.png'], ['18:30', 'm2-1830.png'], ['22:00', 'm2-2200.png']]) {
-      await P(`p.setTime(${+t.slice(0, 2) * 60 + +t.slice(3)})`);
-      await sleep(400);
-      await snap(S10, file);
+  if (shotSet === 'm3') {
+    // M3: this projection with 4, 10 and 20 agents at fit, and a waiting agent with its light at zoom 4 (dusk); the first run also takes the old 3D scene
+    for (const n of [4, 10, 20]) {
+      const S = await scenario(n, { tag: 'shots' + n, dpr: 2, query: '?time=12:00' });
+      try {
+        await snap(S, `m3-${proj}-n${n}.png`);
+        if (n === 10) {
+          const P = e => S.page.evaluate(px(e)), waiting = S.agents.find(a => a.kind === 'main' && (a.status === 'waiting' || a.status === 'ask'));
+          await P('p.setTime(1110)');
+          await P('p.setZoom(4)');
+          await P(`(() => { const r = p.layout.rooms.find(q => q.id === ${JSON.stringify(waiting.id)}); return p.centerOnWorld(r.chiefPos.x, r.chiefPos.y, 16); })()`);
+          await sleep(400);
+          await snap(S, `m3-${proj}-waiting.png`);
+        }
+      } finally { await S.done(); }
     }
-    await P('p.setTime(720)');
-    await P('p.setZoom(3)');
-    await P(`p.centerOnRoom(${JSON.stringify(mains[2].id)})`);
-    await sleep(400);
-    await snap(S10, 'm2-room-zoom3.png');
-    await P('p.setZoom(4)');
-    await P('(() => { const b = p.layout.building; return p.centerOnWorld(b.x1 + 46, (b.y0 + b.y1) / 2 + 12, 6); })()');
-    await sleep(400);
-    await snap(S10, 'm2-garden.png');
-    await P('p.setTime(1110)');
-    await P('p.setZoom(4)');
-    await P(`(() => { const r = p.layout.rooms.find(q => q.id === ${JSON.stringify(waiting.id)}); return p.centerOnWorld(r.chiefPos.x, r.chiefPos.y, 16); })()`);
-    await sleep(400);
-    await snap(S10, 'm2-waiting.png');
-  } finally { await S10.done(); }
-  const S20 = await scenario(20, { tag: 'shots20', dpr: 2, query: '?time=12:00' });
-  try { await snap(S20, 'm2-n20-fit.png'); } finally { await S20.done(); }
+    if (proj === 'iso') {                                                                   // "before": the three.js scene this replaces, same 10 agents
+      const dir = join(tmpdir(), `cco-qa-${process.pid}-before`);
+      const fx = await makeFixture({ dir, n: 10 });
+      const srv = await startServer(dir);
+      const page = await launchChrome({ width: VIEW.w, height: VIEW.h, dpr: 2 });
+      try {
+        await page.goto(`http://127.0.0.1:${srv.port}/?scene=3d#ofis`, 9000);
+        await page.mouse.move(2, 2);
+        await sleep(1500);
+        await page.screenshot(join(shotsDir, 'm3-before-3d-n10.png'));
+        console.log('SHOT m3-before-3d-n10.png');
+      } finally { await page.close(); srv.stop(); fx.cleanup(); }
+    }
+  } else {
+    const S10 = await scenario(10, { tag: 'shots', dpr: 2, query: '?time=12:00' });
+    try {
+      const P = e => S10.page.evaluate(px(e));
+      const mains = S10.agents.filter(a => a.kind === 'main'), waiting = mains.find(a => a.status === 'waiting' || a.status === 'ask');
+      for (const [t, file] of [['06:00', 'm2-0600.png'], ['12:00', 'm2-1200.png'], ['18:30', 'm2-1830.png'], ['22:00', 'm2-2200.png']]) {
+        await P(`p.setTime(${+t.slice(0, 2) * 60 + +t.slice(3)})`);
+        await sleep(400);
+        await snap(S10, file);
+      }
+      await P('p.setTime(720)');
+      await P('p.setZoom(3)');
+      await P(`p.centerOnRoom(${JSON.stringify(mains[2].id)})`);
+      await sleep(400);
+      await snap(S10, 'm2-room-zoom3.png');
+      await P('p.setZoom(4)');
+      await P('(() => { const b = p.layout.building; return p.centerOnWorld(b.x1 + 46, (b.y0 + b.y1) / 2 + 12, 6); })()');
+      await sleep(400);
+      await snap(S10, 'm2-garden.png');
+      await P('p.setTime(1110)');
+      await P('p.setZoom(4)');
+      await P(`(() => { const r = p.layout.rooms.find(q => q.id === ${JSON.stringify(waiting.id)}); return p.centerOnWorld(r.chiefPos.x, r.chiefPos.y, 16); })()`);
+      await sleep(400);
+      await snap(S10, 'm2-waiting.png');
+    } finally { await S10.done(); }
+    const S20 = await scenario(20, { tag: 'shots20', dpr: 2, query: '?time=12:00' });
+    try { await snap(S20, 'm2-n20-fit.png'); } finally { await S20.done(); }
+  }
 }
 
 const failed = results.filter(r => !r.ok);

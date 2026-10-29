@@ -34,7 +34,7 @@ export async function waitReady(page, expectFigures, ms = 20000) {
   return false;
 }
 
-// opts: { tag, dpr, reducedMotion, fixture, query ('?time=22:00'), width, height, timezone ('Asia/Tokyo': the browser's local clock) }
+// opts: { tag, dpr, reducedMotion, fixture, query ('?time=22:00'), proj ('iso' | 'front', added to the query), width, height, timezone ('Asia/Tokyo': the browser's local clock) }
 export async function scenario(n, opts = {}) {
   const dir = join(tmpdir(), `cco-qa-${process.pid}-${n}${opts.tag || ''}`);
   const fx = await makeFixture({ dir, n, ...(opts.fixture || {}) });
@@ -44,7 +44,9 @@ export async function scenario(n, opts = {}) {
   try {
     if (opts.timezone) await page.send('Emulation.setTimezoneOverride', { timezoneId: opts.timezone });
     const agents = await apiAgents(srv.port);
-    await page.goto(`http://127.0.0.1:${srv.port}/${opts.query || ''}#ofis`, 800);
+    const q = new URLSearchParams(opts.query || '');
+    if (opts.proj) q.set('proj', opts.proj);
+    await page.goto(`http://127.0.0.1:${srv.port}/${q.size ? '?' + q : ''}#ofis`, 800);
     const ready = await waitReady(page, agents.filter(a => a.kind === 'main').length);
     return { fx, srv, page, agents, ready, done, dir };
   } catch (e) { await done(); throw e; }

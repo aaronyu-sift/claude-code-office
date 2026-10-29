@@ -66,3 +66,18 @@ test('screenBounds covers all corners of a box', () => {
   const f = screenBounds(FRONT, 0, 0, 96, 128, 30);
   near(f.w, 96); near(f.h, 0.75 * 128 + 30);
 });
+
+// The layout and the scene ask the Projection, they never look at which one it is.
+import { readFileSync, readdirSync } from 'node:fs';
+test('layout, scene and the other pixel modules do not branch on the projection name', () => {
+  const dir = new URL('../public/js/pixel/', import.meta.url);
+  const allowed = new Set(['projection.js', 'index.js', 'gallery.js']);      // the view chooses and stores a name, the gallery loads an atlas by name
+  const files = readdirSync(dir).filter(f => f.endsWith('.js') && !allowed.has(f));
+  assert.ok(files.includes('layout.js') && files.includes('scene.js'));
+  for (const f of files) {
+    const code = readFileSync(new URL(f, dir), 'utf8').split('\n').filter(l => !/^\s*\/\//.test(l)).join('\n');
+    assert.doesNotMatch(code, /['"`](iso|front)['"`]/, `${f} names a projection`);
+    assert.doesNotMatch(code, /proj(ection)?\.name\s*[!=]==?/, `${f} compares the projection name`);
+    assert.doesNotMatch(code, /\bFRONT\b/, `${f} uses the FRONT projection directly`);
+  }
+});
