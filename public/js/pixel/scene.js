@@ -1,6 +1,7 @@
-// Draws the pixel office. Two parts: a cached ground layer (grass, streets, floors, rugs: thousands of tiles drawn once per layout) and
-// the upright sprites (walls, furniture, desks, workers, trees), sorted back to front once and drawn on every frame that is needed,
-// culled to the view. Status effects (marker, balloons, light beam) are drawn on top in code.
+// Draws the pixel office. Two parts: a cached ground layer (grass, streets, floors, rugs, and the landscape far beyond the garden with its trees,
+// bushes and rocks: tens of thousands of tiles and sprites drawn once per layout) and the upright sprites of the building and the garden (walls,
+// furniture, desks, workers, trees), sorted back to front once and drawn on every frame that is needed, culled to the view. Status effects (marker,
+// balloons, light beam) are drawn on top in code. There is no sky: the ground covers the whole world (layout.js `world`) and the view stays inside it.
 //
 // The scene works in virtual pixels (zoom 1). The camera is a whole-number zoom plus a pan in device pixels, so every sprite lands on
 // the pixel grid and is scaled by an integer with nearest-neighbour sampling.
@@ -32,7 +33,8 @@ export function createScene({ atlas, proj }) {
   const fx = { beams: 0, markers: 0, waitBalloons: 0, zzBalloons: 0, doneBalloons: 0, rings: 0, bubbles: 0, steam: 0, butterflies: 0, birds: 0, swayed: 0, lights: {} };
   const img = atlas.image;
   const headRise = Math.round(-proj.toScreen(0, 0, 37.7)[1]);     // px from a seated figure's pivot to the top of its head (40 isometric, 38 front)
-  let layout = null, groundOut = null, groundIn = null, groundOutT = null, gx = 0, gy = 0, bounds = { x0: 0, y0: 0, x1: 1, y1: 1 }, fitBox = bounds;
+  let layout = null, groundOut = null, groundIn = null, groundOutT = null, gx = 0, gy = 0, gix = 0, giy = 0, bounds = { x0: 0, y0: 0, x1: 1, y1: 1 }, fitBox = bounds, world = bounds;
+  let baseColour = [96, 150, 70], outerDrawn = 0, outerDropped = 0;
   let entries = [], figs = [], roomById = new Map(), sortMs = 0, outdoorKey = '', pendingLight = null, ambientPts = { flowers: [], trees: [] };
   const actors = new Map();                     // `${roomId}:${slot}` -> { id, main, status, ap, name, since }
   let hoverId = null, quiet = false;             // quiet: draw no status effects (QA measures the light on the figures alone)
@@ -69,15 +71,21 @@ export function createScene({ atlas, proj }) {
     const fb = screenBounds(proj, bd.x0 - m, bd.y0 - m, bd.x1 + m, bd.y1 + m, 48);
     fitBox = { x0: Math.floor(fb.x0), y0: Math.floor(fb.y0) - 10, x1: Math.ceil(fb.x1), y1: Math.ceil(fb.y1) };
 
-    // ground layers: the garden (grass, street, pond) and the room floors (carpets, rugs) on two canvases, so the garden can be darker at night
-    gx = bounds.x0 - 8; gy = bounds.y0 - 8;
-    const gw = bounds.x1 - bounds.x0 + 16, gh = bounds.y1 - bounds.y0 + 16;
-    const layer = () => { const c = newCanvas(gw, gh), g = c.getContext('2d'); g.imageSmoothingEnabled = false; g.translate(-gx, -gy); return [c, g]; };
+    // ground layers: the landscape and the garden (grass, street, pond, far trees) and the room floors (carpets, rugs) on two canvases, so the
+    // landscape can be darker at night. The first covers the whole world (and the overhang of sprites at its edge), the second only the building.
+    world = { ...L.world };
+    const OVER = 64, ob = screenBounds(proj, bd.x0 - 16, bd.y0 - 16, bd.x1 + 16, bd.y1 + 16, 0);
+    gx = world.x0 - OVER; gy = world.y0 - OVER;
+    gix = Math.floor(ob.x0) - 4; giy = Math.floor(ob.y0) - 4;
+    const layer = (ox, oy, w, h) => { const c = newCanvas(w, h), g = c.getContext('2d'); g.imageSmoothingEnabled = false; g.translate(-ox, -oy); return [c, g]; };
     let gOut, gIn;
-    [groundOut, gOut] = layer(); [groundIn, gIn] = layer(); groundOutT = null;
+    [groundOut, gOut] = layer(gx, gy, world.x1 - world.x0 + 2 * OVER, world.y1 - world.y0 + 2 * OVER);
+    [groundIn, gIn] = layer(gix, giy, Math.ceil(ob.x1) + 4 - gix, Math.ceil(ob.y1) + 4 - giy);
+    groundOutT = null;
     const outFlat = [], inFlat = [];
     seasonal.drawn = seasonal.variants = seasonal.slots = 0;
     for (const t of L.outdoor.tiles) outFlat.push({ ...t, id: rid(t.id), w: 16, d: 16, facing: 0, order: 0 });
+    for (const t of L.outer.tiles) outFlat.push({ ...t, id: rid(t.id), w: 16, d: 16, facing: 0, order: 0 });
     for (const it of L.outdoor.items) if (it.layer === 'floor') outFlat.push({ ...it, id: rid(it.id), tint: null, order: 2 });
     for (const r of L.rooms) {
       for (const f of r.floor) inFlat.push({ ...f, tint: f.tint ? r.color : null, order: 1 });
@@ -140,8 +148,56 @@ export function createScene({ atlas, proj }) {
     entries = [];
     for (const w of depthSort(list.map(e => ({ ...e, bb: e, ref: e })), proj)) { entries.push(w.ref); if (w.ref.kids) for (const k of w.ref.kids) entries.push(k); }
     sortMs = performance.now() - t0;
+    bakeOuter(L, gOut);
+    baseColour = grassColour();
     rebuildFigures();
     if (pendingLight) retint(pendingLight); else groundOutT = null;
+  }
+
+  // The landscape beyond the garden is baked into the ground canvas: each piece goes where its picture touches no sprite of the garden or the building
+  // (a piece that would have to be sorted in among them is dropped), then flat pieces first and the rest from far to near.
+  function bakeOuter(L, g) {
+    const CELL = 128, grid = new Map(), cellKey = (cx, cy) => cx * 65599 + cy;
+    for (const e of entries) {
+      for (let cx = Math.floor(e.x0 / CELL); cx <= Math.floor(e.x1 / CELL); cx++) for (let cy = Math.floor(e.y0 / CELL); cy <= Math.floor(e.y1 / CELL); cy++) {
+        const k = cellKey(cx, cy);
+        let a = grid.get(k);
+        if (!a) grid.set(k, a = []);
+        a.push(e);
+      }
+    }
+    const touches = r => {
+      for (let cx = Math.floor(r.x0 / CELL); cx <= Math.floor(r.x1 / CELL); cx++) for (let cy = Math.floor(r.y0 / CELL); cy <= Math.floor(r.y1 / CELL); cy++) {
+        const a = grid.get(cellKey(cx, cy));
+        if (a) for (const e of a) if (e.x0 < r.x1 && e.x1 > r.x0 && e.y0 < r.y1 && e.y1 > r.y0) return true;
+      }
+      return false;
+    };
+    const list = [];
+    outerDropped = 0;
+    for (const it of L.outer.items) {
+      const id = rid(it.id);
+      if (!id) continue;
+      const [px, py] = centre(it), s = src(id, it.facing, px, py, null, 0);
+      if (!s) continue;
+      const flat = isFloor(it.id);
+      if (!flat && touches({ x0: s.dx - 2, y0: s.dy - 2, x1: s.dx + s.w + 2, y1: s.dy + s.h + 2 })) { outerDropped++; continue; }
+      list.push({ s, flat, key: proj.depthKey({ x0: it.x, y0: it.y, x1: it.x + it.w, y1: it.y + it.d }, 0) });
+    }
+    list.sort((p, q) => q.flat - p.flat || p.key - q.key);
+    for (const e of list) put(g, e.s);
+    outerDrawn = list.length;
+  }
+  // the average colour of the grass in this season: what shows where the ground canvas does not reach (a view larger than the world at every zoom level)
+  function grassColour() {
+    const s = atlas.sprite(rid('floor_grass_a') || 'floor_grass_a', 0);
+    if (!s) return baseColour;
+    const [rx, ry, rw, rh] = s.rect, c = newCanvas(rw, rh), cg = c.getContext('2d', { willReadFrequently: true });
+    cg.drawImage(img, rx, ry, rw, rh, 0, 0, rw, rh);
+    const d = cg.getImageData(0, 0, rw, rh).data;
+    let r = 0, gg = 0, b = 0, n = 0;
+    for (let i = 0; i < d.length; i += 4) if (d[i + 3] > 200) { r += d[i]; gg += d[i + 1]; b += d[i + 2]; n++; }
+    return n ? [Math.round(r / n), Math.round(gg / n), Math.round(b / n)] : baseColour;
   }
 
   // ---- actors (who sits where and what they do), set by index.js
@@ -214,14 +270,17 @@ export function createScene({ atlas, proj }) {
     g.imageSmoothingEnabled = false;
     g.globalAlpha = 1;
     g.globalCompositeOperation = 'source-over';
-    g.clearRect(0, 0, w, h);                                          // the sky is a canvas behind this one
+    g.clearRect(0, 0, w, h);                                          // the stage behind it is the colour of the grass
     fx.beams = fx.markers = fx.waitBalloons = fx.zzBalloons = fx.doneBalloons = fx.rings = fx.bubbles = fx.steam = fx.butterflies = fx.birds = fx.swayed = 0;
     fx.lights = {};
     if (!layout) return;
     g.setTransform(zoom, 0, 0, zoom, panX, panY);
     const vx0 = -panX / zoom, vy0 = -panY / zoom, vx1 = (w - panX) / zoom, vy1 = (h - panY) / zoom;
-    g.drawImage(groundOutT || groundOut, gx, gy);
-    g.drawImage(groundIn, gx, gy);
+    // only the part of each ground canvas that is in the view (the world is large: a whole-canvas draw would be scaled and clipped every frame)
+    for (const [c, ox, oy] of [[groundOutT || groundOut, gx, gy], [groundIn, gix, giy]]) {
+      const sx = Math.max(0, Math.floor(vx0 - ox)), sy = Math.max(0, Math.floor(vy0 - oy)), ex = Math.min(c.width, Math.ceil(vx1 - ox)), ey = Math.min(c.height, Math.ceil(vy1 - oy));
+      if (ex > sx && ey > sy) g.drawImage(c, sx, sy, ex - sx, ey - sy, ox + sx, oy + sy, ex - sx, ey - sy);
+    }
     const outStr = light && light.outStr;
     for (let i = 0; i < entries.length; i++) {
       const e = entries[i];
@@ -395,11 +454,18 @@ export function createScene({ atlas, proj }) {
     setAnimals(butterflies, birds) { animals.butterflies = !!butterflies; animals.birds = !!birds; },
     get seasonal() { return { season, ...seasonal }; },
     get bounds() { return bounds; },
+    get world() { return world; },
+    // the colour of the grass at the time of day: the stage colour behind the canvas, for a view larger than the world
+    stageColour(light = lastLight) {
+      const m = light && light.outStr ? /rgba\((\d+),(\d+),(\d+),([\d.]+)\)/.exec(light.outStr) : null, a = m ? +m[4] : 0;
+      return baseColour.map((v, i) => Math.round(v * (1 - a) + (m ? +m[i + 1] : 0) * a));
+    },
+    get outer() { return { drawn: outerDrawn, dropped: outerDropped }; },
     get fitBox() { return fitBox; },
     get effects() { return { ...fx }; },
     get sortMs() { return +sortMs.toFixed(2); },
     get layout() { return layout; },
-    get counts() { return { entries: entries.length, figures: figs.length, ground: layout ? layout.outdoor.tiles.length : 0 }; },
+    get counts() { return { entries: entries.length, figures: figs.length, ground: layout ? layout.outdoor.tiles.length + layout.outer.tiles.length : 0 }; },
     figureInfo(id, t = 0) {
       const f = figs.find(x => x.id === id);
       if (!f) return null;

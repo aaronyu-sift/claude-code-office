@@ -11,12 +11,11 @@ import { createScheduler } from './anim.js';
 import { ambient, rgba, fmtClock, createMinuteTicker } from './time.js';
 import { merge, load as loadSettings, save as saveSettings, clean as cleanSetting, timeMinutes } from './settings.js';
 import { seasonOfDate, dateKey, parseDateKey, lightMonth } from './season.js';
-import { resolveWeather, planFor, createField, drawRainbow, rainbowFor, skyFor, PARTICLE_CAP } from './weather.js';
-import { drawSky } from './lighting.js';
+import { resolveWeather, planFor, createField, drawRainbow, rainbowFor, PARTICLE_CAP } from './weather.js';
 import { createLabelLayer, placeLabels } from './labels.js';
 import { shelfEntries, isShelved } from './shelf.js';
 import { createShelfView } from './shelf-view.js';
-import { fitZoom, stepZoom, centerPan, clampPan, zoomAbout } from './input.js';
+import { ZOOMS, fitZoom, minZoom, stepZoom, centerPan, clampPan, zoomAbout } from './input.js';
 
 const FIT_ICON = '<svg class="ic" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M2.5 6V2.5H6M10 2.5h3.5V6M13.5 10v3.5H10M6 13.5H2.5V10"/></svg>';
 const DONE_MS = 4500;                 // a finished subagent stays at its desk this long
@@ -45,7 +44,7 @@ export function createPixelOffice(root, ctx, opts = {}) {
   // the scene (`area`) and the shelf lane beside it: pointer, wheel and size belong to the area, so the lane scrolls on its own
   root.innerHTML =
     '<div class="of-area">' +
-    '<div class="of-stage"><canvas class="of-sky"></canvas><canvas class="of-main"></canvas><canvas class="of-wx"></canvas></div><div class="of-layer"></div>' +
+    '<div class="of-stage"><canvas class="of-main"></canvas><canvas class="of-wx"></canvas></div><div class="of-layer"></div>' +
     '<div class="of-hud"><div class="of-sum"></div></div>' +
     '<div class="of-ctl">' +
     `<button type="button" data-z="in" title="${esc(msg('of.zoomIn'))}">+</button>` +
@@ -53,9 +52,9 @@ export function createPixelOffice(root, ctx, opts = {}) {
     `<button type="button" data-z="fit" title="${esc(msg('of.fit'))}">${FIT_ICON}</button></div>` +
     '<div class="of-empty" hidden></div></div>';
   const area = root.querySelector('.of-area');
-  const stage = root.querySelector('.of-stage'), canvas = stage.querySelector('.of-main'), skyCanvas = stage.querySelector('.of-sky');
+  const stage = root.querySelector('.of-stage'), canvas = stage.querySelector('.of-main');
   const layer = root.querySelector('.of-layer'), sumEl = root.querySelector('.of-sum'), emptyEl = root.querySelector('.of-empty');
-  const g = canvas.getContext('2d', { alpha: true });                   // transparent: the sky is a canvas behind it
+  const g = canvas.getContext('2d', { alpha: true });                   // the stage behind it has the colour of the grass: it shows only where the world does not reach
   const labels = createLabelLayer(layer);
 
   let atlas = null, scene = null, visible = false, loadFailed = false;
@@ -94,17 +93,18 @@ export function createPixelOffice(root, ctx, opts = {}) {
   const lightOf = a => ({ roomStr: a.room[3] > 0.004 ? rgba(a.room) : null, outStr: a.out[3] > 0.004 ? rgba(a.out) : null, lights: a.lights, phase: a.phase });
   const realClock = () => { const d = today(); return { minute: d.getHours() * 60 + d.getMinutes(), month: lightMonth(d.getMonth() + 1, settings.hemisphere) }; };
   const nowClock = () => (fixedMin == null ? realClock() : { minute: fixedMin, month: realClock().month });
-  function drawSkyNow() { if (amb) drawSky(skyCanvas, skyFor(amb, wx.weather)); }
+  // there is no sky: the colour behind the canvas is the grass at this time of day (what shows only in a view larger than the world at every zoom level)
+  function stageNow() { if (scene && light) stage.style.background = `rgb(${scene.stageColour(light).join(',')})`; }
   function applyTime(c, force = false) {
     const a = ambient(c.minute, c.month), L = lightOf(a);
-    const key = [L.roomStr, L.outStr, L.lights, a.stars, a.top, a.bottom, a.sun && a.sun.f, a.moon && a.moon.f].join('|');
+    const key = [L.roomStr, L.outStr, L.lights].join('|');
     stats.clockMin = c.minute; stats.month = c.month;
     if (!force && key === lightKey) return false;
     const phaseChanged = !amb || amb.phase !== a.phase;
     lightKey = key; amb = a; light = L;
     if (phaseChanged && wxReady) updateWeather();
     if (scene) { const ms = scene.retint(light); stats.retints++; stats.lastRetintMs = ms; stats.retintMs += ms; stats.awaitFrame = true; }
-    drawSkyNow();
+    stageNow();
     redraw(false);
     return true;
   }
@@ -170,7 +170,6 @@ export function createPixelOffice(root, ctx, opts = {}) {
     sched.setActive('weather', plan.count > 0);
     root.dataset.weather = weather || 'off';
     applyAnimals();
-    drawSkyNow();
     wxLast = 0;
     if (weather) drawWeather(performance.now()); else wxg.clearRect(0, 0, wxCanvas.width, wxCanvas.height);       // off: cleared once, never drawn again
   }
@@ -186,7 +185,7 @@ export function createPixelOffice(root, ctx, opts = {}) {
     if (s === season && !force) return false;
     season = s;
     root.dataset.season = s;
-    if (scene) { scene.setSeason(s, light); redraw(); }
+    if (scene) { scene.setSeason(s, light); stageNow(); redraw(); }
     updateWeather();
     return true;
   }
@@ -264,6 +263,7 @@ export function createPixelOffice(root, ctx, opts = {}) {
       const t0 = performance.now();
       layout = layoutOffice(items, proj);
       scene.setLayout(layout, light);
+      stageNow();
       lastBuildMs = performance.now() - t0;
       if (autoFit) fit(false);
       else clampView();
@@ -395,18 +395,33 @@ export function createPixelOffice(root, ctx, opts = {}) {
   }
 
   // ---------------------------------------------------------- camera
+  // The landscape ends at the edge of the world (layout.js), so the view stays inside it: the zoom never goes below the level at which the view fits in
+  // the world, and the pan never takes the view past its edge.
+  const zoomFloor = () => (scene && scene.layout ? minZoom(scene.world, view.w, view.h) : 1);
   function clampView() {
-    if (!scene) return;
-    [view.panX, view.panY] = clampPan([view.panX, view.panY], scene.bounds, view.zoom, view.w, view.h);
+    if (!scene || !scene.layout) return;
+    view.zoom = Math.max(view.zoom, zoomFloor());
+    [view.panX, view.panY] = clampPan([view.panX, view.panY], scene.world, view.zoom, view.w, view.h);
+    syncZoomButtons();
+  }
+  function syncZoomButtons() {
+    const lo = view.zoom <= zoomFloor(), hi = view.zoom >= ZOOMS[ZOOMS.length - 1];
+    for (const b of root.querySelectorAll('.of-ctl button[data-z]')) {
+      const off = (b.dataset.z === 'out' && lo) || (b.dataset.z === 'in' && hi);
+      b.disabled = off;
+      b.setAttribute('aria-disabled', String(off));
+    }
   }
   function fit(draw = true) {
     if (!scene || !scene.layout) return;
     const b = scene.fitBox;
-    view.zoom = fitZoom(b.x1 - b.x0, b.y1 - b.y0, view.w, view.h, 6 * view.dpr);
+    view.zoom = Math.max(fitZoom(b.x1 - b.x0, b.y1 - b.y0, view.w, view.h, 6 * view.dpr), zoomFloor());
     [view.panX, view.panY] = centerPan(b, view.zoom, view.w, view.h);
+    clampView();
     if (draw) redraw();
   }
   function setZoom(z, px, py) {
+    z = Math.max(z, zoomFloor());
     if (z === view.zoom) return;
     [view.panX, view.panY] = zoomAbout([view.panX, view.panY], view.zoom, z, px, py);
     view.zoom = z;
@@ -423,7 +438,6 @@ export function createPixelOffice(root, ctx, opts = {}) {
     canvas.width = w; canvas.height = h;
     wxCanvas.width = w; wxCanvas.height = h;
     updateWeather();
-    drawSkyNow();
     if (autoFit) fit(false); else clampView();
     redraw();
   }
@@ -486,7 +500,7 @@ export function createPixelOffice(root, ctx, opts = {}) {
       const d = Math.hypot(p1.x - p2.x, p1.y - p2.y) || 1, r = area.getBoundingClientRect();
       if (!pinch.done && (d / pinch.d > 1.3 || d / pinch.d < 0.77)) {
         pinch.done = true;
-        setZoom(stepZoom(view.zoom, d > pinch.d ? 1 : -1), ((p1.x + p2.x) / 2 - r.left) * view.dpr, ((p1.y + p2.y) / 2 - r.top) * view.dpr);
+        setZoom(stepZoom(view.zoom, d > pinch.d ? 1 : -1, zoomFloor()), ((p1.x + p2.x) / 2 - r.left) * view.dpr, ((p1.y + p2.y) / 2 - r.top) * view.dpr);
       }
       return;
     }
@@ -542,13 +556,13 @@ export function createPixelOffice(root, ctx, opts = {}) {
     const dir = wheelAcc < 0 ? 1 : -1;
     wheelAcc = 0;
     const r = area.getBoundingClientRect();
-    setZoom(stepZoom(view.zoom, dir), (e.clientX - r.left) * view.dpr, (e.clientY - r.top) * view.dpr);
+    setZoom(stepZoom(view.zoom, dir, zoomFloor()), (e.clientX - r.left) * view.dpr, (e.clientY - r.top) * view.dpr);
   }, { passive: false });
   root.querySelector('.of-ctl').addEventListener('click', e => {
     const b = e.target.closest('button');
     if (!b) return;
     if (b.dataset.z === 'fit') { autoFit = true; fit(); }
-    else setZoom(stepZoom(view.zoom, b.dataset.z === 'in' ? 1 : -1), view.w / 2, view.h / 2);
+    else setZoom(stepZoom(view.zoom, b.dataset.z === 'in' ? 1 : -1, zoomFloor()), view.w / 2, view.h / 2);
   });
 
   // ---------------------------------------------------------- sync
@@ -581,6 +595,7 @@ export function createPixelOffice(root, ctx, opts = {}) {
       proj = pr; atlas = a; scene = createScene({ atlas, proj });
       shelf.setAtlas(a);
       scene.setSeason(season, light);
+      stageNow();
       applyAnimals();
       root.dataset.proj = proj.name;
       layout = null; layoutSig = ''; hoverId = null; autoFit = true;
@@ -702,11 +717,17 @@ export function createPixelOffice(root, ctx, opts = {}) {
       }
       return out;
     },
-    // the colour of the sky canvas at a fraction of its height (0 = top), as [r, g, b] (QA: the sky follows the time)
-    skyAt(f) {
-      const x = Math.floor(skyCanvas.width * 0.03), y = Math.min(skyCanvas.height - 1, Math.max(0, Math.floor(skyCanvas.height * f)));
-      return [...skyCanvas.getContext('2d').getImageData(x, y, 1, 1).data].slice(0, 3);
+    // QA: how much of the scene canvas is not covered by the landscape (pixels that are not fully opaque), after a redraw; and the limits of the camera
+    uncovered() {
+      scene.draw(g, view, performance.now(), false, light);
+      const d = g.getImageData(0, 0, canvas.width, canvas.height).data;
+      let n = 0;
+      for (let i = 3; i < d.length; i += 4) if (d[i] < 255) n++;
+      return { pixels: n, of: canvas.width * canvas.height };
     },
+    get world() { return scene ? { ...scene.world } : null; }, get minZoom() { return zoomFloor(); },
+    get stageColour() { return stage.style.background; }, get outer() { return scene ? scene.outer : null; },
+    setPan(x, y) { autoFit = false; view.panX = x; view.panY = y; clampView(); redraw(); return [view.panX, view.panY]; },
   };
 
   return {

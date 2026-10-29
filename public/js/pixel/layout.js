@@ -5,7 +5,7 @@
 // walls stand just outside the north (y + d) and west (x - 2) edges, low walls (7 high) on the south and east. Rooms keep their
 // order: room k only depends on rooms 0..k, so an agent that appears is appended and nobody before it moves.
 import { fpSize, deskId, FP, isFloor } from './ids.js';
-import { ISO } from './projection.js';
+import { ISO, screenBounds } from './projection.js';
 
 export const G = Object.freeze({
   TILE: 16, GAP: 16, WALL_T: 2, WALL_H: 30, LOW_H: 7,
@@ -19,6 +19,10 @@ export const G = Object.freeze({
   SHADOW: 44,                      // how far a tall wall hides the ground behind it (along the sight line), in voxels
   MARGIN: 80,                      // grass around the building (the garden island)
 });
+// The landscape goes on far beyond the garden: the world is the screen rectangle (virtual px, zoom 1) around the building and the garden in which the
+// ground and the trees are laid out, so that a view that stays inside it never shows what lies behind the scene. The zoom is limited to the levels
+// at which the view fits in the world (input.js `minZoom`) and the pan keeps the view inside it.
+export const WORLD = Object.freeze({ PAD_X: 640, PAD_Y: 400 });
 // widths are multiples of 32 so the wall pieces tile exactly
 export const roomWidth = cls => Math.ceil((G.CHIEF_W + G.COLS[cls] * G.COL_W + G.EAST) / 32) * 32;
 export const roomCap = cls => G.COLS[cls] * G.ROWS;
@@ -104,7 +108,8 @@ export function layoutOffice(agents, proj = ISO) {
   const building = rooms.length ? { x0: 0, y0: 0, x1: bx1, y1: by1 } : { x0: 0, y0: 0, x1: 96, y1: proj.layout.depth };
   const outdoor = buildOutdoor(rooms, building, proj);
   const bounds = { ...outdoor.island, zTop: 40 };
-  return { rooms, shelf: [], building, outdoor, bounds };
+  const world = buildWorld(building, outdoor.island, proj);
+  return { rooms, shelf: [], building, outdoor, bounds, world, outer: buildOuter(world, outdoor.island, proj) };
 }
 
 function rectsOverlap(a, b) { return a.x0 < b.x1 && a.x1 > b.x0 && a.y0 < b.y1 && a.y1 > b.y0; }
@@ -227,9 +232,9 @@ function buildOutdoor(rooms, b, proj) {
   const tiles = [], items = [];
   for (let tx = island.x0 / T; tx < island.x1 / T; tx++) for (let ty = island.y0 / T; ty < island.y1 / T; ty++) {
     const dd = dist(tx, ty);
-    if (dd === 0) continue;                                          // inside a room: its own floor
+    if (rects.some(r => tx * T >= r.x0 && tx * T + T <= r.x1 && ty * T >= r.y0 && ty * T + T <= r.y1)) continue;          // inside a room: its own floor
     let id = 'floor_path';
-    if (dd > 1) { const n = hash2(tx, ty, 11); id = n > 0.9 ? 'floor_grass_c' : n > 0.62 ? 'floor_grass_b' : 'floor_grass_a'; }
+    if (dd === 0 || dd > 1) { const n = hash2(tx, ty, 11); id = n > 0.9 ? 'floor_grass_c' : n > 0.62 ? 'floor_grass_b' : 'floor_grass_a'; }     // next to a wall: a lawn, then the street
     tiles.push({ id, x: tx * T, y: ty * T });
   }
   const placed = [];
@@ -282,4 +287,49 @@ function buildOutdoor(rooms, b, proj) {
     else if (n > 0.50 && n <= 0.60) place(hash2(tx, ty, 8) > 0.5 ? 'tuft_a' : 'tuft_b', cx, cy, 0, 1);
   }
   return { island, tiles, items };
+}
+
+// The world: the building and the garden (tall things included) with the landscape padding on every side, in virtual screen px.
+function buildWorld(b, island, proj) {
+  const sb = screenBounds(proj, island.x0, island.y0, island.x1, island.y1, 60), bb = screenBounds(proj, b.x0, b.y0, b.x1, b.y1, 48);
+  return {
+    x0: Math.floor(Math.min(sb.x0, bb.x0) - WORLD.PAD_X), y0: Math.floor(Math.min(sb.y0, bb.y0) - WORLD.PAD_Y),
+    x1: Math.ceil(Math.max(sb.x1, bb.x1) + WORLD.PAD_X), y1: Math.ceil(Math.max(sb.y1, bb.y1) + WORLD.PAD_Y),
+  };
+}
+
+// The landscape outside the garden: a grass tile for every tile whose middle is inside the world, and patches of wood and of meadow on it, from hashes
+// of the tile coordinates (the same layout gives the same landscape). Wood is dense in some patches and absent in others (two scales of noise), so it
+// does not look like a sprinkling. Nothing here stands on the garden's own tiles; the scene drops every piece whose picture would touch a sprite of the
+// garden or the building, so the order of drawing between them never matters.
+const WOOD = ['tree_a', 'tree_oak', 'pine', 'tree_birch', 'tree_b', 'tree_cypress'];
+// smooth value noise: the hashes of a lattice with `cell` tiles between points, blended with a smoothstep, so patches have soft shapes and no square edges
+function vnoise(x, y, cell, seed) {
+  const fx = x / cell, fy = y / cell, ix = Math.floor(fx), iy = Math.floor(fy), u = fx - ix, v = fy - iy, su = u * u * (3 - 2 * u), sv = v * v * (3 - 2 * v);
+  const a = hash2(ix, iy, seed), b = hash2(ix + 1, iy, seed), c = hash2(ix, iy + 1, seed), d = hash2(ix + 1, iy + 1, seed);
+  return a + (b - a) * su + (c - a) * sv + (a - b - c + d) * su * sv;
+}
+function buildOuter(world, island, proj) {
+  const T = G.TILE, tiles = [], items = [], hw = proj.tile[0] / 2, hh = proj.tile[1] / 2;
+  const gc = [[world.x0, world.y0], [world.x1, world.y0], [world.x0, world.y1], [world.x1, world.y1]].map(([sx, sy]) => proj.toGround(sx, sy, 0));
+  const xs = gc.map(c => c[0]), ys = gc.map(c => c[1]);
+  const tx0 = Math.floor(Math.min(...xs) / T) - 1, tx1 = Math.ceil(Math.max(...xs) / T) + 1, ty0 = Math.floor(Math.min(...ys) / T) - 1, ty1 = Math.ceil(Math.max(...ys) / T) + 1;
+  const ix0 = island.x0 / T, ix1 = island.x1 / T, iy0 = island.y0 / T, iy1 = island.y1 / T;
+  for (let tx = tx0; tx < tx1; tx++) for (let ty = ty0; ty < ty1; ty++) {
+    if (tx >= ix0 && tx < ix1 && ty >= iy0 && ty < iy1) continue;                 // the garden has its own tiles
+    const cx = tx * T + T / 2, cy = ty * T + T / 2, [sx, sy] = proj.toScreen(cx, cy, 0);
+    if (sx + hw < world.x0 || sx - hw > world.x1 || sy + hh < world.y0 || sy - hh > world.y1) continue;            // a tile that overlaps the world's edge is drawn, so the edge is ground too
+    const g = hash2(tx, ty, 11);
+    tiles.push({ id: g > 0.9 ? 'floor_grass_c' : g > 0.62 ? 'floor_grass_b' : 'floor_grass_a', x: tx * T, y: ty * T });
+    const wood = 0.62 * vnoise(tx, ty, 18, 41) + 0.38 * vnoise(tx, ty, 6, 43);                  // about 0.2..0.8: woods where it is high, meadows where it is low
+    const r = hash2(tx, ty, 29), treeP = 0.003 + 0.5 * Math.max(0, wood - 0.5);
+    let id = null;
+    if (r < treeP) id = WOOD[Math.floor(hash2(tx, ty, 3) * WOOD.length)];
+    else if (r < treeP + 0.035) id = ['bush_a', 'bush_b', 'bush_c', 'bush_d'][Math.floor(hash2(tx, ty, 5) * 4)];
+    else if (r < treeP + 0.045) id = ['rock', 'rock_b', 'rock_c', 'rock_d'][Math.floor(hash2(tx, ty, 6) * 4)];
+    else if (r < treeP + 0.055 && wood < 0.5) id = ['flowerbed', 'flowerbed_d', 'flowerbed_b'][Math.floor(hash2(tx, ty, 7) * 3)];
+    else if (r < treeP + 0.12) id = hash2(tx, ty, 8) > 0.5 ? 'tuft_a' : 'tuft_b';
+    if (id) items.push(itemAt(id, cx + Math.round((hash2(tx, ty, 31) - 0.5) * 10), cy + Math.round((hash2(tx, ty, 32) - 0.5) * 10), 0, { layer: isFloor(id) ? 'floor' : 'stand' }));
+  }
+  return { tiles, items };
 }

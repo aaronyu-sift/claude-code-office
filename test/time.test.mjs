@@ -35,18 +35,16 @@ test('?time=HH:MM parses and prints back', () => {
   assert.equal(fmtClock(-30), '23:30');
 });
 
-test('lights, stars and tint: dark at night, off at noon, a believable curve between', () => {
+test('lights and tint: dark at night, off at noon, a believable curve between; no sky fields', () => {
   for (const month of [1, 4, 7, 10]) {
     const noon = ambient(at(12), month), night = ambient(at(2), month);
-    assert.equal(noon.lights, 0); assert.equal(noon.stars, 0); assert.equal(noon.room[3], 0); assert.equal(noon.phase, 'day');
-    assert.equal(night.lights, 1); assert.equal(night.stars, 1); assert.ok(night.room[3] > 0.25 && night.room[3] <= 0.4); assert.equal(night.phase, 'night');
-    assert.ok(noon.sun && !noon.moon && night.moon && !night.sun);
-    assert.ok(night.top.every((v, i) => v < noon.top[i]), 'the night sky is darker than the day sky');
+    assert.equal(noon.lights, 0); assert.equal(noon.room[3], 0); assert.equal(noon.phase, 'day');
+    assert.equal(night.lights, 1); assert.ok(night.room[3] > 0.25 && night.room[3] <= 0.4); assert.equal(night.phase, 'night');
+    for (const k of ['sun', 'moon', 'stars', 'top', 'bottom']) assert.ok(!(k in noon) && !(k in night), `the scene has no sky: ambient() has no ${k}`);
   }
   const [, ss] = sunTimes(6);
   assert.ok(ambient(ss + 20, 6).lights > 0.5, 'lamps are on soon after sunset');
   assert.ok(ambient(ss - 120, 6).lights === 0, 'and off two hours before');
-  assert.ok(ambient(at(12), 6).sun.f > 0.4 && ambient(at(12), 6).sun.f < 0.6, 'the sun is high at noon');
 });
 
 test('ambient changes smoothly: no jump between two minutes, every value in range', () => {
@@ -55,8 +53,8 @@ test('ambient changes smoothly: no jump between two minutes, every value in rang
     for (let m = 1; m <= 1440; m++) {
       const a = ambient(m, month);
       assert.ok(Math.abs(a.room[3] - prev.room[3]) < 0.02, `tint jumps at ${fmtClock(m)}`);
-      assert.ok(Math.abs(a.lights - prev.lights) < 0.05 && Math.abs(a.stars - prev.stars) < 0.05, `lights jump at ${fmtClock(m)}`);
-      for (const c of [a.top, a.bottom, a.room.slice(0, 3), a.out.slice(0, 3)]) assert.ok(c.every(v => v >= 0 && v <= 255));
+      assert.ok(Math.abs(a.lights - prev.lights) < 0.05, `lights jump at ${fmtClock(m)}`);
+      for (const c of [a.room.slice(0, 3), a.out.slice(0, 3)]) assert.ok(c.every(v => v >= 0 && v <= 255));
       prev = a;
     }
   }

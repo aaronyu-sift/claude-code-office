@@ -3,7 +3,8 @@
 //
 // Sunrise and sunset come from a small table by month (a mid-latitude northern hemisphere, local clock, no daylight saving): the point is
 // a believable light, not astronomy. `ambient()` returns everything the scene needs for one minute of the day: the tint of the rooms and
-// of the garden, the sky colours, how bright the stars and the lights (windows, lamps, monitors) are, and where the sun or moon sits.
+// of the garden and how bright the lights (windows, lamps, monitors) are. There is no sky in the scene, so no sun, moon or stars either:
+// the tint alone says what time it is.
 
 const H = 60;
 // [sunrise, sunset] in minutes after midnight, January to December
@@ -33,17 +34,17 @@ export function parseClock(text) {
 }
 export const fmtClock = min => { const m = ((Math.round(min) % 1440) + 1440) % 1440; return String(Math.floor(m / 60)).padStart(2, '0') + ':' + String(m % 60).padStart(2, '0'); };
 
-// colour keyframes: indoor tint (source-atop overlay r, g, b, a), extra tint for the garden, sky top and bottom, stars, lights (0..1)
+// colour keyframes: indoor tint (source-atop overlay r, g, b, a), extra tint for the garden, lights (0..1)
 const KEY = {
-  night: { room: [14, 24, 64, 0.34], out: [8, 16, 56, 0.34], top: [7, 11, 34], bottom: [23, 37, 84], stars: 1, lights: 1 },
-  predawn: { room: [60, 44, 100, 0.24], out: [40, 34, 90, 0.26], top: [30, 36, 90], bottom: [120, 94, 140], stars: 0.5, lights: 0.8 },
-  dawn: { room: [255, 168, 120, 0.14], out: [255, 150, 110, 0.12], top: [106, 120, 190], bottom: [255, 197, 143], stars: 0, lights: 0.35 },
-  day: { room: [255, 255, 255, 0], out: [255, 255, 255, 0], top: [90, 170, 240], bottom: [205, 234, 252], stars: 0, lights: 0 },
-  golden: { room: [255, 150, 60, 0.15], out: [255, 140, 50, 0.16], top: [86, 128, 205], bottom: [255, 183, 112], stars: 0, lights: 0.25 },
-  dusk: { room: [70, 40, 110, 0.26], out: [50, 30, 100, 0.3], top: [44, 47, 107], bottom: [200, 97, 138], stars: 0.45, lights: 0.85 },
+  night: { room: [14, 24, 64, 0.34], out: [8, 16, 56, 0.34], lights: 1 },
+  predawn: { room: [60, 44, 100, 0.24], out: [40, 34, 90, 0.26], lights: 0.8 },
+  dawn: { room: [255, 168, 120, 0.14], out: [255, 150, 110, 0.12], lights: 0.35 },
+  day: { room: [255, 255, 255, 0], out: [255, 255, 255, 0], lights: 0 },
+  golden: { room: [255, 150, 60, 0.15], out: [255, 140, 50, 0.16], lights: 0.25 },
+  dusk: { room: [70, 40, 110, 0.26], out: [50, 30, 100, 0.3], lights: 0.85 },
 };
 const mix = (a, b, t) => a.map((v, i) => v + (b[i] - v) * t);
-const lerpKey = (a, b, t) => ({ room: mix(a.room, b.room, t), out: mix(a.out, b.out, t), top: mix(a.top, b.top, t), bottom: mix(a.bottom, b.bottom, t), stars: a.stars + (b.stars - a.stars) * t, lights: a.lights + (b.lights - a.lights) * t });
+const lerpKey = (a, b, t) => ({ room: mix(a.room, b.room, t), out: mix(a.out, b.out, t), lights: a.lights + (b.lights - a.lights) * t });
 
 // keyframes of one day, as [minute, key], covering 0 to 1440 (the first and last repeat the night so the day wraps)
 export function keyframes(month) {
@@ -60,16 +61,12 @@ export function ambient(min, month) {
   let i = 0;
   while (i < K.length - 2 && m >= K[i + 1][0]) i++;
   const [t0, a] = K[i], [t1, b] = K[i + 1], t = t1 > t0 ? Math.min(1, Math.max(0, (m - t0) / (t1 - t0))) : 0;
-  const k = lerpKey(a, b, t), [sr, ss] = sunTimes(month);
-  const day = m >= sr && m <= ss, f = day ? (m - sr) / (ss - sr) : m > ss ? (m - ss) / (1440 - ss + sr) : (m + 1440 - ss) / (1440 - ss + sr);
+  const k = lerpKey(a, b, t);
   return {
     minute: Math.floor(m), month, phase: phaseAt(m, month),
     room: k.room.map((v, j) => (j < 3 ? Math.round(v) : +v.toFixed(3))),          // [r, g, b, alpha] laid over the rooms and everything in them
     out: k.out.map((v, j) => (j < 3 ? Math.round(v) : +v.toFixed(3))),            // [r, g, b, alpha] laid over the garden's ground as well
-    top: k.top.map(Math.round), bottom: k.bottom.map(Math.round),
-    stars: +k.stars.toFixed(3), lights: +k.lights.toFixed(3),
-    // the sun climbs from the east in the morning and sets in the west; the moon takes the night, f runs 0..1 along the arc
-    sun: day ? { f: +f.toFixed(3) } : null, moon: day ? null : { f: +Math.min(1, Math.max(0, f)).toFixed(3) },
+    lights: +k.lights.toFixed(3),
   };
 }
 export const rgba = c => `rgba(${c[0]},${c[1]},${c[2]},${c[3]})`;

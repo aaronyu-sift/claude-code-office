@@ -59,15 +59,6 @@ export function planFor({ weather, season, phase = 'day' }) {
   }
 }
 
-// The sky behind the scene in this weather: grey and dimmer, no sun, moon or stars (a few stars through thin cloud). `amb` is time.js `ambient()`.
-const SKY = { rain: { grey: 0.6, dim: 0.78 }, snow: { grey: 0.45, dim: 0.95 }, fog: { grey: 0.7, dim: 1.05 }, cloudy: { grey: 0.35, dim: 0.92 } };
-export function skyFor(amb, weather) {
-  const k = SKY[weather];
-  if (!k || !amb) return amb;
-  const toGrey = c => { const l = 0.2126 * c[0] + 0.7152 * c[1] + 0.0722 * c[2]; return c.map(v => Math.max(0, Math.min(255, Math.round((v + (l - v) * k.grey) * k.dim)))); };
-  return { ...amb, top: toGrey(amb.top), bottom: toGrey(amb.bottom), stars: weather === 'cloudy' ? +(amb.stars * 0.3).toFixed(3) : 0, sun: null, moon: null };
-}
-
 // ---- the particles: fixed typed arrays (no allocation per frame), positions in canvas pixels ------------------------------------------------
 const rnd = (i, s) => { let h = Math.imul(i * 374761393 + s * 668265263, 1274126177); h ^= h >>> 15; return ((h >>> 0) % 100000) / 100000; };
 const PETAL = ['#ffb8d6', '#fff0f6', '#ffd3e4'], LEAF = ['#eb8a3b', '#c4492f', '#ffd45e', '#d9701f'];

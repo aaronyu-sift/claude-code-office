@@ -322,7 +322,7 @@ if (want('time')) {
       await P(`p.setTime(${min})`);
       await sleep(350);                                                      // the frame the scheduler draws for it
       const fx = await P('p.effects'), amb = await P('p.ambient');
-      return { min, phase: amb.phase, lightsK: amb.lights, fx, lum: await P('p.agentLuminances()'), skyTop: await P('p.skyAt(0.05)'), skyLow: await P('p.skyAt(0.9)'), label: await labelStyle(), errors: S.page.errors.length - e0, figures: (await P('p.figures().length')) };
+      return { min, phase: amb.phase, lightsK: amb.lights, fx, lum: await P('p.agentLuminances()'), stage: await P('p.stageColour'), label: await labelStyle(), errors: S.page.errors.length - e0, figures: (await P('p.figures().length')) };
     };
     const noon = await at(720);
     const REQUIRED = ['06:00', '09:00', '12:00', '18:30', '22:00', '02:00'].map(t => +t.slice(0, 2) * 60 + +t.slice(3));
@@ -335,12 +335,14 @@ if (want('time')) {
     const lowRows = worst.filter(w => !(w.min >= 0.6));
     const dark = rows.filter(r => r.phase === 'dusk' || r.phase === 'night'), unlit = dark.filter(r => !(r.fx.lights.window > 0 && r.fx.lights.lamp > 0 && r.fx.lights.monitor > 0));
     const day = rows.filter(r => r.phase === 'day'), lit = day.filter(r => Object.keys(r.fx.lights).length);
-    const skies = new Set(rows.filter(r => REQUIRED.includes(r.min)).map(r => r.skyTop.join(',')));
-    const nightSky = rows.find(r => r.min === 22 * 60), sameLabel = rows.every(r => r.label === noon.label), noErr = rows.every(r => r.errors === 0 && r.figures === ids.length);
+    const stageLum = r => lumOf((r.stage.match(/\d+/g) || [0, 0, 0]).slice(0, 3).map(Number));
+    const stages = new Set(rows.filter(r => REQUIRED.includes(r.min)).map(r => r.stage));
+    const noSky = await P("typeof p.skyAt === 'undefined' && !document.querySelector('.of-sky')");
+    const nightStage = rows.find(r => r.min === 22 * 60), sameLabel = rows.every(r => r.label === noon.label), noErr = rows.every(r => r.errors === 0 && r.figures === ids.length);
     const req = worst.filter(w => REQUIRED.includes(w.r.min)).map(w => `${hhmm(w.r.min)} ${w.r.phase}: lowest ${w.min.toFixed(2)}, mean ${w.mean.toFixed(2)}, lit ${['window', 'lamp', 'monitor'].map(k => `${k} ${w.r.fx.lights[k] || 0}`).join(' ')}`);
-    check('11-time', start.fixed && start.clock === '12:00' && lowRows.length === 0 && unlit.length === 0 && lit.length === 0 && skies.size >= 4 && lumOf(nightSky.skyTop) < 0.35 * lumOf(noon.skyTop) && sameLabel && noErr,
+    check('11-time', start.fixed && start.clock === '12:00' && lowRows.length === 0 && unlit.length === 0 && lit.length === 0 && stages.size >= 4 && stageLum(nightStage) < 0.6 * stageLum(noon) && noSky && sameLabel && noErr,
       `${ids.length} agents, month ${start.month}; luminance of every agent's silhouette as a share of its noon value, at ${order.length} times (the six required and every hour): lowest of all ${lowest.min.toFixed(2)} at ${hhmm(lowest.r.min)} (floor 0.60), times below the floor ${lowRows.length}; ` +
-      `${req.join('; ')}; after dark (${dark.length} of those times) windows, lamps and monitors all lit at ${dark.length - unlit.length}; in daylight (${day.length} times) lights drawn at ${lit.length}; sky colour at the top at the six times: ${skies.size} different values (day and night each keep one colour for hours), 22:00 sky is ${(lumOf(nightSky.skyTop) / lumOf(noon.skyTop) * 100).toFixed(0)} percent as bright as noon; label colours identical at every time: ${sameLabel} (${noon.label}); errors ${S.page.errors.length}; ?time=12:00 start: fixed ${start.fixed}, ticker ${start.ticking}`);
+      `${req.join('; ')}; after dark (${dark.length} of those times) windows, lamps and monitors all lit at ${dark.length - unlit.length}; in daylight (${day.length} times) lights drawn at ${lit.length}; the ground colour behind the scene (there is no sky, sun, moon or stars) at the six times: ${stages.size} different values (no sky element: ${noSky}), 22:00 is ${(stageLum(nightStage) / stageLum(noon) * 100).toFixed(0)} percent as bright as noon; label colours identical at every time: ${sameLabel} (${noon.label}); errors ${S.page.errors.length}; ?time=12:00 start: fixed ${start.fixed}, ticker ${start.ticking}`);
   } finally { await S.done(); }
 
   // the clock is the browser's local clock: two emulated time zones show their own hour, and nothing re-tints except at a minute boundary
@@ -697,6 +699,39 @@ if (want('views')) {
     check('18-views', bad.length === 0 && !!back && back.figures >= 9 && back.shelf >= 13 && shelfOk && S.page.errors.length === 0,
       `tabs opened by a click: ${['pano', 'akis', 'maliyet', 'ofis'].map(v => `${v}: displayed [${out[v].shown}], selected [${out[v].sel}], boxes still laid out in the other views ${Object.values(out[v].other).reduce((a, n) => a + n, 0)}, elements of another view on top of this one at 160 sample points ${out[v].over.length}${out[v].over.length ? ' (' + out[v].over.slice(0, 2) + ')' : ''}, ${out[v].h} px high, ${out[v].text} characters of text`).join('; ')}; back on the Dashboard last; the Office came back with ${back && back.figures} figures and ${back && back.shelf} shelf rows; the page opened on the Dashboard and moved to the Office: the shelf is ${wideFirst.mode} in a 1500 px window (${wideFirst.rows} rows) and ${narrowFirst.mode} in a 700 px window (tab "${narrowFirst.tab}"); console errors ${S.page.errors.length}`);
   } finally { await S.done(); }
+}
+
+// ---- 19. the landscape: the scene is ground everywhere (no sky, no backdrop), at every zoom the view may take, at every edge of the pan range, in
+// the daylight and at night, with 2 agents (a small building in a big landscape), 10 and 20. `uncovered` is the number of canvas pixels that
+// are not fully opaque after a redraw: whatever is not covered would show the page behind the scene.
+if (want('landscape')) {
+  const rows = [];
+  for (const [n, query] of [[2, '?time=12:00'], [10, '?time=22:00'], [20, '?time=12:00&weather=rain']]) {
+    const S = await scenario(n, { tag: 'land' + n, query, dpr: 2 });
+    try {
+      const P = e => S.page.evaluate(px(e));
+      await sleep(900);
+      const info = await P('({ zoom: p.zoom, min: p.minZoom, size: p.size, world: p.world, outer: p.outer, build: p.buildMs })');
+      const zooms = [...new Set([info.min, info.min * 2, info.zoom])];
+      const bad = [];
+      let probes = 0;
+      for (const z of zooms) {
+        await P(`p.setZoom(${z})`); await sleep(250);
+        for (const [px_, py_] of [[0, 0], [-1e6, -1e6], [1e6, -1e6], [-1e6, 1e6], [1e6, 1e6]]) {
+          if (px_ || py_) await P(`p.setPan(${px_}, ${py_})`);
+          await sleep(120);
+          const u = await P('p.uncovered()');
+          probes++;
+          if (u.pixels > 0) bad.push(`zoom ${z} pan ${px_ ? (px_ < 0 ? 'min' : 'max') : 'centre'}/${py_ ? (py_ < 0 ? 'min' : 'max') : 'centre'}: ${u.pixels}`);
+        }
+      }
+      const world = info.world, wpx = (world.x1 - world.x0) * info.min, hpx = (world.y1 - world.y0) * info.min, cv = await P('p.size');                                                    // p.size is in device pixels already
+      rows.push({ n, info, bad, probes, zooms, fills: wpx >= cv[0] - 1 && hpx >= cv[1] - 1, noSky: await P("typeof p.skyAt === 'undefined' && !document.querySelector('.of-sky')"), errors: S.page.errors.length });
+    } finally { await S.done(); }
+  }
+  check('19-landscape', rows.every(r => r.bad.length === 0 && r.fills && r.noSky && r.errors === 0 && r.info.outer.drawn > 600 && r.info.build < 150),
+    rows.map(r => `${r.n} agents: ${r.probes} views (${r.zooms.length} zooms, ${r.zooms.join(', ')}, x 5 pan positions, the four corners of the pan range among them) with ${r.bad.length ? 'UNCOVERED ' + r.bad.join('; ') : 'no uncovered pixel'}; the world (${r.info.world.x1 - r.info.world.x0} x ${r.info.world.y1 - r.info.world.y0} px) fills the canvas at the lowest zoom ${r.fills}; ${r.info.outer.drawn} decor sprites baked outside the garden (${r.info.outer.dropped} dropped where they touched it); build ${r.info.build} ms (limit 150); errors ${r.errors}`).join(' | ') +
+    `; no sky element or sky function ${rows.every(r => r.noSky)}`);
 }
 
 // ---- 12. seasons: every outdoor id resolves, the pictures differ, the automatic season follows the date and the hemisphere

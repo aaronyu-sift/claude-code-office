@@ -211,3 +211,42 @@ for (const proj of [ISO, FRONT]) test(`${proj.name}: the garden keeps its season
     assert.equal(JSON.stringify(L), JSON.stringify(layoutOffice(agents(n, n === 10 ? [0, 1, 2] : [0]), proj)));     // the layout never looks at the season
   }
 });
+
+for (const proj of [ISO, FRONT]) test(`${proj.name}: the world is all ground (no sky): garden, building and outer tiles cover every point of it, in a deterministic landscape that never touches the garden`, () => {
+  for (const n of [0, 1, 4, 10, 20]) {
+    const list = agents(n, n === 10 ? [0, 1, 2] : [0]), L = layoutOffice(list, proj), T = G.TILE, W = L.world;
+    assert.equal(JSON.stringify(L.outer), JSON.stringify(layoutOffice(list.map(a => ({ ...a })), proj).outer), `${proj.name} ${n}: outer landscape is deterministic`);
+    const key = (x, y) => `${Math.floor(x / T)},${Math.floor(y / T)}`;
+    const outer = new Set(L.outer.tiles.map(t => key(t.x, t.y))), garden = new Set(L.outdoor.tiles.map(t => key(t.x, t.y)));
+    for (const k of outer) assert.ok(!garden.has(k), `${proj.name} ${n}: outer tile ${k} is also a garden tile`);
+    const I = L.outdoor.island;
+    const inRoom = (x, y) => L.rooms.some(r => x >= r.x - G.WALL_T && x < r.x + r.w + G.WALL_T && y >= r.y - G.WALL_T && y < r.y + r.d + G.WALL_T);
+    let holes = 0, samples = 0;
+    for (let sx = W.x0; sx <= W.x1; sx += 16) for (let sy = W.y0; sy <= W.y1; sy += 8) {
+      const [gx, gy] = proj.toGround(sx, sy, 0), k = key(gx, gy);
+      samples++;
+      if (!outer.has(k) && !garden.has(k) && !inRoom(gx, gy) && !(gx >= I.x0 && gx < I.x1 && gy >= I.y0 && gy < I.y1)) holes++;
+    }
+    assert.equal(holes, 0, `${proj.name} ${n}: ${holes} of ${samples} points of the world are not covered by any tile`);
+    for (const it of L.outer.items) {                                             // no decor in the garden or in the building (an edge may touch: the scene drops what overlaps)
+      const cx = it.x + it.w / 2, cy = it.y + it.d / 2;
+      assert.ok(!(cx >= I.x0 && cx < I.x1 && cy >= I.y0 && cy < I.y1), `${proj.name} ${n}: ${it.id} stands in the garden`);
+      assert.ok(!inRoom(cx, cy), `${proj.name} ${n}: ${it.id} stands in a room`);
+    }
+  }
+});
+
+test('landscape: the world is big enough to pan around the garden, wooded in places and open in others, with several kinds of tree', () => {
+  const L = layoutOffice(agents(2), ISO), W = L.world, trees = L.outer.items.filter(i => /^(tree|pine)/.test(i.id));
+  assert.ok(W.x1 - W.x0 >= 1500 && W.y1 - W.y0 >= 1000, `world ${W.x1 - W.x0} x ${W.y1 - W.y0} px`);
+  assert.ok(new Set(trees.map(t => t.id)).size >= 3, 'at least three kinds of tree');
+  // patchy: split the world into 8 x 6 cells; some have many trees (a wood), some almost none (a meadow)
+  const cells = new Map();
+  for (const t of trees) {
+    const [sx, sy] = ISO.toScreen(t.x, t.y, 0), c = Math.floor((sx - W.x0) / ((W.x1 - W.x0) / 8)) + ',' + Math.floor((sy - W.y0) / ((W.y1 - W.y0) / 6));
+    cells.set(c, (cells.get(c) || 0) + 1);
+  }
+  const counts = [...Array(48).keys()].map(i => cells.get((i % 8) + ',' + Math.floor(i / 8)) || 0).sort((a, b) => a - b);
+  assert.ok(counts[Math.floor(counts.length * 0.2)] * 3 < counts[Math.floor(counts.length * 0.9)], `trees are spread evenly (cells: ${counts.join(' ')})`);
+  assert.ok(L.outer.items.filter(i => /^(bush|rock|flowerbed|tuft)/.test(i.id)).length > trees.length, 'more low plants and stones than trees');
+});

@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
-import { WEATHERS, WEATHER_SETTINGS, PARTICLE_CAP, parseWeather, weatherFor, rainbowFor, resolveWeather, planFor, createField, drawRainbow, skyFor } from '../public/js/pixel/weather.js';
+import { WEATHERS, WEATHER_SETTINGS, PARTICLE_CAP, parseWeather, weatherFor, rainbowFor, resolveWeather, planFor, createField, drawRainbow } from '../public/js/pixel/weather.js';
 import { SEASONS, addDays } from '../public/js/pixel/season.js';
 import { PHASES, ambient } from '../public/js/pixel/time.js';
 
@@ -91,18 +91,4 @@ test('weather: no network access from any weather code (nothing is fetched, noth
     const code = readFileSync(new URL('../public/js/pixel/' + f, import.meta.url), 'utf8').split('\n').filter(l => !/^\s*\/\//.test(l)).join('\n');
     assert.doesNotMatch(code, /\b(fetch|XMLHttpRequest|WebSocket|EventSource|sendBeacon|importScripts)\b|\bimport\s*\(|https?:\/\//, `${f} can reach the network`);
   }
-});
-test('weather: rain, snow, fog and cloud grey the sky and hide the sun, the moon and the stars; clear and no weather leave it alone', () => {
-  const noon = ambient(720, 6), night = ambient(23 * 60, 6);
-  assert.equal(skyFor(noon, null), noon); assert.equal(skyFor(noon, 'clear'), noon); assert.equal(skyFor(null, 'rain'), null);
-  for (const w of ['rain', 'snow', 'fog']) {
-    const s = skyFor(night, w);
-    assert.equal(s.stars, 0); assert.equal(s.moon, null); assert.equal(s.sun, null); assert.equal(s.top.length, 3);
-    assert.ok(skyFor(noon, w).sun === null && noon.sun, `${w} still shows the sun`);
-  }
-  const lum = c => 0.2126 * c[0] + 0.7152 * c[1] + 0.0722 * c[2];
-  assert.ok(lum(skyFor(noon, 'rain').top) < lum(noon.top), 'a rainy sky is darker');
-  const sat = c => Math.max(...c) - Math.min(...c);
-  assert.ok(sat(skyFor(noon, 'rain').top) < sat(noon.top), 'a rainy sky is greyer');
-  assert.ok(skyFor(night, 'cloudy').stars < night.stars && skyFor(night, 'cloudy').stars > 0);
 });
