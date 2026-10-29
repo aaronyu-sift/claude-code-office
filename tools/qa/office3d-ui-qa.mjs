@@ -355,14 +355,14 @@ if (want('shelf')) {
     eq('rows after the footer button', [b.rows.length, ids(b), b.foot.hidden, b.count], [TOTAL, want_(TOTAL), true, `${TOTAL} chats`]);
     // the figure of a row is the 3D scene's avatar in the project's colour: "Zz" for an asleep chat, a check mark for a closed one (so the two differ), the colour of the project in both
     const avatar = async id => T.ev(`(() => { const c = document.querySelector('.sh-list li[data-id="${id}"] canvas.sh-fig'), g = c.getContext('2d'), w = c.width, h = c.height, d = g.getImageData(0, 0, w, h).data;
-      let r = 0, gr = 0, bl = 0, n = 0, white = 0;
-      for (let y = Math.floor(h * 0.3); y < Math.floor(h * 0.85); y++) for (let x = Math.floor(w * 0.15); x < Math.floor(w * 0.85); x++) { const i = (y * w + x) * 4; if (d[i + 3] < 200) continue; if (d[i] > 240 && d[i + 1] > 240 && d[i + 2] > 240) white++; else { r += d[i]; gr += d[i + 1]; bl += d[i + 2]; n++; } }
-      return JSON.stringify({ url: c.toDataURL().length, hash: c.toDataURL().slice(-60), rgb: n ? [r / n, gr / n, bl / n].map(Math.round) : null, white }); })()`).then(JSON.parse);
+      let r = 0, gr = 0, bl = 0, n = 0, white = 0, mask = '';
+      for (let y = Math.floor(h * 0.3); y < Math.floor(h * 0.85); y++) for (let x = Math.floor(w * 0.15); x < Math.floor(w * 0.85); x++) { const i = (y * w + x) * 4; if (d[i + 3] < 200) { mask += '0'; continue; } if (d[i] > 240 && d[i + 1] > 240 && d[i + 2] > 240) { white++; mask += '1'; } else { r += d[i]; gr += d[i + 1]; bl += d[i + 2]; n++; mask += '0'; } }
+      return JSON.stringify({ mask, rgb: n ? [r / n, gr / n, bl / n].map(Math.round) : null, white }); })()`).then(JSON.parse);
     const sleeper = b.rows.find(r => r.kind === 'dormant'), closer = b.rows.find(r => r.kind === 'closed');
     if (!sleeper || !closer) bad.push('the shelf has no asleep row or no closed row to compare');
     else {
       const [as, cl] = [await avatar(sleeper.id), await avatar(closer.id)];
-      if (as.hash === cl.hash || !as.white || !cl.white) bad.push(`the avatars of an asleep and a closed chat do not differ or have no white glyph (white pixels ${as.white} and ${cl.white})`);
+      if (as.mask === cl.mask || as.white < 15 || cl.white < 15) bad.push(`the glyphs of an asleep and a closed chat's avatar do not differ or are missing (white pixels ${as.white} and ${cl.white})`);
       if (!as.rgb || !cl.rgb) bad.push('an avatar is empty');
     }
 
@@ -773,6 +773,10 @@ if (shotsDir) {
     const snap = async (file, clip) => { await sleep(500); await S.page.send('Page.captureScreenshot', { format: 'png', ...(clip ? { clip: { ...clip, scale: 1 } } : {}) }).then(r => import('node:fs').then(fs => fs.writeFileSync(join(shotsDir, file), Buffer.from(r.data, 'base64')))); console.log('SHOT', join(shotsDir, file)); };
     if (!S.ready) throw new Error('the scene did not become ready');
     await snap('3d-ui-1-fit-1500.png');
+    // the labels close up: one step of the zoom button in, then back to "fit" (the pictures after it are taken at fit again)
+    await T.click('.of-ctl [data-z="in"]'); await T.click('.of-ctl [data-z="in"]'); await sleep(900);
+    await snap('3d-ui-12-labels-zoomed-in.png');
+    await T.click('.of-ctl [data-z="fit"]'); await sleep(900);
     const waiting = S.roomed.find(a => a.status === 'waiting' || a.status === 'ask'), working = S.roomed.find(a => a.status === 'working');
     const o = await T.openAgent((working || S.roomed[0]).id);
     await T.settle(); await S.page.mouse.move(8, 880); await sleep(600);

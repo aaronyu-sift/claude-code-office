@@ -80,15 +80,15 @@ test('a frame of 60 labels is laid out in a few milliseconds at most', () => {
 });
 
 test('a main label is never hidden: when the spots near it are all under the card it takes the nearest free one', () => {
-  // the card covers the left two thirds, the free part is a strip on the right more than a ring away from the label
-  const blocked = [{ x: 0, y: 0, w: 700, h: 700 }];
-  const T = box('m', 100, 300, 160, 60, { force: true, rank: 100 });
-  const p = layoutLabels({ tags: [T], blocked, vw: VW, vh: VH }).get('m');
+  // a band across the view covers the label and everything the declutter tries around it (its rings reach about 330 px down); the free part starts 400 px below the label
+  const blocked = [{ x: 0, y: 0, w: 1000, h: 700 }], VH2 = 1000;
+  const T = box('m', 400, 300, 160, 60, { force: true, rank: 100 });
+  const p = layoutLabels({ tags: [T], blocked, vw: VW, vh: VH2 }).get('m');
   assert.ok(p, 'shown');
-  assert.ok(p.x >= 700 && p.x + 160 <= VW - 4, `at ${p.x},${p.y}`);
+  assert.ok(p.y >= 700 && p.y + 60 <= VH2 - 4, `at ${p.x},${p.y}`);
   // two such labels do not land on each other
-  const U = box('n', 120, 320, 160, 60, { force: true, rank: 100 });
-  const out = layoutLabels({ tags: [T, U], blocked, vw: VW, vh: VH });
+  const U = box('n', 420, 320, 160, 60, { force: true, rank: 100 });
+  const out = layoutLabels({ tags: [T, U], blocked, vw: VW, vh: VH2 });
   assert.ok(out.has('m') && out.has('n'));
   assert.ok(!hit(rect(T, out.get('m')), rect(U, out.get('n'))), 'the two labels overlap');
 });
