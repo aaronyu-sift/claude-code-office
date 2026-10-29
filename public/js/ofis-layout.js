@@ -99,30 +99,45 @@ export function nextClass(st, want, have, nowMs, instant = false) {
 
 // ------------------------------------------------------------ slots: which chat has which office
 
-// saved: what toJSON() returned before (the page keeps it in localStorage), used only when it was made for the same row size.
-// Without it the slots are derived from the chats alone: the oldest chat (order, then id) takes slot 0, the next one slot 1, and so on, so
-// the same chats give the same offices after a reload.
+const MEMORY = 400;                      // chats whose last slot is remembered (the newest ones)
+
+// Which chats get an office is the caller's rule: an asleep chat is on the shelf and a closed one is gone, so neither is in the list, and both
+// give their slot back. The slot each chat last had is remembered: a chat that wakes (or a session that is resumed) gets it back if it is still
+// free, otherwise the lowest free slot. saved: what toJSON() returned before (the page keeps it in localStorage), used only when it was made for
+// the same row size. Without it the slots are derived from the chats alone: the oldest chat (order, then id) takes slot 0, the next one slot 1,
+// and so on, so the same chats give the same offices after a reload.
 export function createSlots({ minRooms = MIN_ROOMS, saved = null } = {}) {
   const perRow = perRowFor(minRooms);
   const slotOf = new Map();
-  const hint = saved && saved.perRow === perRow && saved.slots && typeof saved.slots === 'object' ? saved.slots : {};
+  const memory = new Map();              // chat id → the slot it last had (oldest first)
+  if (saved && saved.perRow === perRow && saved.slots && typeof saved.slots === 'object') {
+    for (const [id, s] of Object.entries(saved.slots)) if (Number.isInteger(s) && s >= 0) memory.set(id, s);
+  }
+  const remember = (id, s) => {
+    memory.delete(id);
+    memory.set(id, s);
+    if (memory.size > MEMORY) memory.delete(memory.keys().next().value);
+  };
   let rows = MIN_ROWS, lowSince = 0;
 
   return {
     perRow,
     get rows() { return rows; },
     get size() { return rows * perRow; },
-    // chats: [{ id, order }] (every live chat). Returns { slotOf: Map id → slot, rows, size, grew, shrank }.
+    // chats: [{ id, order }] (every chat that has an office). Returns { slotOf: Map id → slot, rows, size, grew, shrank }.
     update(chats, nowMs) {
       const live = new Set(chats.map(c => c.id));
-      for (const id of [...slotOf.keys()]) if (!live.has(id)) slotOf.delete(id);
+      for (const id of [...slotOf.keys()]) if (!live.has(id)) slotOf.delete(id);          // the slot is remembered, not kept: someone else may take it
       const used = new Set(slotOf.values());
+      // a remembered slot is only honoured inside the building as it will be: the offices it has, or as many as this many chats need
+      const limit = Math.max(rows * perRow, Math.ceil(chats.length / perRow) * perRow);
       const fresh = chats.filter(c => !slotOf.has(c.id)).sort((a, b) => (a.order || 0) - (b.order || 0) || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
       for (const c of fresh) {
-        let s = hint[c.id];
-        if (!Number.isInteger(s) || s < 0 || used.has(s)) { s = 0; while (used.has(s)) s++; }
+        let s = memory.get(c.id);
+        if (!Number.isInteger(s) || s >= limit || used.has(s)) { s = 0; while (used.has(s)) s++; }
         slotOf.set(c.id, s);
         used.add(s);
+        remember(c.id, s);
       }
       const top = used.size ? Math.max(...used) : -1;
       const need = Math.max(MIN_ROWS, Math.floor(top / perRow) + 1);
@@ -134,6 +149,6 @@ export function createSlots({ minRooms = MIN_ROOMS, saved = null } = {}) {
       } else lowSince = 0;
       return { slotOf: new Map(slotOf), rows, size: rows * perRow, grew: rows > was, shrank: rows < was };
     },
-    toJSON() { return { v: 1, perRow, slots: Object.fromEntries(slotOf) }; },
+    toJSON() { return { v: 1, perRow, slots: Object.fromEntries(memory) }; },
   };
 }

@@ -222,10 +222,73 @@ test('slots: saved slots made for another row size, or in conflict, are not trus
   for (const bad of [null, undefined, 'x', 5, { slots: 3 }, { perRow: 5, slots: null }]) assert.equal(createSlots({ saved: bad }).update(list, 0).slotOf.size, 4);
 });
 
-test('slots: a saved slot beyond the minimum building brings the row back with it', () => {
-  const r = createSlots({ saved: { v: 1, perRow: 5, slots: { 'chat-000': 12 } } }).update(chats(1), 0);
-  assert.equal(r.slotOf.get('chat-000'), 12);
+test('slots: a remembered slot beyond the building is honoured only when this many chats need that many offices', () => {
+  const saved = { v: 1, perRow: 5, slots: { 'chat-000': 12, 'chat-005': 11 } };
+  const few = createSlots({ saved }).update(chats(1), 0);
+  assert.equal(few.slotOf.get('chat-000'), 0, 'one chat does not bring a row back');
+  assert.equal(few.rows, MIN_ROWS);
+  const many = createSlots({ saved }).update(chats(12), 0);
+  assert.equal(many.slotOf.get('chat-005'), 11, 'twelve chats need three rows: the remembered office is in them');
+  assert.equal(many.rows, 3);
+  assert.equal(new Set(many.slotOf.values()).size, 12);
+});
+
+test('slots: a chat that falls asleep (goes to the shelf) frees its office; it gets it back on waking if it is still free', () => {
+  const S = createSlots();
+  const all = chats(6);
+  let r = S.update(all, 0);
+  assert.equal(r.slotOf.get('chat-002'), 2);
+  const asleep = all.filter(c => c.id !== 'chat-002');
+  r = S.update(asleep, 1000);
+  assert.equal(r.slotOf.has('chat-002'), false, 'no room while asleep');
+  for (const c of asleep) assert.equal(r.slotOf.get(c.id), Number(c.id.slice(5)), 'nobody else moved');
+  r = S.update(all, 2000);
+  assert.equal(r.slotOf.get('chat-002'), 2, 'back in its own office');
+});
+
+test('slots: a chat that wakes to find its office taken gets the lowest free slot', () => {
+  const S = createSlots();
+  const all = chats(6);
+  S.update(all, 0);
+  const asleep = all.filter(c => c.id !== 'chat-002');
+  S.update(asleep, 1000);
+  let r = S.update([...asleep, chat(50, 500)], 2000);
+  assert.equal(r.slotOf.get('chat-050'), 2, 'a newcomer takes the freed office');
+  r = S.update([...asleep, chat(50, 500), chat(2)], 3000);
+  assert.equal(r.slotOf.get('chat-050'), 2, 'and keeps it');
+  assert.equal(r.slotOf.get('chat-002'), 6, 'the sleeper takes the lowest free slot');
+  assert.equal(r.rows, MIN_ROWS);
+});
+
+test('slots: a woken chat whose remembered office is outside the building takes the lowest free office', () => {
+  const S = createSlots();
+  S.update(chats(12), 0);                                  // three rows, chat-011 in slot 11
+  const nine = chats(9);
+  S.update(nine, 10);                                      // chats 9, 10 and 11 fall asleep
+  S.update(nine, 10 + SHRINK_MS + 1);                      // the third row has stood empty long enough: it goes
+  assert.equal(S.rows, MIN_ROWS);
+  const r = S.update([...nine, chat(11)], 20 + SHRINK_MS);
+  assert.equal(r.slotOf.get('chat-011'), 9, 'ten chats fit the ten offices: no row comes back for it');
+  assert.equal(r.rows, MIN_ROWS);
+});
+
+test('slots: a woken chat that makes the crowd too big for the offices gets its old office back in the row that returns', () => {
+  const S = createSlots();
+  S.update(chats(12), 0);
+  const ten = chats(10);
+  S.update(ten, 10);
+  S.update(ten, 10 + SHRINK_MS + 1);
+  assert.equal(S.rows, MIN_ROWS);
+  const r = S.update([...ten, chat(11)], 20 + SHRINK_MS);
+  assert.equal(r.slotOf.get('chat-011'), 11);
   assert.equal(r.rows, 3);
+});
+
+test('slots: only the newest few hundred chats are remembered', () => {
+  const S = createSlots();
+  for (let i = 0; i < 600; i++) { S.update([chat(i)], i); S.update([], i + 0.5); }
+  const n = Object.keys(S.toJSON().slots).length;
+  assert.ok(n <= 400 && n >= 100, `${n} remembered`);
 });
 
 test('slots: the smallest and the largest minimum both lay out', () => {
@@ -247,11 +310,13 @@ test('stability: over thousands of random arrivals and departures nothing that s
   for (const min of [10, 6, 3]) {
     const S = createSlots({ minRooms: min });
     const perRow = perRowFor(min);
-    let live = new Map(), nextId = 0, now = 0, prev = null;
+    let live = new Map(), gone = [], nextId = 0, now = 0, prev = null;
     for (let step = 0; step < 4000; step++) {
       now += Math.floor(rnd() * 20000);
-      if (rnd() < 0.55 && live.size < 4 * min) live.set('c' + nextId, nextId++);
-      else if (live.size) { const ids = [...live.keys()]; live.delete(ids[Math.floor(rnd() * ids.length)]); }
+      if (rnd() < 0.55 && live.size < 4 * min) {
+        if (gone.length && rnd() < 0.3) { const [id, order] = gone.splice(Math.floor(rnd() * gone.length), 1)[0]; live.set(id, order); }       // a sleeper wakes
+        else live.set('c' + nextId, nextId++);
+      } else if (live.size) { const ids = [...live.keys()], id = ids[Math.floor(rnd() * ids.length)]; gone.push([id, live.get(id)]); live.delete(id); }
       const r = S.update([...live].map(([id, order]) => ({ id, order })), now);
       assert.equal(new Set(r.slotOf.values()).size, live.size, 'one office per chat');
       for (const s of r.slotOf.values()) assert.ok(s >= 0 && s < r.size, 'every chat has an office in the building');

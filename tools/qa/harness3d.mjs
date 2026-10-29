@@ -22,13 +22,13 @@ async function startServerAt(root, dir) {
 // an expression evaluated with `o` = the 3D view's QA state and `v` = its element
 export const o3 = expr => `(()=>{const v=document.querySelector('#view-ofis'), o=v.__ofis3d, s=v.__ofis; return ${expr}})()`;
 
-// The people the scene shows once it has settled: one chief per room, plus the working subagents that fit a room (3, 6 or 12 desks)
+// The people the scene shows once it has settled: one chief per room (an asleep chat is on the shelf, not in a room), plus the working subagents that fit a room (6 or 12 desks)
 export function expectedFigures(agents) {
-  const mains = agents.filter(a => a.kind === 'main');
+  const mains = agents.filter(a => a.kind === 'main' && a.status !== 'dormant');
   let n = mains.length;
   for (const m of mains) {
     const subs = agents.filter(a => a.kind === 'sub' && a.parent === m.id && a.status === 'working').length;
-    n += Math.min(subs, subs <= 3 ? 3 : subs <= 6 ? 6 : 12);
+    n += Math.min(subs, 12);
   }
   return n;
 }

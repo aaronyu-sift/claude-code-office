@@ -65,7 +65,7 @@ async function runMain(ctx) {
   const S = await scenario3d(10, { tag: 'main', root: ctx.root });
   try {
     const { page, agents } = S;
-    const mains = agents.filter(a => a.kind === 'main');
+    const mains = agents.filter(a => a.kind === 'main' && a.status !== 'dormant');           // an asleep chat is on the shelf: it has no room
     const bl = await blank(page);
     const files = await models(page);
     const byUrl = new Map(files.map(f => [f.url, f]));
@@ -85,7 +85,7 @@ async function runMain(ctx) {
     const first = await page.evaluate(o3('o.rebuildMs')), best = Math.min(...rebuilds);
     const bytes = files.reduce((s, f) => s + f.bytes, 0);
     res.push(make('3d-budget', info.calls <= BUDGET.calls && info.tris <= BUDGET.tris && best <= BUDGET.rebuildMs && bytes <= BUDGET.modelBytes && files.length === KEYS.length + 1,
-      `10 agents (${S.expect} figures) at fit zoom: ${info.calls} draw calls (budget ${BUDGET.calls}), ${info.tris} triangles (${BUDGET.tris}), rebuild at ${mains.length} rooms ${rebuilds.map(r => r.toFixed(0)).join(', ')} ms, best ${best.toFixed(0)} (${BUDGET.rebuildMs}), `
+      `10 agents (${S.expect} figures) at fit zoom: ${info.calls} draw calls (budget ${BUDGET.calls}), ${info.tris} triangles (${BUDGET.tris}), rebuild of the 10 offices (${mains.length} with a chat) ${rebuilds.map(r => r.toFixed(0)).join(', ')} ms, best ${best.toFixed(0)} (${BUDGET.rebuildMs}), `
       + `${files.length} model files ${(bytes / 1e6).toFixed(2)} MB (${BUDGET.modelBytes / 1e6} MB), ${info.geos} geometries, ${info.tex} textures`));
     ctx.info = { info, rebuilds, bytes, files: files.length, first };
 

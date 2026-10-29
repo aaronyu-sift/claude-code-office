@@ -10,6 +10,7 @@ import { LOOP, wave } from './motion.js';
 import * as AS from './ofis-assets.js';
 import * as PL from './ofis-polish.js';
 import { makePalette, PALETTES, chooseOutfit, poseBones } from './ofis-rig.js';
+import { isShelved } from './pixel/shelf.js';
 import {
   WALL_T, ROOM_D, CHEF_W, COL_W, FRONT_M, GAP, HALL_D, HALL_OPEN_D, HALL_GAP, COLS, CAP, roomW,
   MIN_ROWS, VACANT_CLS, minRoomsFrom, buildingPlan, classFor, nextClass, createSlots,
@@ -931,7 +932,8 @@ export function createOfis(root, ctx) {
     const sg0 = shell.signX0, sg1 = shell.signX1;
     const sw = Math.min(sg1 - sg0, 5.4), sh = SIGN_H;
     const scx = sg0 + Math.min(sw / 2 + 0.2, (sg1 - sg0) / 2);
-    makeSign(g, room, X + scx, SIGN_Y, Z, sw, sh);
+    if (it.vacant) makeVacantSign(g, X + scx, SIGN_Y, Z, sw, sh);
+    else makeSign(g, room, X + scx, SIGN_Y, Z, sw, sh);
     b(scx, SIGN_Y, 0.012, sw + 0.1, sh + 0.1, 0.024, cap);
     const poster = x => {
       const bg = POSTERS[(r() * POSTERS.length) | 0], fg = POSTERS[(r() * POSTERS.length) | 0];
@@ -1245,6 +1247,23 @@ export function createOfis(root, ctx) {
 
   // ---------------------------------------------------------- room sign: wall-mounted acrylic plaque
 
+  // A vacant office has a quiet grey sign, painted once: nothing to click, no your-turn lamp.
+  function makeVacantSign(g, x, y, z, w, h) {
+    const cv = document.createElement('canvas');
+    cv.height = SIGN_PX;
+    cv.width = Math.min(2048, Math.round(SIGN_PX * w / h));
+    const tex = new THREE.CanvasTexture(cv);
+    tex.colorSpace = THREE.SRGBColorSpace;
+    tex.anisotropy = aniso;
+    paintPlaque(cv, { name: msg('of.vacant'), title: '', color: '#8a93a3', status: '' });
+    const face = new THREE.MeshBasicMaterial({ map: tex });
+    const mesh = new THREE.Mesh(new THREE.BoxGeometry(w, h, 0.06), [MAT.signSide, MAT.signSide, MAT.signSide, MAT.signSide, face, MAT.signSide]);
+    mesh.position.set(x, y, z + 0.055);
+    mesh.userData.own = true;
+    mesh.userData.dispose = () => { face.dispose(); tex.dispose(); };
+    g.add(mesh);
+  }
+
   function makeSign(g, room, x, y, z, w, h) {
     const cv = document.createElement('canvas');
     cv.height = SIGN_PX;
@@ -1258,13 +1277,8 @@ export function createOfis(root, ctx) {
     mesh.position.set(x, y, z + 0.055);
     mesh.userData.own = true;
     mesh.userData.dispose = () => { face.dispose(); tex.dispose(); };
-    g.add(mesh);
-    if (room.vacant) {                                  // a vacant office has a quiet grey sign, painted once: nothing to click, no your-turn lamp
-      paintPlaque(cv, { name: msg('of.vacant'), title: '', color: '#8a93a3', status: '' });
-      tex.needsUpdate = true;
-      return;
-    }
     mesh.userData.pick = { t: 'agent', id: room.id };
+    g.add(mesh);
     world.pick.push(mesh);
     // your-turn lamp: blinks at the sign's top-right corner
     const lamp = new THREE.Mesh(GEO.lamp, new THREE.MeshBasicMaterial({ color: YELLOW }));
@@ -2043,7 +2057,7 @@ export function createOfis(root, ctx) {
   // ---------------------------------------------------------- sync with the data
 
   function syncRooms(instant) {
-    const mains = store.mains();
+    const mains = store.mains().filter(a => !isShelved(a));            // an asleep chat has no room: it is on the shelf, and its office is free for another chat
     const nowMs = performance.now();
     // the slot of every chat: a new chat takes the lowest free office, an office stays with its chat; more chats than offices append a row
     const plan = slots.update(mains.map(m => ({ id: m.id, order: m.started || 0 })), nowMs);
