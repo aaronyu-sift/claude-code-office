@@ -330,7 +330,9 @@ function pack(items, lead0 = 0, lead1 = 0) {
 
 // ------------------------------------------------------------ view
 
-export function createOfis(root, ctx) {
+// opts: { settings (office-settings.js: time, season, weather, hemisphere, shelf), atmosphere (office-atmosphere.js: the clock, season and weather of the surroundings) };
+// without them the scene follows the local clock and the address
+export function createOfis(root, ctx, opts = {}) {
   const { store } = ctx;
   root.innerHTML =
     '<div class="of-stage"></div><div class="of-layer"></div>' +
@@ -474,7 +476,7 @@ export function createOfis(root, ctx) {
   scene.add(hoverRing);
 
   // surroundings (street, river, woods, mountains): laid out around world.bounds in applyBounds, animated in step
-  const env = createEnv({ scene, camera, lights: { hemi, sun }, lightDir: LIGHT, softwareGL: SOFTWARE_GL, fitBox: () => projBounds() });
+  const env = createEnv({ scene, camera, lights: { hemi, sun }, lightDir: LIGHT, softwareGL: SOFTWARE_GL, fitBox: () => projBounds(), atmosphere: opts.atmosphere });
 
   // ---------------------------------------------------------- state
 

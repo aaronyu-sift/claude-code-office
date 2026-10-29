@@ -21,7 +21,7 @@ QA check `21-motion` measures the real animations in Chrome.
 | Walker | an agent walking between desks | constant speed along the path with a short speed-up and slow-down at the ends, walk cycle paced by the speed | no feet sliding |
 | Indicator | the working dot, the thinking dots, the waiting balloon and lamp, the light beam | looping sine of the clock, two tempos, never more than 3 flashes a second | slow 2400 ms (a state that continues), quick 1200 ms (it wants a look) |
 | Ambient scenery | candles, street lights, monitor glow, steam, drifting leaves, snow, fireflies | follows the clock, never a spring, never started by a click; each instance has its own phase and they do not share a period on purpose; a flicker is stepped random (8 to 10 steps a second) or a plain sine | small amplitude: under 8 percent brightness, under 6 px |
-| Cycle | day and night, seasons, weather | follows the clock, linear, no easing | slow |
+| Cycle | day and night, seasons, weather | follows the clock, linear, no easing; a change made by hand moves the light at a constant rate, never in a step | slow: `CYCLE.turn` 4000 ms for a full change of the light |
 
 Why each choice: a click has no momentum, so a surface that it opens does not overshoot; the same goes for the camera, which would make the whole map wobble. A small control may
 hint at a bounce because its distance is tiny and the bounce says "I am responding". A built thing is a small celebration and may bounce. Colour and opacity have no mass, so they
@@ -66,6 +66,7 @@ never overshoot. Indicators and scenery are not pushed by anything, so a spring 
 | `--spring-follow`, `--spring-follow-ms` | 0.6 s, bounce 0: 858 ms | the camera |
 | `--loop-slow` / `LOOP.slow` | 2400 ms | an indicator for a state that continues (working dot, light beam) |
 | `--loop-quick` / `LOOP.quick` | 1200 ms | an indicator that wants a look (waiting balloon and lamp, thinking dots) |
+| `CYCLE.turn` (script only) | 4000 ms | the time a full change of the light (0 to 1) takes in the 3D scene: day to night, clear to rain; the real clock moves it a little every minute |
 
 The spring easings are CSS `linear()` functions through 48 points of the real spring's step response, so CSS and the Web Animations API move exactly like the physics; the
 millisecond value is the time the spring needs to settle to within 0.3 percent.
@@ -85,6 +86,9 @@ millisecond value is the time the spring needs to settle to within 0.3 percent.
 - Indicator: done. The working dot uses the slow tempo and the thinking dots and the waiting balloon the quick one (CSS); in the pixel scene the light beam is slow and the waiting
   figure's bob is quick; in the 3D scene the beam is slow and the lamp's blink is quick.
 - Ambient scenery in the pixel scene (monitor glow, steam, snow, petals, fireflies, sway) already follows the clock with a phase of its own per instance, as the rule asks.
+- Cycle in the 3D scene: the light of the day and night (lit windows, lamps, the sun's and the sky's strength and colour) and the weather's share of it move toward what the clock and the
+  settings ask for at a constant rate (`ofis-env.js` `stepLight`, the pure `approach` in `office-atmosphere.js`, pace `CYCLE.turn`); a time chosen in the popover is a slow change, not a step.
+  The weather overlay's particles are ambient scenery (clock-driven, a phase per particle, at most 10 frames a second); with reduced motion the weather is off.
 - Waiting for the new art style and assets (the 3D scene, plan item S17): the camera on the `follow` spring, the construction animation on the `build` spring, eased growth of a room,
   a check that walkers keep a constant speed with a short ramp and a walk cycle paced by it, and the flicker of candles and street lights (stepped random, one shared helper).
 - Open: WCAG 2.2.2 asks for a way to pause, stop or hide a loop that starts by itself and lasts more than five seconds. The reduced-motion setting is the only stop today; there is

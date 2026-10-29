@@ -5,11 +5,15 @@
 // lamps and the windows light up. The island is rebuilt only when the building or the lots change size, or when
 // a resized view needs a bigger island to reach past its edges.
 //
-// Preview another time of day by adding ?hour=21 to the page URL (before the #); ?env=0 leaves the surroundings out.
+// The time of day, the season and the weather come from the atmosphere (office-atmosphere.js: the local clock, or the time chosen in the popover; the month moves
+// sunrise and sunset, the hemisphere turns the months round). Preview another time with ?time=21:30 (or ?hour=21) in the page address; ?env=0 leaves the surroundings out.
 import * as THREE from 'three';
 import { RoundedBoxGeometry } from 'three/addons/geometries/RoundedBoxGeometry.js';
 import * as AS from './ofis-assets.js';
 import { makePalette, PALETTES } from './ofis-rig.js';
+import { CYCLE } from './motion.js';
+import { createAtmosphere, lightTarget, lightVector, approach } from './office-atmosphere.js';
+import { createOfficeSettings, officeQuery } from './office-settings.js';
 
 // Trees, bushes and rocks come from the Nature Kit (ofis-assets.js loaded it before this module runs), recoloured to this scene's greens
 // and browns and baked into vertex colours; a model that did not load leaves the procedural tree, bush or rock in its place.
@@ -1262,7 +1266,8 @@ function drawWater(g, w, h) {
 
 // ------------------------------------------------------------ the module
 
-export function createEnv({ scene, camera, lights = null, lightDir = null, softwareGL = false, fitBox = null } = {}) {
+// opts.atmosphere: the clock, season and weather (office-atmosphere.js); without one the scene follows the local clock and the address (?time, ?season, ?weather, ?hemisphere)
+export function createEnv({ scene, camera, lights = null, lightDir = null, softwareGL = false, fitBox = null, atmosphere = null } = {}) {
   const lite = !!softwareGL;
   const root = new THREE.Group();
   root.name = 'environment';
@@ -1285,9 +1290,8 @@ export function createEnv({ scene, camera, lights = null, lightDir = null, softw
   const TREE = treeGeometries();
 
   const params = (() => { try { return new URLSearchParams(location.search); } catch { return new URLSearchParams(); } })();
-  const hourParam = params.get('hour') !== null && params.get('hour') !== '' && Number.isFinite(+params.get('hour'))
-    ? ((+params.get('hour') % 24) + 24) % 24 : null;
   const off = params.get('env') === '0';
+  const atm = atmosphere || createAtmosphere({ settings: createOfficeSettings({ overrides: officeQuery(typeof location === 'undefined' ? '' : location.search) }) });
 
   let pending = null, pendingAt = 0, delay = 90, sig = '', built = false, L = null, last = null, builtRect = null, checkAt = -1e9;
   // road connections requested by the local lots (roadApi); registered anew on every office rebuild
@@ -1309,7 +1313,9 @@ export function createEnv({ scene, camera, lights = null, lightDir = null, softw
     for (const fn of roadFns.slice()) { try { fn(payload); } catch (err) { report('onRoadsChange', err); } }
   }
   let cars = [], glowPts = null, poolMesh = null, stats = {};
-  let night = -1, dayAt = -1e9, lightBase = null, errLogged = false;
+  let night = -1, lightBase = null, errLogged = false;
+  // the light: `want` is what the atmosphere asks for now, `shown` what the lights are set to; shown moves toward want at a constant rate (motion.js CYCLE), never in a step
+  let want = null, shown = null, atmSeen = -1, lightDirty = true;
   const report = (where, err) => {
     if (errLogged) return;
     errLogged = true;
@@ -1410,29 +1416,24 @@ export function createEnv({ scene, camera, lights = null, lightDir = null, softw
         cars.push({ m, dir, speed });
       });
     }
-    night = -1; dayAt = -1e9;     // re-apply the time of day to the new meshes on the next frame
+    lightDirty = true;            // re-apply the time of day to the new meshes on the next frame
     built = true;
     const tris = root.children.reduce((s, o) => s + (o.geometry && o.geometry.index ? o.geometry.index.count / 3 * (o.isInstancedMesh ? o.count : 1) : 0), 0);
     stats = {
       ms: +(performance.now() - t0).toFixed(1), meshes: root.children.length, tris: Math.round(tris),
       trees: c.trees.round.length + c.trees.pine.length + c.trees.bush.length, island: [L.I.x1 - L.I.x0, L.I.z1 - L.I.z0],
-      roads: L.roads.length,
+      roads: L.roads.length, houses: L.houses.length, firstHouse: L.houses[0] ? [+(L.houses[0].x0 + L.houses[0].w / 2).toFixed(2), +(L.houses[0].z0 + L.houses[0].d).toFixed(2)] : null,
     };
     builtRoads = roadsKey();
     notifyRoads(network(L.b, L.I));
   }
 
-  function hourNow() {
-    if (hourParam !== null) return hourParam;
-    const d = new Date();
-    return d.getHours() + d.getMinutes() / 60;
-  }
-  // 0 by day, 1 at night, with an hour and a half of dusk and dawn
-  const darkness = h => Math.max(1 - smooth(5.6, 7.1, h), smooth(18.6, 20.1, h));
-  const NIGHT_SKY = new THREE.Color('#9fb2ff'), MOON = new THREE.Color('#aebfff');
-  function setNight(k) {
-    if (Math.abs(k - night) < 0.01) return;
-    night = k;
+  const NIGHT_SKY = new THREE.Color('#9fb2ff'), MOON = new THREE.Color('#aebfff'), _c = new THREE.Color();
+  // The lights for a shown state v = [k, sunDim, skyDim, wmix, wr, wg, wb, amix, ar, ag, ab] (office-atmosphere.js lightVector): k is how far the night is on (lit
+  // windows, lamps, glow, a dimmer and cooler sun and sky), the weather takes some of the sun's and the sky's light and pulls their colour toward its own, and dawn and dusk
+  // warm the sun's colour.
+  function applyLight(v) {
+    const k = night = v[0];
     MAT.lit.emissive.setRGB(1, 0.74, 0.4).multiplyScalar(0.9 * k);
     MAT.glow.opacity = k;
     MAT.pool.opacity = 0.34 * k;
@@ -1441,11 +1442,18 @@ export function createEnv({ scene, camera, lights = null, lightDir = null, softw
     if (lights && lights.hemi && lights.sun) {
       const { hemi, sun } = lights;
       if (!lightBase) lightBase = { hi: hemi.intensity, si: sun.intensity, hc: hemi.color.clone(), sc: sun.color.clone() };
-      hemi.intensity = lightBase.hi * (1 - 0.3 * k);
-      sun.intensity = lightBase.si * (1 - 0.45 * k);
-      hemi.color.copy(lightBase.hc).lerp(NIGHT_SKY, 0.35 * k);
-      sun.color.copy(lightBase.sc).lerp(MOON, 0.5 * k);
+      hemi.intensity = lightBase.hi * (1 - 0.3 * k) * (1 - v[2]);
+      sun.intensity = lightBase.si * (1 - 0.45 * k) * (1 - v[1]);
+      hemi.color.copy(lightBase.hc).lerp(NIGHT_SKY, 0.35 * k).lerp(_c.setRGB(v[8], v[9], v[10]), 0.4 * v[7]).lerp(_c.setRGB(v[4], v[5], v[6]), 0.5 * v[3]);
+      sun.color.copy(lightBase.sc).lerp(MOON, 0.5 * k).lerp(_c.setRGB(v[8], v[9], v[10]), v[7]).lerp(_c.setRGB(v[4], v[5], v[6]), v[3]);
     }
+  }
+  // each frame: take what the atmosphere says now (one comparison when nothing changed) and move the lights toward it; the first frame sets them at once
+  function stepLight(dt) {
+    if (atm.version !== atmSeen || !want) { atmSeen = atm.version; want = lightVector(lightTarget(atm.state)); }
+    if (!shown) shown = want.slice();
+    const moved = approach(shown, want, (dt * 1000) / CYCLE.turn);
+    if (moved || lightDirty) { lightDirty = false; applyLight(shown); }
   }
 
   return {
@@ -1496,12 +1504,18 @@ export function createEnv({ scene, camera, lights = null, lightDir = null, softw
           m.scale.setScalar(Math.max(0.001, s));
           m.visible = s > 0.02;
         }
-        if (T - dayAt > 5) { dayAt = T; setNight(darkness(hourNow())); }
+        stepLight(dt);
         if (glowPts && glowPts.visible) MAT.glow.size = 2.6 * camera.zoom;
       } catch (err) { report('frame', err); }
     },
     // for verification: build time, the draw calls the surroundings add right now (one per visible mesh), sizes
-    get stats() { return { ...stats, draws: root.children.filter(o => o.visible).length, night: +Math.max(0, night).toFixed(2) }; },
+    get stats() {
+      const a = atm.state, sun = lights && lights.sun, hemi = lights && lights.hemi;
+      return { ...stats, draws: root.children.filter(o => o.visible).length, night: +Math.max(0, night).toFixed(2),
+        sun: sun ? +sun.intensity.toFixed(3) : null, hemi: hemi ? +hemi.intensity.toFixed(3) : null, sunColor: sun ? '#' + sun.color.getHexString() : null,
+        minute: a.minute, month: a.month, phase: a.phase, fixed: a.fixed, season: a.season, weather: a.weather, wantNight: want ? +want[0].toFixed(3) : null,
+        settled: !!want && !!shown && atmSeen === atm.version && shown.every((x, i) => x === want[i]) };
+    },
     // the office calls this at the start of every rebuild: the local module registers its connections again
     resetRoads() {
       if (roadReqs.length) roadsDirty = true;

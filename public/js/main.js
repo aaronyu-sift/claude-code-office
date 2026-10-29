@@ -5,6 +5,7 @@ import { createPixelOffice } from './pixel/index.js';
 import { createOpenMenu } from './pixel/open-menu.js';
 import { fromQuery } from './pixel/settings.js';
 import { createOfficeSettings, officeQuery, urlAfterChange, OFFICE3D_ROWS } from './office-settings.js';
+import { createAtmosphere } from './office-atmosphere.js';
 import { createSettingsPanel } from './settings-panel.js';
 import { createAkis } from './akis.js';
 import { createMaliyet } from './maliyet.js';
@@ -172,8 +173,10 @@ function createOffice(root) {
   root.dataset.scene = '3d';
   // the 3D scene has no camera toggle: the popover shows the rows it supports; the choices are remembered under the same keys as the pixel scene's
   const settings = createOfficeSettings({ overrides: officeQuery(location.search) });
+  const atmosphere = createAtmosphere({ settings });              // the clock, season and weather of the surroundings (time of day: ofis-env.js)
+  root.__office = { settings, atmosphere };                       // read-only state for QA (tools/qa/office3d-env-qa.mjs)
   let real = null, visible = false;
-  import('./ofis.js').then(m => { real = m.createOfis(root, ctx, { settings }); if (visible) real.show(); })
+  import('./ofis.js').then(m => { real = m.createOfis(root, ctx, { settings, atmosphere }); if (visible) real.show(); })
     .catch(e => { console.error('[ofis]', e); root.innerHTML = `<div class="empty">${esc(msg('view.failed'))}<br><span class="faint mono">${esc(e && e.message || e)}</span></div>`; });
   return (sceneSettings = {
     show() { visible = true; if (real) real.show(); },
