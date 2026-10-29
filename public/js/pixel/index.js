@@ -442,10 +442,13 @@ export function createPixelOffice(root, ctx, opts = {}) {
   // What floats over the scene (CSS px, from the top and from the right of the area): the page's bar and the shelf card. The scene spans the whole
   // area behind them; "fit" frames the offices in what is left, and the agent card is placed there too.
   const LABEL_ROOM = 56;                                              // CSS px kept free above the offices for the labels of the top row of agents
+  // where an element rests, not where an animation has it right now: its box without transforms (the shelf card arrives with a small travel and scale, and the
+  // first fit runs the moment it appears)
+  const restLeft = el => { const p = el.offsetParent; return p ? p.getBoundingClientRect().left + p.clientLeft + el.offsetLeft : el.getBoundingClientRect().left; };
   function covered() {
     const a = area.getBoundingClientRect(), top = parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--top-h'));
     const shelfEl = root.querySelector('.of-shelf');
-    const right = shelfEl && !shelfEl.hidden && root.dataset.shelf === 'open' ? Math.max(0, a.right - shelfEl.getBoundingClientRect().left + 8) : 0;
+    const right = shelfEl && !shelfEl.hidden && root.dataset.shelf === 'open' ? Math.max(0, a.right - restLeft(shelfEl) + 8) : 0;
     return { top: Number.isFinite(top) ? Math.max(0, Math.min(top - a.top + 4, a.height * 0.4)) : 0, right: right > a.width * 0.45 ? 0 : right };
   }
   function fit(draw = true) {

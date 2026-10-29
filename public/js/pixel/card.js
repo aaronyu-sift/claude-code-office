@@ -6,7 +6,7 @@ import { t as msg } from '../i18n.js';
 import { esc, fmtShort, fmtClock, catColor, CATS, icon } from '../util.js';
 import { createOpenMenu } from './open-menu.js';
 import { placeCard } from './cardplace.js';
-import { enter, leave, comesFrom, DUR } from '../motion.js';
+import { enter, leave, comesFrom, SPRING } from '../motion.js';
 
 const SUB_MAX = 6;
 // the clock texts inside a card are kept by the page's ticker; a re-render for them alone would only close the menu and move the scroll
@@ -113,7 +113,7 @@ export function createAgentCard({ root, ctx, storage = null, anchorOf, boundsOf,
   function glide() {
     el.classList.add('glide');
     clearTimeout(glideTimer);
-    glideTimer = setTimeout(() => el.classList.remove('glide'), DUR.base + 60);
+    glideTimer = setTimeout(() => el.classList.remove('glide'), SPRING.glide.ms + 60);
   }
   function open(id, row = null) {
     if (!resolve(id)) return false;

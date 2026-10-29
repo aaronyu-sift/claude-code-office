@@ -6,6 +6,7 @@ import { RoundedBoxGeometry } from 'three/addons/geometries/RoundedBoxGeometry.j
 import { catColor, hash, esc, icon, fmtShort } from './util.js';
 import { t as msg } from './i18n.js';
 import { createEnv } from './ofis-env.js';
+import { LOOP, wave } from './motion.js';
 
 // ------------------------------------------------------------ dimensions (1 unit ≈ 1 meter)
 
@@ -2093,10 +2094,10 @@ export function createOfis(root, ctx) {
       });
       if (room.lamp) room.lamp.visible = room.halo.visible = wait;
       if (wait) {
-        room.beam.material.opacity = 0.2 + Math.sin(T * 3) * 0.06;
-        room.disc.material.opacity = 0.3 + Math.sin(T * 3) * 0.08;
+        room.beam.material.opacity = 0.2 + wave(T * 1000, LOOP.slow) * 0.06;
+        room.disc.material.opacity = 0.3 + wave(T * 1000, LOOP.slow) * 0.08;
         if (room.lamp) {
-          const blink = 0.5 + 0.5 * Math.sin(T * 6);
+          const blink = 0.5 + 0.5 * wave(T * 1000, LOOP.quick);
           room.halo.material.opacity = 0.35 + 0.65 * blink;
           room.halo.scale.setScalar(0.9 + 0.5 * blink);
           room.lamp.material.color.set(YELLOW).multiplyScalar(0.75 + 0.35 * blink);

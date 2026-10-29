@@ -683,8 +683,9 @@ if (want('shelf-style')) {
     };
     const widths = [360, 700, 1024, 1500, 2560];
     for (const w of widths) {
-      await S.page.setViewport(w, 900, 1);
-      await P('p.setShelfFolded(false)'); await sleep(700);
+      // the card is open before the window changes size, as in use: the fit that a resize triggers frames the offices beside it. (Unfolding the card afterwards never moves the map, rule 6 of
+      // docs/motion.md, so unfolding it after the resize would leave the offices where the folded view put them, and whether the resize or the unfold came first was a matter of timing.)
+      await P('p.setShelfFolded(false)'); await S.page.setViewport(w, 900, 1); await sleep(900);
       const { g, btnsRect } = await around();
       const L = `${w}px open`, A = g.area, labs = (await P('p.labelRects()')).filter(l => l.shown).map(l => ({ x: A.x + l.x, y: A.y + l.y, w: l.w, h: l.h }));
       const figs = (await P('p.figures().map(id => p.agentCss(id))')).filter(Boolean).map(f => ({ x: A.x + f.x - 12, y: A.y + f.y - 12, w: 24, h: 24 }));
@@ -733,6 +734,29 @@ if (want('shelf-style')) {
     } finally { await N.done(); }
     check('15-shelf-style', bad.length === 0 && S.page.errors.length === 0,
       `${bad.length ? 'FAILED: ' + bad.slice(0, 6).join('; ') + '; ' : ''}card ${dark.card.backgroundColor}, ${dark.card.backdropFilter}, border ${dark.card.borderTopWidth} ${dark.card.borderTopColor}, radius ${dark.card.borderTopLeftRadius}, padding ${dark.card.paddingTop} ${dark.card.paddingLeft}; chip ${dark.chip.color} ${dark.chip.fontWeight} ${dark.chip.fontSize} ${dark.chip.textTransform} spacing ${dark.chip.letterSpacing}; row radius ${dark.row.borderTopLeftRadius}, name ${dark.name.fontSize}/${dark.name.fontWeight} ${dark.name.color}, hover ${hov}; round buttons ${dark.zoom.borderTopColor} on ${dark.zoom.backgroundColor}, hover border ${hovZ}; the same in a light system theme ${JSON.stringify(light.card) === JSON.stringify(dark.card) && JSON.stringify(light.name) === JSON.stringify(dark.name)}; ${rowsOut.join('; ')}; empty shelf: ${none ? none.mode : '?'}, scene ${none ? none.area.w.toFixed(0) : '?'} of ${none ? none.view.w.toFixed(0) : '?'}; console errors ${S.page.errors.length}`);
+  } finally { await S.done(); }
+}
+
+// ---- 15-shelf-fit: "fit" frames the offices in the free part of the view, and that must not depend on when it runs. The shelf card arrives with a small travel and scale, and the
+// first fit after it appears can run in the very tick it starts (the observer of the shelf mode), so the fit must use the card's resting box, not where the animation has it that moment:
+// a fit in the tick the card starts to arrive gives the same pan and zoom as a fit after it has settled.
+if (want('shelf-fit')) {
+  const S = await scenario(10, { tag: 'shfit', query: '?time=12:00', fixture: { closed: 12 } });
+  try {
+    const P = e => S.page.evaluate(px(e)), ev = e => S.page.evaluate(e);
+    const sleepUntil = async (fn, ms = 8000) => { let r; for (const t0 = Date.now(); Date.now() - t0 < ms; await sleep(200)) { r = await fn().catch(() => null); if (r) return r; } return r; };
+    await S.page.setViewport(1500, 900, 1);
+    await sleepUntil(async () => (await P('p.shelf().total')) >= 13);
+    await P('p.setShelfFolded(true)'); await sleep(900);
+    const early = await ev(`(() => { const p = document.querySelector('#view-ofis').__pixel; p.setShelfFolded(false); p.fit(); return JSON.stringify({ pan: p.pan, zoom: p.zoom, moving: document.querySelector('#view-ofis .of-shelf').getAnimations().length }); })()`).then(JSON.parse);
+    await sleep(1200);
+    const late = await ev(`(() => { const p = document.querySelector('#view-ofis').__pixel; p.fit(); return JSON.stringify({ pan: p.pan, zoom: p.zoom, moving: document.querySelector('#view-ofis .of-shelf').getAnimations().length }); })()`).then(JSON.parse);
+    const bad = [];
+    if (!early.moving) bad.push('the shelf card was not animating when the early fit ran, so the check proves nothing');
+    if (late.moving) bad.push('the shelf card was still animating at the late fit');
+    if (JSON.stringify([early.pan, early.zoom]) !== JSON.stringify([late.pan, late.zoom])) bad.push(`a fit while the card arrives gives pan ${JSON.stringify(early.pan)} zoom ${early.zoom}, a fit after it settled gives pan ${JSON.stringify(late.pan)} zoom ${late.zoom}`);
+    check('15-shelf-fit', bad.length === 0 && S.page.errors.length === 0,
+      bad.length ? `FAILED: ${bad.join('; ')}` : `a fit in the tick the shelf card starts to arrive (${early.moving} animations running) and a fit after it settled give the same pan ${JSON.stringify(late.pan)} and zoom ${late.zoom}; errors ${S.page.errors.length}`);
   } finally { await S.done(); }
 }
 
@@ -1101,27 +1125,36 @@ if (want('card')) {
 }
 
 // ---- 12. seasons: every outdoor id resolves, the pictures differ, the automatic season follows the date and the hemisphere
-// ---- 21-motion: the rules of docs/motion.md hold on the page. The CSS tokens equal public/js/motion.js; the card beside an agent comes out of its agent and leaves by the
-// rules; a click on the interface (a card, the shelf, a menu) moves nothing on the map; the details card and the shelf card follow the same rules; reduced motion removes the
-// travel; and app.css has no literal duration left in a transition.
+// ---- 21-motion: the rules of docs/motion.md hold on the page. The CSS tokens equal public/js/motion.js (the springs are generated from it); the card beside an agent comes
+// out of its agent on a spring (not linear, and no overshoot because a click has no momentum) and leaves on a quicker one; the loops of the indicators use the two loop tempos; a click on the interface (a card, the shelf, a menu) moves nothing
+// on the map; the details card and the shelf card use the same springs; reduced motion removes the travel; and app.css has no literal duration left in a transition.
 if (want('motion')) {
-  const { DUR, EASE } = await import('../../public/js/motion.js');
+  const { DUR, EASE, LOOP, SPRING, SLIDE, SCALE } = await import('../../public/js/motion.js');
   const S = await scenario(10, { tag: 'motion', query: '?time=12:00', fixture: { closed: 12 } });
   try {
     const P = e => S.page.evaluate(px(e)), ev = e => S.page.evaluate(e);
     const bad = [];
     const eq = (what, got, want_) => { if (JSON.stringify(got) !== JSON.stringify(want_)) bad.push(`${what}: ${JSON.stringify(got)} instead of ${JSON.stringify(want_)}`); };
     const norm = s => String(s).replace(/\s+/g, '');
+    // the points of the first linear(...) in a string, however the browser writes them (with or without stop positions)
+    const lin = str => { const m = /linear\(([^)]*)\)/.exec(str); return m ? m[1].split(',').map(x => parseFloat(x.trim())) : []; };
+    const sameCurve = (got, spring) => { const a = lin(got), b = lin(spring.css); return a.length === b.length && a.every((v, i) => Math.abs(v - b[i]) < 1e-3); };
     // a link of the card must never be followed in the QA browser
     await ev(`document.addEventListener('click', e => { if (e.target.closest && e.target.closest('.of-card a')) e.preventDefault(); }, true)`);
 
-    // 1. the tokens: the CSS variables equal motion.js, and no transition in app.css has a literal duration
-    const tokens = await ev(`(() => { const c = getComputedStyle(document.documentElement); return JSON.stringify(Object.fromEntries(['--m-hover', '--m-fast', '--m-base', '--m-slow', '--m-camera', '--ease-out', '--ease-in', '--ease-in-out', '--ease-spring', '--slide'].map(k => [k, c.getPropertyValue(k).trim()]))); })()`).then(JSON.parse);
-    for (const k of ['hover', 'fast', 'base', 'slow', 'camera']) eq('token --m-' + k, tokens['--m-' + k], DUR[k] + 'ms');
-    for (const [c, j] of [['out', 'out'], ['in', 'in'], ['in-out', 'inOut'], ['spring', 'spring']]) eq('token --ease-' + c, norm(tokens['--ease-' + c]), norm(EASE[j]));
+    // 1. the tokens: the CSS variables equal motion.js (the springs are generated from it), and no transition in app.css has a literal duration
+    const names = Object.keys(SPRING);
+    const tokens = await ev(`(() => { const c = getComputedStyle(document.documentElement); return JSON.stringify(Object.fromEntries(['--m-hover', '--m-fast', '--m-slow', '--ease-out', '--ease-in', '--ease-in-out', '--slide', '--scale-from', '--loop-slow', '--loop-quick', ...${JSON.stringify(names)}.flatMap(n => ['--spring-' + n, '--spring-' + n + '-ms'])].map(k => [k, c.getPropertyValue(k).trim()]))); })()`).then(JSON.parse);
+    for (const k of ['hover', 'fast', 'slow']) eq('token --m-' + k, tokens['--m-' + k], DUR[k] + 'ms');
+    for (const [c, j] of [['out', 'out'], ['in', 'in'], ['in-out', 'inOut']]) eq('token --ease-' + c, norm(tokens['--ease-' + c]), norm(EASE[j]));
+    for (const k of ['slow', 'quick']) eq('token --loop-' + k, tokens['--loop-' + k], LOOP[k] + 'ms');
+    eq('token --slide', tokens['--slide'], SLIDE + 'px'); eq('token --scale-from', Number(tokens['--scale-from']), SCALE);
+    for (const n of names) { eq(`token --spring-${n}-ms`, tokens[`--spring-${n}-ms`], SPRING[n].ms + 'ms'); if (!sameCurve(tokens['--spring-' + n], SPRING[n])) bad.push(`token --spring-${n} differs from motion.js`); }
     const css = readFileSync(join(ROOT, 'public/app.css'), 'utf8').split('\n');
     const literal = css.filter(l => /transition:/.test(l) && !/transition: none/.test(l) && /[\s:,](?!0s[\s;,])\.?\d+(\.\d+)?m?s[\s;,]/.test(l.replace(/var\([^)]*\)/g, '')));
     if (literal.length) bad.push(`${literal.length} transition lines in app.css with a literal duration: ${literal[0].trim().slice(0, 90)}`);
+    const loops = css.filter(l => /animation:[^;]*infinite/.test(l)), ownLoop = loops.filter(l => !/var\(--loop-(slow|quick)\)/.test(l));
+    if (!loops.length || ownLoop.length) bad.push(`${ownLoop.length} of ${loops.length} looping animations in app.css have a period of their own: ${(ownLoop[0] || '').trim().slice(0, 90)}`);
 
     // helpers
     const area = await ev(`document.querySelector('#view-ofis .of-area').getBoundingClientRect().toJSON()`);
@@ -1137,104 +1170,125 @@ if (want('motion')) {
     if (spots.length < 2) throw new Error('fewer than two figures can be clicked without a label, the bar, the shelf or a control over them');
     const [A, B] = spots;
     const view = async () => JSON.stringify({ pan: await P('p.pan'), zoom: await P('p.zoom') });
-    const anims = sel => ev(`(() => { const e = document.querySelector(${JSON.stringify(sel)}); if (!e) return '[]'; return JSON.stringify(e.getAnimations().map(a => ({ name: a.animationName || 'waapi', duration: a.effect.getTiming().duration, easing: a.effect.getTiming().easing, kf: a.effect.getKeyframes().map(k => ({ opacity: k.opacity, translate: k.translate })) }))); })()`).then(JSON.parse);
+    const anims = sel => ev(`(() => { const e = document.querySelector(${JSON.stringify(sel)}); if (!e) return '[]'; return JSON.stringify(e.getAnimations().map(a => ({ name: a.animationName || 'waapi', duration: a.effect.getTiming().duration, easing: a.effect.getTiming().easing, kf: a.effect.getKeyframes().map(k => ({ opacity: k.opacity, translate: k.translate, scale: k.scale })) }))); })()`).then(JSON.parse);
     const style = (sel, props) => ev(`(() => { const e = document.querySelector(${JSON.stringify(sel)}), c = getComputedStyle(e); return JSON.stringify(Object.fromEntries(${JSON.stringify(props)}.map(p => [p, c[p]]))); })()`).then(JSON.parse);
     // wait until the animations of the cards and the shelf are over (a headless browser with a busy main thread starts them late)
-    const settle = async () => { await sleep(120); for (let i = 0; i < 30; i++) { const n = await ev(`document.getAnimations().filter(a => (a.playState === 'running' || a.pending) && a.effect && a.effect.target && a.effect.target.closest && a.effect.target.closest('.of-card, .of-shelf, .of-shelf-tab, #drawer')).length`); if (!n) return; await sleep(100); } };
+    const settle = async () => { await sleep(120); for (let i = 0; i < 40; i++) { const n = await ev(`document.getAnimations().filter(a => (a.playState === 'running' || a.pending) && a.effect && a.effect.target && a.effect.target.closest && a.effect.target.closest('.of-card, .of-shelf, .of-shelf-tab, #drawer')).length`); if (!n) return; await sleep(100); } };
+    const atRest = o => (o.translate === 'none' || o.translate === '0px' || o.translate === '0px 0px') && (o.scale === 'none' || o.scale === '1');
+    const vecOf = t => { const [x = 0, y = 0] = String(t || '0px 0px').split(' ').map(v => parseFloat(v) || 0); return [x, y]; };
+    const moveOf = list => list.find(a => a.kf[0] && a.kf[0].translate !== undefined);
+    const fadeOf = list => list.find(a => a.kf[0] && a.kf[0].opacity !== undefined && a.kf[0].translate === undefined);
     const v0 = await view();
 
-    // 2. a click on an agent: the card comes out of the agent (fade and a short travel from the agent's side, base, ease-out); the map does not move
+    // 2. a click on an agent: the card comes out of its agent: it fades in (base ease) while it travels and grows on the enter spring, which is not linear and does not overshoot (a click has no momentum)
     await S.page.mouse.click(A.x, A.y);
-    const inA = (await anims('.of-card')).find(a => a.name === 'waapi');
+    const inA = await anims('.of-card'), inFade = fadeOf(inA), inMove = moveOf(inA);
     const side = await ev(`document.querySelector('.of-card').dataset.side`);
-    if (!inA) bad.push('the card has no enter animation');
+    if (!inFade || !inMove) bad.push(`the card has no enter animation (${inA.length} animations)`);
     else {
-      eq('card enter duration', inA.duration, DUR.base); eq('card enter easing', norm(inA.easing), norm(EASE.out));
-      const [from, to] = inA.kf, dx = parseFloat(String(from.translate).split(' ')[0]) || 0, dy = parseFloat(String(from.translate).split(' ')[1]) || 0;
-      eq('card enter fade', [Number(from.opacity), Number(to.opacity)], [0, 1]);
-      if (!(Math.hypot(dx, dy) > 0 && Math.hypot(dx, dy) <= 24)) bad.push(`card enter travel ${Math.hypot(dx, dy)} px (must be 1 to 24)`);
+      eq('card enter fade', [inFade.duration, norm(inFade.easing), Number(inFade.kf[0].opacity), Number(inFade.kf[1].opacity)], [DUR.fast, norm(EASE.out), 0, 1]);
+      eq('card enter spring duration', inMove.duration, SPRING.enter.ms);
+      if (!sameCurve(inMove.easing, SPRING.enter)) bad.push(`card enter easing is not the enter spring: ${inMove.easing.slice(0, 60)}`);
+      const [dx, dy] = vecOf(inMove.kf[0].translate), pts = lin(inMove.easing);
+      eq('card enter size', [Math.hypot(dx, dy), Number(inMove.kf[0].scale)], [SLIDE, SCALE]);
+      eq('card enter ends in place', [vecOf(inMove.kf[1].translate), Number(inMove.kf[1].scale)], [[0, 0], 1]);
+      if (!(pts[12] > 0.5 && Math.max(...pts) <= 1.0001)) bad.push(`the enter curve is not a spring without overshoot (a quarter through: ${pts[12]}, peak ${Math.max(...pts)})`);
       const comes = { right: dx < 0, left: dx > 0, below: dy < 0, above: dy > 0, dock: dy > 0 }[side];
       if (!comes) bad.push(`the card on the ${side} of its agent travels from (${dx}, ${dy}), not out of the agent`);
+      // it grows out of the point it belongs to: the transform origin is its tail
+      const o = await ev(`(() => { const c = document.querySelector('.of-card'), s = getComputedStyle(c); return JSON.stringify({ tail: c.dataset.tail, w: c.offsetWidth, h: c.offsetHeight, origin: s.transformOrigin, at: parseFloat(s.getPropertyValue('--tail')) }); })()`).then(JSON.parse);
+      const [ox, oy] = o.origin.split(' ').map(parseFloat), near = (u, w) => Math.abs(u - w) < 1.5;
+      const originOk = { left: near(ox, 0) && near(oy, o.at), right: near(ox, o.w) && near(oy, o.at), top: near(oy, 0) && near(ox, o.at), bottom: near(oy, o.h) && near(ox, o.at) }[o.tail] ?? true;
+      if (!originOk) bad.push(`the card does not grow out of its tail (${o.tail} at ${o.at}, origin ${o.origin})`);
     }
     await settle();
     eq('map after the card opened', await view(), v0);
-    const rest = await style('.of-card', ['opacity', 'translate']);
-    eq('card at rest', [rest.opacity, rest.translate === 'none' || rest.translate === '0px' || rest.translate === '0px 0px'], ['1', true]);
+    const rest = await style('.of-card', ['opacity', 'translate', 'scale']);
+    eq('card at rest', [rest.opacity, atRest(rest)], ['1', true]);
 
-    // 3. it glides to another agent (a transition on its position, base, in-out), the map still does not move
+    // 3. it glides to another agent on the glide spring (a transition on its position), the map still does not move
     const cardRect = await ev(`document.querySelector('.of-card').getBoundingClientRect().toJSON()`);
     const B2 = spots.find(q => q !== A && !(q.x > cardRect.left - 14 && q.x < cardRect.right + 14 && q.y > cardRect.top - 14 && q.y < cardRect.bottom + 14)) || B;
     await S.page.mouse.click(B2.x, B2.y);
-    const gl = await style('.of-card', ['transitionDuration', 'transitionProperty']);
+    const gl = await style('.of-card', ['transitionDuration', 'transitionProperty', 'transitionTimingFunction']);
     const glide = await ev(`document.querySelector('.of-card').classList.contains('glide')`);
-    eq('card glide', [glide, gl.transitionDuration, gl.transitionProperty], [true, DUR.base / 1000 + 's', 'transform']);
-    await settle();
+    eq('card glide', [glide, gl.transitionDuration, gl.transitionProperty], [true, SPRING.glide.ms / 1000 + 's', 'transform']);
+    if (!sameCurve(gl.transitionTimingFunction, SPRING.glide)) bad.push('the glide easing is not the glide spring');
+    await settle(); await sleep(SPRING.glide.ms);
     eq('map after the card moved to another agent', await view(), v0);
 
-    // 4. the Open menu pops in; Esc, then the cross: the card leaves (fast, ease-in, a short travel back) and is hidden afterwards; the map does not move
+    // 4. the Open menu pops in on the pop spring; the cross: the card leaves (fade, then a quick spring back toward its agent, no bounce) and is hidden afterwards
     await ev(`document.querySelector('.of-card .oc-caret').click()`);
-    const menu = await style('.of-card .oc-menu', ['animationName', 'animationDuration']);
-    eq('menu pop', [menu.animationName, menu.animationDuration], ['m-pop', DUR.fast / 1000 + 's']);
+    const menu = await style('.of-card .oc-menu', ['animationName', 'animationDuration', 'animationTimingFunction']);
+    eq('menu pop', [menu.animationName, menu.animationDuration], ['m-pop-move, m-pop-fade', `${SPRING.pop.ms / 1000}s, ${DUR.fast / 1000}s`]);
+    if (!sameCurve(menu.animationTimingFunction, SPRING.pop)) bad.push('the menu does not move on the pop spring');
     await ev(`document.querySelector('.of-card .oc-x').click()`);
-    const outA = (await anims('.of-card')).find(a => a.name === 'waapi');
-    if (!outA) bad.push('the card has no leave animation');
+    const outA = await anims('.of-card'), outFade = fadeOf(outA), outMove = moveOf(outA);
+    if (!outFade || !outMove) bad.push('the card has no leave animation');
     else {
-      eq('card leave duration', outA.duration, DUR.fast); eq('card leave easing', norm(outA.easing), norm(EASE.in));
-      if (!(outA.duration < DUR.base)) bad.push('leaving is not quicker than arriving');
+      eq('card leave fade', [outFade.duration, norm(outFade.easing)], [DUR.fast, norm(EASE.in)]);
+      eq('card leave spring duration', outMove.duration, SPRING.leave.ms);
+      if (!sameCurve(outMove.easing, SPRING.leave)) bad.push('the card leaves on another curve than the leave spring');
+      if (Math.max(...lin(outMove.easing)) > 1.0001) bad.push('the leave spring bounces');
+      if (!(SPRING.leave.ms < SPRING.enter.ms)) bad.push('leaving is not quicker than arriving');
     }
-    const clicksThrough = await ev(`document.querySelector('.of-card').dataset.motion`);
-    eq('a leaving card takes no clicks (data-motion)', clicksThrough, 'out');
-    await settle();
+    eq('a leaving card takes no clicks (data-motion)', await ev(`document.querySelector('.of-card').dataset.motion`), 'out');
+    await settle(); await sleep(250);
     eq('card hidden after it left', await ev(`document.querySelector('.of-card').hidden`), true);
     eq('map after the card closed', await view(), v0);
 
-    // 5. the details card: closed, it waits 14 px to the right; open it by "All details": fade and travel in over base; closing leaves over fast; the map does not move
-    const dClosed = await style('#drawer', ['translate', 'visibility', 'transitionDuration']);
-    eq('details card closed', [dClosed.translate, dClosed.visibility], ['14px', 'hidden']);
+    // 5. the details card: closed, it waits 20 px to the right and a little smaller; "All details" brings it in on the enter spring, the cross sends it out on the leave spring
+    const dClosed = await style('#drawer', ['translate', 'scale', 'visibility']);
+    eq('details card closed', [dClosed.translate, Number(dClosed.scale), dClosed.visibility], [SLIDE + 'px', SCALE, 'hidden']);
     await S.page.mouse.click(A.x, A.y); await settle();
     await ev(`document.querySelector('.of-card .oc-more').click()`);
     await sleep(80);
-    const dOpen = await style('#drawer', ['transitionDuration', 'transitionTimingFunction']);
-    eq('details card enter', [dOpen.transitionDuration.split(',')[0], norm(dOpen.transitionTimingFunction).startsWith(norm(EASE.out))], [DUR.base / 1000 + 's', true]);
-    await settle();
-    const dRest = await style('#drawer', ['translate', 'opacity', 'visibility']);
-    eq('details card at rest', [dRest.opacity, dRest.visibility, dRest.translate === 'none' || dRest.translate === '0px' || dRest.translate === '0px 0px'], ['1', 'visible', true]);
+    const dOpen = await style('#drawer', ['transitionProperty', 'transitionDuration', 'transitionTimingFunction']);
+    eq('details card enter', dOpen.transitionDuration.split(',').map(x => x.trim()), [SPRING.enter.ms / 1000 + 's', SPRING.enter.ms / 1000 + 's', DUR.fast / 1000 + 's']);
+    if (!sameCurve(dOpen.transitionTimingFunction, SPRING.enter)) bad.push('the details card does not arrive on the enter spring');
+    await settle(); await sleep(SPRING.enter.ms);
+    const dRest = await style('#drawer', ['translate', 'scale', 'opacity', 'visibility']);
+    eq('details card at rest', [dRest.opacity, dRest.visibility, atRest(dRest)], ['1', 'visible', true]);
     eq('map after the details card opened', await view(), v0);
     await ev(`document.querySelector('#dw-close').click()`);
-    const dLeave = await style('#drawer', ['transitionDuration']);
-    eq('details card leave', dLeave.transitionDuration.split(',')[0], DUR.fast / 1000 + 's');
-    await settle();
+    const dLeave = await style('#drawer', ['transitionDuration', 'transitionTimingFunction']);
+    eq('details card leave', dLeave.transitionDuration.split(',').slice(0, 2).map(x => x.trim()), [SPRING.leave.ms / 1000 + 's', SPRING.leave.ms / 1000 + 's']);
+    if (!sameCurve(dLeave.transitionTimingFunction, SPRING.leave)) bad.push('the details card does not leave on the leave spring');
+    await sleep(SPRING.leave.ms + 200);
     eq('details card hidden after it left', await ev(`getComputedStyle(document.querySelector('#drawer')).visibility`), 'hidden');
     eq('map after the details card closed', await view(), v0);
 
-    // 6. the shelf card goes out to the right edge and comes back; folding and unfolding never move the map
+    // 6. the shelf card goes out to the right edge and comes back, on the same springs; folding and unfolding never move the map
     await ev(`document.querySelector('.sh-hide').click()`);
-    const shOut = (await anims('.of-shelf')).find(a => a.name === 'waapi');
-    if (!shOut) bad.push('the shelf card has no leave animation'); else { eq('shelf leave', [shOut.duration, norm(shOut.easing)], [DUR.fast, norm(EASE.in)]); }
-    await settle();
+    const shOut = await anims('.of-shelf');
+    if (!fadeOf(shOut) || !moveOf(shOut)) bad.push('the shelf card has no leave animation');
+    else eq('shelf leave', [fadeOf(shOut).duration, moveOf(shOut).duration, sameCurve(moveOf(shOut).easing, SPRING.leave)], [DUR.fast, SPRING.leave.ms, true]);
+    await settle(); await sleep(250);
     eq('shelf card hidden after it left', await ev(`document.querySelector('.of-shelf').hidden`), true);
     eq('map after the shelf folded', await view(), v0);
     await ev(`document.querySelector('.of-shelf-tab').click()`);
-    const shIn = (await anims('.of-shelf')).find(a => a.name === 'waapi');
-    if (!shIn) bad.push('the shelf card has no enter animation'); else { eq('shelf enter', [shIn.duration, norm(shIn.easing), Number(shIn.kf[0].opacity), Number(shIn.kf[1].opacity)], [DUR.base, norm(EASE.out), 0, 1]); }
+    const shIn = await anims('.of-shelf');
+    if (!fadeOf(shIn) || !moveOf(shIn)) bad.push('the shelf card has no enter animation');
+    else eq('shelf enter', [fadeOf(shIn).duration, moveOf(shIn).duration, sameCurve(moveOf(shIn).easing, SPRING.enter), Number(moveOf(shIn).kf[0].scale)], [DUR.fast, SPRING.enter.ms, true, SCALE]);
     await settle();
     eq('map after the shelf unfolded', await view(), v0);
 
-    // 7. less motion on request: the card fades in over the short duration and travels nowhere; the menu does not pop
+    // 7. less motion on request: only a short fade, no travel, no spring, no menu pop
     await S.page.send('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-reduced-motion', value: 'reduce' }] });
     await sleep(200);
     await S.page.mouse.click(A.x, A.y);
-    const inR = (await anims('.of-card')).find(a => a.name === 'waapi');
-    if (!inR) bad.push('reduced motion: the card has no fade'); else eq('reduced motion card', [inR.duration, inR.kf.every(k => String(k.translate).split(' ').every(x => parseFloat(x) === 0))], [DUR.hover, true]);
+    const inR = await anims('.of-card');
+    if (!fadeOf(inR)) bad.push('reduced motion: the card has no fade'); else eq('reduced motion card', [fadeOf(inR).duration, moveOf(inR) === undefined], [DUR.hover, true]);
     await ev(`document.querySelector('.of-card .oc-caret').click()`);
     eq('reduced motion menu', (await style('.of-card .oc-menu', ['animationName'])).animationName, 'none');
     await ev(`document.querySelector('.of-card .oc-x').click()`);
     await S.page.send('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-reduced-motion', value: 'no-preference' }] });
     await P('p.freeze(false)');
 
+    const pts = lin(inMove.easing);
     check('21-motion', bad.length === 0 && S.page.errors.length === 0,
       bad.length ? `FAILED: ${bad.join('; ')}` :
-      `tokens ${Object.entries(tokens).map(([k, v]) => `${k.slice(2)} ${v.replace(/\s+/g, '')}`).join(', ')} equal motion.js; no literal duration in a transition of app.css; the card comes out of its agent (${side} side): fade 0 to 1 over ${inA.duration} ms, ${inA.easing}, travel ${inA.kf[0].translate}; glides to another agent over ${DUR.base} ms; leaves over ${outA.duration} ms with ${outA.easing} and takes no clicks while it leaves; the menu pops over ${DUR.fast} ms; the details card waits 14 px to the right when closed, arrives over ${DUR.base} ms and leaves over ${DUR.fast} ms; the shelf card leaves over ${shOut.duration} ms and comes back over ${shIn.duration} ms; the pan and zoom of the map were identical (${v0}) after every one of these; reduced motion: ${inR.duration} ms fade with no travel and no menu pop; errors ${S.page.errors.length}`);
+      `tokens equal motion.js (${Object.entries(SPRING).map(([n, s]) => `${n} ${s.duration} s/bounce ${s.bounce} = ${s.ms} ms`).join(', ')}); no literal duration in a transition of app.css and ${loops.length} looping animations on the two loop tempos (${LOOP.slow} and ${LOOP.quick} ms); the card comes out of its agent (${side} side) on the enter spring: ${inMove.duration} ms, travel ${SLIDE} px and growth from ${SCALE}, a quarter of the way through the curve it is already at ${pts[12].toFixed(2)} and it peaks at ${Math.max(...pts).toFixed(3)}; the fade is ${inFade.duration} ms; it glides to another agent on the glide spring (${SPRING.glide.ms} ms); the menu pops on the pop spring; the card leaves on the leave spring (${outMove.duration} ms, no bounce) and takes no clicks while it leaves; the details card (closed: ${SLIDE} px right, scaled ${SCALE}) and the shelf card use the same springs; the pan and zoom of the map were identical (${v0}) after every one of these; reduced motion: ${fadeOf(inR).duration} ms fade, no travel, no menu pop; errors ${S.page.errors.length}`);
   } finally { await S.done(); }
 }
 

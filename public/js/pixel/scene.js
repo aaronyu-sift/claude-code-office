@@ -11,6 +11,7 @@ import { glowSprite, GLOW } from './lighting.js';
 import { workerId, deskId, isFloor } from './ids.js';
 import { depthSort } from './depth.js';
 import { spriteFor } from './season.js';
+import { LOOP, wave } from '../motion.js';
 
 const WALL_TINT = 0.45, FLOOR_TINT = 0.32;
 const newCanvas = (w, h) => (typeof OffscreenCanvas !== 'undefined' ? new OffscreenCanvas(w, h) : Object.assign(document.createElement('canvas'), { width: w, height: h }));
@@ -296,7 +297,7 @@ export function createScene({ atlas, proj }) {
       }
       const a = actorOf(e);
       // the light of a waiting agent shines behind its figure and behind everything nearer, so it never washes out the sprite
-      if (e.kind === 'c' && a && a.main && (a.status === 'waiting' || a.status === 'ask')) fx.beams++, drawBeam(g, Math.round(e.px), Math.round(e.py) + 2, 64, anim ? 0.5 + 0.5 * Math.sin(t / 420) : 1);
+      if (e.kind === 'c' && a && a.main && (a.status === 'waiting' || a.status === 'ask')) fx.beams++, drawBeam(g, Math.round(e.px), Math.round(e.py) + 2, 64, anim ? 0.5 + 0.5 * wave(t, LOOP.slow) : 1);
       const s = dynSrc(e, a, t, anim);
       if (s) put(g, s);
     }
@@ -367,7 +368,7 @@ export function createScene({ atlas, proj }) {
       const cx = Math.round(e.px), fy = Math.round(e.py);
       if (cx < vx0 - 40 || cx > vx1 + 40 || fy < vy0 || fy > vy1 + 90) continue;
       const wait = a.status === 'waiting' || a.status === 'ask';
-      const bob = wait && anim ? Math.round(Math.sin(t / 230) * 2) : 0;
+      const bob = wait && anim ? Math.round(wave(t, LOOP.quick) * 2) : 0;
       const headTop = fy - headRise;
       if (a.main) {
         const top = headTop - 15 + bob;
