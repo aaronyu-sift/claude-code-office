@@ -258,11 +258,20 @@ if (want('ux')) {
 if (want('idle')) {
   const S = await scenario(10, { tag: 'idle', query: NIGHT, fixture: { statuses: ['dormant'], subs: () => [] } });
   try {
+    // the page is settled first: the last start-up message of the server (a late cost summary, say) may still draw one frame; wait until
+    // 1.5 s pass without a frame, then measure the steady state
+    let settled = 0;
+    for (let k = 0; k < 40; k++) {
+      await S.page.evaluate(px('p.resetStats()'));
+      await sleep(1500);
+      if ((await S.page.evaluate(px('p.stats.frames'))) === 0) break;
+      settled++;
+    }
     await S.page.evaluate(px('p.resetStats()'));
     await sleep(4000);
     const st = await S.page.evaluate(px('({stats: p.stats, active: p.active, pending: p.pending})'));
     check('07-idle', S.ready && st.stats.frames === 0 && st.stats.callbacks === 0 && !st.pending && st.active.length === 0,
-      `10 dormant agents at 22:00 (fixed time, so no minute ticker), 4 s: ${st.stats.frames / 4} frames per second, ${st.stats.callbacks} scheduler callbacks, animation sources ${JSON.stringify(st.active)}, loop pending ${st.pending}`);
+      `10 dormant agents at 22:00 (fixed time, so no minute ticker; settled after ${settled} busy 1.5 s windows), 4 s: ${st.stats.frames / 4} frames per second, ${st.stats.callbacks} scheduler callbacks, animation sources ${JSON.stringify(st.active)}, loop pending ${st.pending}`);
   } finally { await S.done(); }
 }
 
