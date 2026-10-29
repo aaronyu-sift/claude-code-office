@@ -43,6 +43,7 @@ Claude Code Office answers those questions live, from the data Claude Code alrea
   - Your full chat name hangs over each lead agent; a thought bubble shows the tool in use; a beam of light and a "!" balloon mark the agent that waits for you.
   - Day and night follow your local clock: tinted light, a sky, lit windows, lamps and monitors after dark.
   - Only small things move (steam, plants, butterflies, birds), at most 10 frames per second, nothing while the tab is hidden.
+  - A shelf at the right edge lists the chats that have no room: asleep for hours, or closed in the last 14 days, newest first, each as a small sleeping or leaning figure with its full name and "closed 12m ago". A chat that waits for you never goes there. Click an entry for its details.
 - **3D isometric office** (`?scene=3d`, the original scene). It is a tycoon-game style building on a little diorama island, with streets, a river, trees and mountains. Every session is a room with its project name on the wall.
   - The lead agent sits at the big desk; subagents work at the other desks.
   - Monitors glow in the color of the current activity: thinking, shell, reading, editing, web/MCP or delegating.
@@ -57,7 +58,7 @@ Claude Code Office answers those questions live, from the data Claude Code alrea
   - breakdowns per model and per project
   
   The first scan runs in a worker thread; after that only new bytes are read.
-- **Drawer with details.** Click any agent to see its last prompt, recap, last reply, tool mix, per-minute tokens and full event log.
+- **Drawer with details.** Click any agent, or a shelf entry, to see its full name, project, status and time since, last prompt, recap, last reply and tool mix (a live chat also has per-minute tokens, cost and the full event log). **Open in VS Code** opens the chat in the Claude Code panel (`vscode://anthropic.claude-code/open?session=<id>`) and **Copy session id** puts its id on the clipboard.
 - **English and Turkish UI, ready for more.** The page uses your system language when it is supported and otherwise asks you to pick one from a list (each language in its own language); the header button changes it later. A language is one file (see [Languages](#languages)).
 - **Local, read-only, zero dependencies.** It binds to `127.0.0.1` only and never writes to `~/.claude`. It has no telemetry and no npm dependencies at runtime.
 
@@ -95,6 +96,8 @@ npm start            # or double-click start-windows.bat  (macOS/Linux: ./start-
 | `--demo` | off | Fictional data; does not read `~/.claude` |
 | `--claude-dir <dir>` | `~/.claude` or `$CLAUDE_CONFIG_DIR` | Where Claude Code keeps its data |
 | `--data-dir <dir>` | `~/.claude-code-office` | Where the cost cache is stored |
+| `--closed-days <n>` | `14` | How far back closed sessions are listed on the shelf (`0` turns the shelf's closed list off) |
+| `--closed-max <n>` | `50` | How many closed sessions the shelf lists at most |
 | `--chat-db <file>` | off | SQLite message board to show next to the avatars, read-only (or `CCO_CHAT_DB`; see [Agent chat bridge](#agent-chat-bridge-optional)) |
 
 ## How it works
@@ -129,6 +132,19 @@ The Office view draws a pixel-art scene: voxel models written as code in [`tools
 
 **Look and controls.** The scene scales in whole-number steps (no blur): `+`, `-`, the mouse wheel and pinch zoom; drag to pan; the fit button or a double click shows everything. Click an agent or its label for the drawer. Rooms keep their place when agents come and go, and the theme of a room (library, lounge, lab, studio) follows its project.
 
+**The shelf and closed chats.** Chats that have no room are listed in a lane at the right of the scene (it scrolls on its own, and the `›` button or the `Shelf · N` tab folds it away; the choice is remembered, and it starts folded in a window narrower than 760 px). Two kinds of chat are there, newest first by their last activity or close time: live chats that have been asleep for hours (they leave their room), and closed chats, meaning a transcript written in the last 14 days with no live process. A chat that waits for you, works or has just finished a turn stays in its room. A click on an entry or on a figure in a room opens the details panel of that chat.
+
+How the closed list is read, because it runs on your own disk: a project folder is listed again only when its modification time changes; known transcripts are only `stat`ed; only the newest `closedMax` (50) are read, and only the last 256 KB of each; a file whose size and modification time did not change is never read again; one pass stops reading after `closedBudgetMs` (150 ms) and the next pass goes on, newest first. Measured on a real `~/.claude/projects` (129 transcripts in the window, median 1.8 MB, the largest 90 MB): the first scan took 40 ms and read 50 tails, 12.5 MB; the next scans stat the files, take about 0.5 ms and read nothing (`node tools/qa/scan-real.mjs` prints this for your own data and writes nothing). The close time is the moment the server saw the process end, otherwise the file's modification time, because Claude Code appends its bookkeeping records when a chat ends. The counts in a closed chat's tool mix come only from the last 256 KB.
+
+| Setting | Default | Meaning |
+|---|---|---|
+| `closedDays` (`--closed-days`) | `14` | Window in days; `0` turns the closed list off |
+| `closedMax` (`--closed-max`) | `50` | Most closed sessions listed (and read) |
+| `closedBudgetMs` (`CCO_CLOSED_BUDGET_MS`) | `150` | Time one pass may spend reading transcripts |
+| `closedEveryMs` (`CCO_CLOSED_EVERY_MS`) | `30000` | How often the list is looked at again (at least 250) |
+
+The four settings are keys of the config file (see [Configuration](#configuration-optional)) or options of `createOffice`; `/api/closed` returns the list and the scan statistics.
+
 **Regenerating the art.** The atlases are committed, so this is only needed after changing a model. You need [bun](https://bun.sh) and the pinned VoxPix renderer (MIT, see [THIRD_PARTY.md](THIRD_PARTY.md)):
 
 ```bash
@@ -141,7 +157,7 @@ npm run sprites:table                                # the content lists of the 
 
 The models are in `tools/sprites/` (`models.mjs`, `props.mjs`, `decor.mjs`; `catalog.mjs` lists every sprite; `seasons.mjs` makes the seasonal variants out of the same models with another palette, snow caps, bare branches and the four seasonal props); [`tools/sprites/README.md`](tools/sprites/README.md) has the details.
 
-**Tests.** `npm test` runs the unit tests (projections, layout in both views, depth order, labels, scheduler, time of day, seasons, weather, settings, languages, manifest). `node tools/qa/pixel-qa.mjs --proj iso` (or `--proj front`) starts the server against a fake `~/.claude`, drives headless Chrome in a throw-away profile and prints one `CHECK … PASS|FAIL` line per check (occlusion, click targets, labels, frame budget, idle, time of day, seasons, weather, settings, gallery, projection toggle) and a final `QA PASS` or `QA FAIL`. The checks run in one fixed season (`--season summer` by default, `--season auto` follows the date) so the date they run on does not matter. `--shots <dir> --set m4` also writes the screenshots of the seasons, the weather and the times of day. The plan, its decisions and the deviations are in [docs/pixel-scene-plan.md](docs/pixel-scene-plan.md).
+**Tests.** `npm test` runs the unit tests (projections, layout in both views, depth order, labels, scheduler, time of day, seasons, weather, settings, languages, shelf, closed-chat scan, manifest). `node tools/qa/pixel-qa.mjs --proj iso` (or `--proj front`) starts the server against a fake `~/.claude`, drives headless Chrome in a throw-away profile and prints one `CHECK … PASS|FAIL` line per check (occlusion, click targets, labels, frame budget, idle, time of day, seasons, weather, settings, gallery, projection toggle, the shelf, the details panel, the scan of closed chats) and a final `QA PASS` or `QA FAIL`. The checks run in one fixed season (`--season summer` by default, `--season auto` follows the date) so the date they run on does not matter. `--shots <dir> --set m4` also writes the screenshots of the seasons, the weather and the times of day, and `--set m5` those of the shelf and the details panel. The shelf checks use a fixture with 10 live and 12 closed chats and a second, 300-transcript fixture for the scan (cap, budget, cold and warm reads). The plan, its decisions and the deviations are in [docs/pixel-scene-plan.md](docs/pixel-scene-plan.md).
 
 ## Languages
 
