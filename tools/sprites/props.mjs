@@ -37,6 +37,20 @@ export function floorTile(p, kind, variant = 0) {
     const tufts = [[3, 4], [11, 9], [6, 13], [13, 2]];
     if (variant === 1) for (const [x, y] of tufts) v.box(x, y, 0, x + 1, y + 1, 1, p.m('leaf', 3));
     if (variant === 2) tufts.forEach(([x, y], i) => v.box(x, y, 0, x + 1, y + 1, 1, p.m(['flowerP', 'flowerY', 'flowerW', 'flowerB'][i], 3)));
+  } else if (kind === 'checker') {
+    v.box(0, 0, -2, 16, 16, 0, (x, y, z) => {
+      if (z === -2) return side;
+      return ((x >> 2) + (y >> 2)) % 2 ? p.m('kb', hash(x, y, 2) > 0.9 ? 2 : 3) : p.m('metalDark', hash(x, y, 3) > 0.9 ? 1 : 2);
+    });
+  } else if (kind === 'hall' || kind === 'gold' || kind === 'teal') {
+    const base = kind === 'teal' ? 'carpetTeal' : 'carpetGold', other = kind === 'teal' ? 'carpetGold' : 'carpetTeal';
+    v.box(0, 0, -2, 16, 16, 0, (x, y, z) => {
+      if (z === -2) return side;
+      const n = hash(x, y, 4 + variant);
+      if (kind === 'hall') { const e = Math.min(x, 15 - x); return e < 2 ? p.m(other, 1) : e === 3 || e === 4 ? p.m('carpetGold', 3) : p.m('carpetTeal', n > 0.88 ? 3 : 2); }
+      const dia = (Math.abs(x - 8) + Math.abs(y - 8)) % 8 === 0;
+      return p.m(base, dia ? 3 : n > 0.9 ? 3 : 2);
+    });
   } else if (kind === 'path') {
     v.box(0, 0, -2, 16, 16, 0, (x, y, z) => {
       if (z === -2) return p.m('soil', 1);
@@ -69,7 +83,7 @@ export function wallPiece(p, kind = 'plain', len = 32) {
     v.box(x0, 0, 12, x0 + 16, 2, 26, (x, y, z) => p.m('screen', y === 0 ? (z > 22 ? 3 : z > 17 ? 2 : 1) : 1));
     v.box(x0 + 7, 0, 12, x0 + 9, 1, 26, tr(3)).box(x0, 0, 18, x0 + 16, 1, 20, tr(3));
     v.box(x0 - 2, 0, 9, x0 + 18, 3, 11, tr(2));                           // sill
-  } else if (kind.startsWith('poster')) {
+  } else if (kind === 'posterA' || kind === 'posterB') {
     const x0 = (len >> 1) - 5, cols = { posterA: ['bkR', 'bkB', 'bkY', 'bkG'], posterB: ['bkP', 'bkO', 'bkB', 'bkY'] }[kind] || ['bkG', 'bkR', 'bkP', 'bkO'];
     v.box(x0 - 1, 0, 13, x0 + 11, 1, 27, tr(3));
     v.box(x0, 0, 14, x0 + 10, 1, 26, (x, y, z) => p.m(cols[(Math.floor((x - x0) / 5) + Math.floor((z - 14) / 6)) % 4], (x + z) % 7 === 0 ? 3 : 2));
@@ -80,6 +94,45 @@ export function wallPiece(p, kind = 'plain', len = 32) {
       if (d <= 26) v.set(x, 0, z, d > 19 ? p.m('woodDark', 2) : p.m('trim', 3));
     }
     v.box(cx, 0, 19, cx + 1, 1, 23, p.m('rubber', 0)).box(cx, 0, 19, cx + 3, 1, 20, p.m('rubber', 0));
+  } else if (kind === 'door') {
+    const x0 = (len >> 1) - 7;
+    v.box(x0 - 2, 0, 0, x0 + 16, 2, 26, tr(3));
+    v.box(x0, 0, 0, x0 + 14, 1, 24, (x, y, z) => { const panel = (z > 2 && z < 11 || z > 13 && z < 22) && x > x0 + 1 && x < x0 + 12; return p.m('wood', panel ? 3 : 2); });
+    v.box(x0 + 10, -1, 11, x0 + 12, 0, 13, p.m('steel', 3));
+    v.box(x0 + 1, 0, 22, x0 + 13, 1, 24, p.m('glass', 1));
+  } else if (kind === 'posterC') {
+    const x0 = (len >> 1) - 9;
+    v.box(x0 - 1, 0, 14, x0 + 19, 1, 26, p.m('woodDark', 2));
+    v.box(x0, 0, 15, x0 + 18, 1, 25, (x, y, z) => { const hill = 19 + Math.floor(3 * Math.sin((x - x0) / 3)); return z > hill ? p.m('glass', 2) : z > hill - 3 ? p.m('leaf', 2) : p.m('leaf2', 1); });
+    v.box(x0 + 11, 0, 21, x0 + 14, 1, 24, p.m('flowerY', 3));
+  } else if (kind === 'notice') {
+    const x0 = (len >> 1) - 9;
+    v.box(x0 - 1, 0, 12, x0 + 19, 1, 26, p.m('woodDark', 2));
+    v.box(x0, 0, 13, x0 + 18, 1, 25, (x, y, z) => p.m('cork', hash(x, z, 5) > 0.7 ? 3 : 2));
+    for (const [nx, nz, c] of [[x0 + 2, 19, 'paper'], [x0 + 7, 15, 'flowerY'], [x0 + 12, 20, 'flowerP'], [x0 + 5, 21, 'flowerB'], [x0 + 13, 15, 'paper']]) { v.box(nx, -1, nz, nx + 4, 0, nz + 4, p.m(c, 2)); v.set(nx + 1, -1, nz + 3, p.m('mug', 2)); }
+  } else if (kind === 'shelfwall') {
+    v.box(1, -2, 0, len - 1, 2, 28, p.m('woodDark', 2));
+    const books = ['bkR', 'bkB', 'bkG', 'bkY', 'bkP', 'bkO'];
+    for (const z of [2, 10, 18]) {
+      v.box(2, -2, z, len - 2, 0, z + 7, p.m('woodDark', 0));
+      let x = 3;
+      while (x < len - 4) { const bw = 1 + Math.floor(hash(x, z, 3) * 2.5), h = 4 + Math.floor(hash(x, z, 4) * 3), bk = books[Math.floor(hash(x, z, 5) * books.length)]; if (hash(x, z, 6) > 0.15) v.box(x, -2, z, x + bw, 0, z + h, (X, Y, Z) => p.m(bk, Z === z + h - 1 ? 2 : 1)); x += bw + (hash(x, z, 7) > 0.85 ? 1 : 0); }
+    }
+    v.box(0, -2, 26, len, 2, 29, p.m('woodDark', 3));
+  } else if (kind === 'glass') {
+    v.box(0, 0, 3, len, 2, 30, (x, y, z) => { if (z >= 29 || x % 16 < 1) return p.m('trim', 3); if (z < 10) return wn(z === 9 ? 3 : 2); return p.m('glass', y === 0 && (x + z) % 9 === 0 ? 2 : 1); });
+  } else if (kind === 'windowB') {
+    for (const x0 of [4, 19]) {
+      v.box(x0 - 1, 0, 11, x0 + 9, 2, 28, tr(3));
+      v.box(x0, 0, 12, x0 + 8, 2, 27, (x, y, z) => ((x - x0 - 3.5) ** 2 / 20 + (z > 22 ? (z - 22) ** 2 / 20 : 0) > 1 && z > 22 ? 0 : p.m('screen', y === 0 ? (z > 22 ? 3 : z > 17 ? 2 : 1) : 1)));
+      v.box(x0 + 3, 0, 12, x0 + 5, 1, 27, tr(3));
+    }
+    v.box(2, 0, 9, 30, 3, 11, tr(2));
+  } else if (kind === 'sconce') {
+    const cx = len >> 1;
+    v.box(cx - 1, -1, 17, cx + 1, 0, 24, p.m('steel', 2));
+    v.cyl(cx, -2, 22, 27, 2.6, (x, y, z) => p.m('paper', z > 25 ? 3 : 2));
+    v.box(cx - 1, -2, 20, cx + 1, -1, 22, p.m('carpetGold', 3));
   } else if (kind === 'whiteboard') {
     const x0 = 3;
     v.box(x0 - 1, 0, 12, len - 2, 1, 26, p.m('steel', 2));
@@ -91,6 +144,12 @@ export function wallPiece(p, kind = 'plain', len = 32) {
   }
   return v;
 }
+export function pillar(p) {
+  const v = new Vox(p, 'wall_cap');
+  v.box(0, 0, 0, 2, 2, 30, (x, y, z) => (z >= 28 ? p.m('carpetGold', 3) : z < 3 ? p.m('wallN', 1) : p.m('trim', z === 12 ? 1 : 2)));
+  v.box(-1, -1, 28, 3, 3, 30, p.m('carpetGold', 2));
+  return v;
+}
 export function cornerPost(p) {
   const v = new Vox(p, 'wall_corner');
   v.box(0, 0, 0, 2, 2, 30, (x, y, z) => (z >= 29 ? p.m('trim', 3) : z < 3 ? p.m('wallN', 1) : p.m('wallN', 2)));
@@ -99,7 +158,7 @@ export function cornerPost(p) {
 
 // ---- desks with a screen state: on (code), idle (waiting for you), off (asleep) -----------------------------------
 export function deskState(p, state = 'on') {
-  const v = desk(p);
+  const v = desk(p, { props: false });
   v.name = 'desk_' + state;
   for (let x = 9; x < 23; x++) for (let z = 18; z < 30; z++) {
     if (state === 'idle') v.set(x, 6, z, p.m('screen', (z === 24 && x > 10 && x < 14) || (z === 22 && x > 10 && x < 19) ? 2 : 1));
@@ -129,8 +188,6 @@ export function chiefDesk(p, state = 'on') {
     }
   }
   v.box(12, 1, 12, 28, 5, 13, (x, y) => p.m('kb', (x + y) % 2 === 0 ? 2 : 3));
-  v.cyl(35, 3, 12, 15, 1.7, p.m('mug', 2)).cyl(35, 3, 14, 15, 1.2, p.m('coffee', 1));
-  v.box(3, 4, 12, 9, 8, 13, p.m('paper', 2));
   v.cyl(40, 12, 12, 14, 2.2, p.m('pot', 2)).ellipsoid(40, 12, 17, 3, 3, 3.6, (x, y, z) => p.m(hash(x, y, z, 4) > 0.8 ? 'leafLight' : z > 17 ? 'leaf' : 'leaf2', z > 17 ? 3 : 2));
   v.box(18, 0, 10, 26, 1, 12, p.m('carpetGold', 2));                      // nameplate
   return v;
@@ -158,7 +215,7 @@ export const APPEARANCES = [
   { skin: 'skin2', hair: 'hairBlack', shirt: 'shirtE', hairStyle: 'short' },
   { skin: 'skin1', hair: 'hairGrey', shirt: 'shirtB', hairStyle: 'tuft' },
 ];
-export const POSES = ['typeA', 'typeB', 'wait', 'sleep', 'relax'];
+export const POSES = ['typeA', 'typeB', 'wait', 'sleep', 'relax', 'think'];   // seated; `stand` is a separate model without the chair
 
 export function seatedWorker(p, ap, pose, chairColor = 'chairSlate') {
   const { skin, hair, shirt, hairStyle } = ap;
@@ -186,6 +243,9 @@ export function seatedWorker(p, ap, pose, chairColor = 'chairSlate') {
     v.box(9, 3, 17, 11, 6, 22, sh(1)).box(10, 3, 22, 12, 6, 31, sh(1)).box(10, 3, 31, 12, 6, 35, sk(2));   // raised arm and hand
   } else if (pose === 'sleep') {
     v.box(0, 4, 13, 2, 8, 20, sh(1)).box(8, 4, 13, 10, 8, 20, sh(1)).box(1, 7, 12, 3, 9, 14, sk(2)).box(7, 7, 12, 9, 9, 14, sk(2));   // arms down in the lap
+  } else if (pose === 'think') {
+    v.box(0, 3, 17, 1, 6, 21, sh(1)).box(0, 6, 15, 2, 11, 18, sh(1)).box(0, 10, 15, 2, 12, 17, sk(2));                              // left hand on the keyboard
+    v.box(9, 3, 17, 11, 6, 24, sh(1)).box(6, 5, 23, 11, 8, 26, sh(1)).box(4, 7, 22, 8, 10, 25, sk(2));                              // right hand at the chin
   } else if (pose === 'relax') {
     v.box(-1, 3, 17, 1, 6, 24, sh(1)).box(9, 3, 17, 11, 6, 24, sh(1));                                                                // elbows out
     v.box(0, 2, 24, 3, 5, 27, sh(1)).box(7, 2, 24, 10, 5, 27, sh(1)).box(2, 1, 27, 5, 4, 29, sk(2)).box(5, 1, 27, 8, 4, 29, sk(2));  // hands behind the head
@@ -209,6 +269,31 @@ export function seatedWorker(p, ap, pose, chairColor = 'chairSlate') {
   } else {
     v.ellipsoid(5, hyc + 0.5, hzc, 5.8, 5.2, 3.6, (x, y, z) => (front(x, y, z) ? 0 : hr(2)));
     v.box(4, 3 + hy, 33 + hz, 7, 6 + hy, 36 + hz, hr(3));
+  }
+  return v;
+}
+
+// a standing person, facing +y at facing 0 (baked at 4 facings)
+export function standingWorker(p, ap) {
+  const { skin, hair, shirt, hairStyle } = ap;
+  const v = new Vox(p, 'stand');
+  const sk = n => p.m(skin, n), sh = n => p.m(shirt, n), hr = n => p.m(hair, n), pa = n => p.m('pants', n);
+  v.box(2, 3, 2, 4, 7, 13, pa(2)).box(6, 3, 2, 8, 7, 13, pa(2));
+  v.box(2, 2, 0, 4, 8, 2, p.m('rubber', 1)).box(6, 2, 0, 8, 8, 2, p.m('rubber', 1));
+  v.box(1, 2, 13, 9, 8, 24, (x, y, z) => (z >= 22 ? sh(3) : sh(2)));
+  v.box(-1, 3, 12, 1, 7, 23, sh(1)).box(9, 3, 12, 11, 7, 23, sh(1));
+  v.box(-1, 3, 10, 1, 7, 12, sk(2)).box(9, 3, 10, 11, 7, 12, sk(2));
+  v.ellipsoid(5, 4.5, 29, 5.6, 5, 5.2, (x, y, z, d) => sk(d > 0.7 ? 2 : 3));
+  v.set(3, 9, 29, p.m('eye', 0)).set(7, 9, 29, p.m('eye', 0)).set(3, 9, 28, p.m('eye', 0)).set(7, 9, 28, p.m('eye', 0));
+  v.set(2, 9, 27, p.m('blush', 0)).set(8, 9, 27, p.m('blush', 0)).set(5, 9, 26, p.m('eye', 1));
+  const front = (x, y, z) => y > 7 && z < 31;
+  if (hairStyle === 'short') v.ellipsoid(5, 3.5, 31.5, 5.9, 5.4, 4.2, (x, y, z, d) => (front(x, y, z) ? 0 : hr(d > 0.6 ? 1 : 2)));
+  else if (hairStyle === 'long') {
+    v.ellipsoid(5, 3.5, 31, 6.2, 5.6, 4.6, (x, y, z, d) => (front(x, y, z) ? 0 : hr(d > 0.6 ? 1 : 2)));
+    v.box(-1, 0, 22, 1, 5, 31, hr(1)).box(9, 0, 22, 11, 5, 31, hr(1)).box(0, 0, 23, 10, 2, 31, hr(1));
+  } else {
+    v.ellipsoid(5, 4, 31.5, 5.8, 5.2, 3.6, (x, y, z) => (front(x, y, z) ? 0 : hr(2)));
+    v.box(4, 3, 35, 7, 6, 38, hr(3));
   }
   return v;
 }

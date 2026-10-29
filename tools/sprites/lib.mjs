@@ -90,9 +90,12 @@ export class Vox {
     }
     return this;
   }
+  // VoxPix allows 64 ramps per model, the shared palette has more: a model carries only the ramps it uses, renumbered
   json() {
     const voxels = [...this.v.values()].sort((a, b) => a[0] - b[0] || a[1] - b[1] || a[2] - b[2]);
-    return { format: 'voxpix', version: 1, name: this.name, palette: { ramps: this.pal.ramps, outline: this.pal.outline || '#1d1830' }, voxels };
+    const used = [...new Set(voxels.map(v => (v[3] - 1) >> 4))].sort((a, b) => a - b), remap = new Map(used.map((r, i) => [r, i]));
+    const packed = voxels.map(([x, y, z, m]) => [x, y, z, remap.get((m - 1) >> 4) * 16 + ((m - 1) & 15) + 1]);
+    return { format: 'voxpix', version: 1, name: this.name, palette: { ramps: used.map(r => this.pal.ramps[r]), outline: this.pal.outline || '#1d1830' }, voxels: packed };
   }
 }
 

@@ -27,10 +27,16 @@ export function makePalette() {
   p.add('screenOff', '#2b3347', { n: 3, mid: 1 }).add('boardWhite', '#f6f8fb', { n: 4, mid: 2 }).add('rock', '#9aa0ad', { shift: 0.7 });
   p.add('bark', '#8a5a36').add('leafPine', '#2f8a5c', { material: 'follaje' }).add('flowerW', '#fff4e8', { material: 'follaje' }).add('flowerB', '#6fa3ff', { material: 'follaje' });
   p.add('hairGrey', '#9aa1b5', { shift: 0.3 }).add('skin4', '#f0b98f', { shift: 0.5 });
+  // Goal 2: water, status lights, glass, cork, brick, roofs, more flowers and greens
+  p.add('water', null, { colors: ['#2a6fb5', '#3f9be0', '#7fd0f5', '#d6f5ff'], mid: 1 });
+  p.add('ledG', null, { colors: ['#1f9d55', '#6bffa6'], emissive: true, mid: 1 }).add('ledR', null, { colors: ['#a8281f', '#ff7060'], emissive: true, mid: 1 });
+  p.add('glass', null, { colors: ['#7fc4e0', '#a8e0f2', '#e3f7ff'], mid: 1 }).add('cork', '#c8955a').add('brick', '#c4694a').add('roof', '#a8473a');
+  p.add('flowerR', '#e8524a', { material: 'follaje' }).add('flowerO', '#f59a3a', { material: 'follaje' }).add('hedgeG', '#2b8a4c', { material: 'follaje' });
+  p.add('cactusG', '#58b86a', { material: 'follaje' }).add('stoneDark', '#8b8576', { shift: 0.5 }).add('metalDark', '#5b6477');
   return p;
 }
 
-export function desk(p) {
+export function desk(p, o = {}) {
   const v = new Vox(p, 'desk');
   const top = p.m('deskTop', 2), edge = p.m('deskTop', 3), wood = p.m('wood', 2), dark = p.m('woodDark', 2), darker = p.m('woodDark', 1);
   // top slab with a lighter front edge
@@ -55,9 +61,11 @@ export function desk(p) {
   // keyboard, mouse, mug, papers
   v.box(9, 1, 12, 23, 5, 13, (x, y) => p.m('kb', (x + y) % 2 === 0 ? 2 : 3));
   v.box(25, 2, 12, 27, 5, 13, p.m('kb', 1));
-  v.cyl(3, 11, 12, 16, 1.7, p.m('mug', 2)).set(5, 11, 14, p.m('mug', 1)).set(5, 11, 13, p.m('mug', 1));
-  v.cyl(3, 11, 15, 16, 1.2, p.m('coffee', 1));
-  v.box(2, 5, 12, 8, 9, 13, p.m('paper', 2)).box(3, 6, 13, 9, 10, 14, p.m('paper', 3));
+  if (o.props !== false) {
+    v.cyl(3, 11, 12, 16, 1.7, p.m('mug', 2)).set(5, 11, 14, p.m('mug', 1)).set(5, 11, 13, p.m('mug', 1));
+    v.cyl(3, 11, 15, 16, 1.2, p.m('coffee', 1));
+    v.box(2, 5, 12, 8, 9, 13, p.m('paper', 2)).box(3, 6, 13, 9, 10, 14, p.m('paper', 3));
+  }
   return v;
 }
 

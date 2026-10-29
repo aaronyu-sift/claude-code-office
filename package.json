@@ -49,7 +49,8 @@
     "test": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --test test/",
     "qa:pixel": "node tools/qa/pixel-qa.mjs",
     "sprites": "node tools/sprites/build-atlas.mjs --proj iso",
-    "sprites:check": "node tools/sprites/build-atlas.mjs --proj iso --check"
+    "sprites:check": "node tools/sprites/build-atlas.mjs --proj iso --check",
+    "sprites:table": "node tools/sprites/content-table.mjs"
   },
   "engines": {
     "node": ">=18"

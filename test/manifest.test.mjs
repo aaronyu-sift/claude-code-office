@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { readFileSync, existsSync } from 'node:fs';
 import { FP, POSES, APPEARANCES, workerId, deskId } from '../public/js/pixel/ids.js';
 import { layoutOffice } from '../public/js/pixel/layout.js';
+import { countRows, POSE_MINIMUM } from '../tools/sprites/content-minimums.mjs';
 
 const dir = new URL('../public/pixel/', import.meta.url);
 const manifest = JSON.parse(readFileSync(new URL('manifest.json', dir), 'utf8'));
@@ -49,4 +50,24 @@ test('manifest: no two images overlap in the atlas', () => {
     const [a, b, c, d] = rects[i], [e, f, g, h] = rects[j];
     assert.ok(!(a < e + g && a + c > e && b < f + h && b + d > f), 'two sprites share atlas pixels');
   }
+});
+
+test('manifest: the content minimums of plan section 5 are met (counting rule in the plan)', () => {
+  for (const r of countRows(manifest)) assert.ok(r.met, `${r.row}: ${r.actual} of ${r.min}`);
+  for (let a = 0; a < APPEARANCES; a++) for (const p of POSE_MINIMUM) assert.ok(manifest.sprites[workerId(a, p)], `appearance ${a} has no ${p} pose`);
+});
+test('manifest: every sprite id used by the layout props and every animated or lit sprite has what the scene reads', () => {
+  const L = layoutOffice([{ id: 'x', cls: 2, project: 'p', color: '#fff' }]);
+  for (const pr of L.rooms[0].props) assert.equal(manifest.sprites[pr.id].cat, 'deskprop');
+  const P = manifest.projections.iso;
+  for (const [id, s] of Object.entries(manifest.sprites)) {
+    if (s.tags.includes('lit')) assert.ok(P.sprites[id].anchors, `${id} is tagged lit but has no light anchors`);
+    if (P.sprites[id].anchors) assert.equal(P.sprites[id].anchors.length, s.facings, `${id}: anchors per facing`);
+  }
+});
+test('manifest: only small things animate (sway and steam sprites are at most 32 x 48 px)', () => {
+  const P = manifest.projections.iso.sprites;
+  const moving = Object.entries(manifest.sprites).filter(([, s]) => s.tags.includes('sway') || s.tags.includes('steam'));
+  assert.ok(moving.length >= 10);
+  for (const [id] of moving) for (const [, , w, h] of P[id].rects) assert.ok(w <= 32 && h <= 48, `${id} is ${w} x ${h} px, too big to animate`);
 });
