@@ -306,6 +306,66 @@ async function runWeather(ctx) {
   } finally { await S.done(); }
 }
 
+// ---- 3d-season
+// the mean colour of the 3D canvas (the pixels that are drawn), as it is on screen
+const MEAN_PX = o3(`(() => { const c = v.querySelector('.of-stage canvas'), gl = c.getContext('webgl2') || c.getContext('webgl'), W = c.width, H = c.height; o.draw();
+  const b = new Uint8Array(W * H * 4); gl.readPixels(0, 0, W, H, gl.RGBA, gl.UNSIGNED_BYTE, b); let r = 0, g = 0, bl = 0, n = 0;
+  for (let i = 0; i < b.length; i += 4) if (b[i + 3] > 200) { r += b[i]; g += b[i + 1]; bl += b[i + 2]; n++; }
+  return [Math.round(r / n), Math.round(g / n), Math.round(bl / n)]; })()`);
+const colourDist = (a, b) => Math.hypot(a[0] - b[0], a[1] - b[1], a[2] - b[2]);
+const hexRgb = h => [1, 3, 5].map(i => parseInt(h.slice(i, i + 2), 16));
+
+async function runSeason(ctx) {
+  const S = await scenario3d(4, { tag: 'envsea', root: ctx.root, query: 'time=12:00&season=winter' });
+  try {
+    const { page } = S, ev = e => page.evaluate(e);
+    const first = await waitEnv(page, e => e && e.builtSeason, 20000);               // ?season=winter reaches the first build: no summer island that is recoloured a moment later
+    await waitEnv(page, e => e.settled);
+    const rooms0 = JSON.stringify(await ev(o3('s.rooms')));
+    const zoom0 = await ev(o3('s.zoom'));
+    const seen = {};
+    for (const season of ['summer', 'autumn', 'winter', 'spring']) {
+      await ev(setting('season', season));
+      const e = await waitEnv(page, x => x.builtSeason === season && x.season === season, 30000);
+      await sleep(500);
+      seen[season] = { env: e, mean: await ev(MEAN_PX), calls: (await ev(o3('o.draw()'))).calls, rooms: JSON.stringify(await ev(o3('s.rooms'))), zoom: await ev(o3('s.zoom')) };
+    }
+    const names = Object.keys(seen);
+    const distinct = key => new Set(names.map(n => seen[n].env.colours[key])).size === 4;
+    let minMean = Infinity;
+    for (let i = 0; i < 4; i++) for (let j = i + 1; j < 4; j++) minMean = Math.min(minMean, colourDist(seen[names[i]].mean, seen[names[j]].mean));
+    const sameAll = key => new Set(names.map(n => JSON.stringify(seen[n].env[key]))).size === 1;
+    // the season that "auto" picks follows the date and the hemisphere
+    await ev(setting('season', 'auto'));
+    const auto = {};
+    for (const [date, hemi] of [['2026-01-15', 'north'], ['2026-01-15', 'south'], ['2026-04-15', 'north'], ['2026-04-15', 'south'], ['2026-07-15', 'north'], ['2026-10-15', 'north']]) {
+      await ev(setting('hemisphere', hemi)); await ev(atmosphere(`a.setDate(${JSON.stringify(date)})`));
+      auto[date + ' ' + hemi] = (await waitEnv(page, x => x.builtSeason === x.season && x.settled !== undefined, 30000)).season;
+      await waitEnv(page, x => x.builtSeason === x.season, 30000);
+    }
+    // a season that is chosen stays when the date moves on
+    await ev(setting('season', 'autumn')); await ev(atmosphere(`a.setDate('2026-01-15')`)); await waitEnv(page, x => x.builtSeason === 'autumn', 30000); await sleep(1500);
+    const kept = await ev(ENV);
+    const errs = page.errors.filter(e => !/\/local\/ofis-extras\.js/.test(e));
+    const C = {
+      address: first.builtSeason === 'winter' && first.colours.grass === seen.winter.env.colours.grass,
+      grass: distinct('grass'), round: distinct('round'), pine: distinct('pine'),
+      visible: minMean >= 6,
+      positions: sameAll('treeSig') && sameAll('trees') && sameAll('tris') && sameAll('meshes') && sameAll('island') && names.every(n => seen[n].rooms === rooms0 && seen[n].zoom === zoom0),
+      draws: new Set(names.map(n => seen[n].calls)).size === 1,
+      auto: auto['2026-01-15 north'] === 'winter' && auto['2026-01-15 south'] === 'summer' && auto['2026-04-15 north'] === 'spring' && auto['2026-04-15 south'] === 'autumn' && auto['2026-07-15 north'] === 'summer' && auto['2026-10-15 north'] === 'autumn',
+      kept: kept.season === 'autumn' && kept.builtSeason === 'autumn',
+      noErrors: errs.length === 0,
+    };
+    const bad = Object.keys(C).filter(k => !C[k]), ok = bad.length === 0;
+    return [make('3d-season', ok,
+      `${ok ? '' : 'FAILED PARTS: ' + bad.join(', ') + '; '}?season=winter: the first build is ${first.builtSeason}; the grass, the round trees and the pines as built, by season: ${names.map(n => `${n} ${seen[n].env.colours.grass} ${seen[n].env.colours.round} ${seen[n].env.colours.pine}`).join('; ')}; `
+      + `mean colour of the canvas: ${names.map(n => `${n} ${seen[n].mean.join(',')}`).join('; ')} (the least apart: ${minMean.toFixed(1)}, need 6); `
+      + `trees ${seen.summer.env.trees} at places with signature ${names.map(n => seen[n].env.treeSig).join('/')}, triangles ${names.map(n => seen[n].env.tris).join('/')}, meshes ${names.map(n => seen[n].env.meshes).join('/')}, draw calls ${names.map(n => seen[n].calls).join('/')}, rooms and zoom unchanged ${names.every(n => seen[n].rooms === rooms0 && seen[n].zoom === zoom0)}; `
+      + `automatic season: ${Object.entries(auto).map(([k, v]) => `${k} ${v}`).join(', ')}; a chosen season on 2026-01-15: ${kept.season}; console errors ${errs.length}${errs[0] ? ' ' + errs[0].slice(0, 100) : ''}`)];
+  } finally { await S.done(); }
+}
+
 // ---- mutations: break one line in a copy of the repo and expect the check that guards it to fail
 const MUTATIONS = [
   { name: 'the popover is hidden again for the 3D scene', file: 'public/js/main.js', from: 'const on = current === \'ofis\' && !!sceneSettings;', to: 'const on = current === \'ofis\' && !!pixelOffice;', fails: '3d-settings' },
@@ -321,6 +381,10 @@ const MUTATIONS = [
   { name: 'the overlay keeps drawing while the Office view is hidden', file: 'public/js/ofis-weather.js', from: 'setVisible(on) { shown = !!on; sched.wake(); }', to: 'setVisible(on) { sched.wake(); }', fails: '3d-weather' },
   { name: 'rain takes no light from the sun', file: 'public/js/office-atmosphere.js', from: 'k, sunDim: w.sun, skyDim: w.sky,', to: 'k, sunDim: 0, skyDim: 0,', fails: '3d-weather' },
   { name: 'the overlay is drawn at 60 frames a second instead of 10', file: 'public/js/ofis-weather.js', from: 'createScheduler({ draw: t => drawFrame(t),', to: 'createScheduler({ maxFps: 60, draw: t => drawFrame(t),', fails: '3d-weather' },
+  { name: 'the trees are baked in the colours of summer in every season', file: 'public/js/ofis-env.js', from: 'makePalette(SEASON_PALETTES.tree[season] || SEASON_PALETTES.tree.summer)', to: 'makePalette(SEASON_PALETTES.tree.summer)', fails: '3d-season' },
+  { name: 'the grass keeps the colours of summer in every season', file: 'public/js/ofis-env.js', from: 'Object.assign(PAL, { grassA: g.grassA,', to: 'Object.assign({}, { grassA: g.grassA,', fails: '3d-season' },
+  { name: 'the automatic season ignores the hemisphere', file: 'public/js/office-atmosphere.js', from: 'seasonOfDate(date, settings.hemisphere)', to: "seasonOfDate(date, 'north')", fails: '3d-season' },
+  { name: 'a new season is never built (the island keeps its first colours)', file: 'public/js/ofis-env.js', from: 'atm.state.season !== builtSeason', to: 'false', fails: '3d-season' },
   { name: '?hour= is no longer an alias of ?time=', file: 'public/js/office-settings.js', from: "if (out.time == null && raw != null", to: "if (false && raw != null", fails: '3d-time' },
 ];
 
@@ -345,7 +409,7 @@ async function runMutations() {
 }
 
 // ---- main
-const CHECKS = { '3d-settings': runSettings, '3d-time': runTime, '3d-weather': runWeather };
+const CHECKS = { '3d-settings': runSettings, '3d-time': runTime, '3d-weather': runWeather, '3d-season': runSeason };
 const report = [];
 const show = r => { report.push(r); console.log(`CHECK ${r.name} ${r.ok ? 'PASS' : 'FAIL'} ${r.detail}`); };
 if (args.includes('--mutations')) {

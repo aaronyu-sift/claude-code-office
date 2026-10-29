@@ -127,6 +127,25 @@ export const PALETTE_OF = {
   treeA: 'tree', treeA2: 'tree', treeB: 'tree', treeB2: 'tree', bushA: 'tree', bushA2: 'tree', rock1: 'rock', rock2: 'rock', rock3: 'rock', rock4: 'rock',
 };
 
+// The seasons of the 3D scene are palette swaps (the pixel scene bakes its seasons into the sprites; this scene recolours): the trees (the same material names as
+// PALETTES.tree: `leafsGreen` is the round trees and the bushes, `leafsDark` the pines, which keep their needles) and the ground (the two greens of the grass and the wood's
+// darker green, the grass lip at the island's edge, the hedges, the green of the hills). Summer is the scene's usual look. A season changes colours only: nothing is added, moved or removed.
+export const SEASONS = ['spring', 'summer', 'autumn', 'winter'];
+export const SEASON_PALETTES = {
+  tree: {
+    spring: { byName: { leafsGreen: '#f3a7c5', leafsDark: '#4aa86c', woodBark: '#8a5d3b', woodBarkDark: '#7a5236', grass: '#7ccf6a', _defaultMat: '#7a5236' } },
+    summer: PALETTES.tree,
+    autumn: { byName: { leafsGreen: '#e8892f', leafsDark: '#3b7a52', woodBark: '#7d5436', woodBarkDark: '#6f4a31', grass: '#b9a24a', _defaultMat: '#6f4a31' } },
+    winter: { byName: { leafsGreen: '#d3dfe8', leafsDark: '#5f9186', woodBark: '#6f5a4a', woodBarkDark: '#625044', grass: '#b8c9c4', _defaultMat: '#625044' } },
+  },
+  ground: {
+    spring: { grassA: '#a2e07a', grassB: '#c2ee8e', grassWood: '#86cf6b', lip: '#7fc462', leaf: '#5cae52', leaf2: '#72c262', hillA: '#78ba5c', hillB: '#8cc86a' },
+    summer: { grassA: '#8cc76c', grassB: '#a6d47d', grassWood: '#70ad59', lip: '#6aa851', leaf: '#4f9a4c', leaf2: '#63b058', hillA: '#72ae59', hillB: '#7fb862' },
+    autumn: { grassA: '#b4b45a', grassB: '#cbbf68', grassWood: '#98954a', lip: '#9c9a48', leaf: '#b0883a', leaf2: '#c4803a', hillA: '#a9a255', hillB: '#bcae5c' },
+    winter: { grassA: '#e6eef3', grassB: '#f6f9fb', grassWood: '#c8d6dd', lip: '#cdd9df', leaf: '#7d9a8a', leaf2: '#93aa9c', hillA: '#e3ebef', hillB: '#f0f5f7' },
+  },
+};
+
 // ------------------------------------------------------------ how the old joints drive a pack character's bones
 
 // The pack's rest pose is a T (arms out); the procedural figure's arms hang down and swing from the shoulder. `j` holds the old joint
