@@ -2,7 +2,8 @@ import { t as msg, locale, fmtPct } from './i18n.js';
 import { CATS, STATUS, verbOf, actText, evName, evText, catColor, fmtDur, fmtShort, fmtClock, fmtTok, fmtUsd, pct, esc, icon } from './util.js';
 import { createPano } from './pano.js';
 import { createPixelOffice } from './pixel/index.js';
-import { parseClock } from './pixel/time.js';
+import { fromQuery } from './pixel/settings.js';
+import { createSettingsPanel } from './settings-panel.js';
 import { createAkis } from './akis.js';
 import { createMaliyet } from './maliyet.js';
 import './site.js';
@@ -149,8 +150,9 @@ function safeView(name, create) {
 let pixelOffice = null;
 function createOffice(root) {
   const q = new URLSearchParams(location.search), proj = q.get('proj');
-  // ?time=HH:MM pins the time of day; ?proj=iso|front picks the view (without it the stored choice, then isometric)
-  if (q.get('scene') !== '3d') return (pixelOffice = createPixelOffice(root, ctx, { time: parseClock(q.get('time')), proj: proj === 'iso' || proj === 'front' ? proj : null }));
+  // ?proj=iso|front picks the view (without it the stored choice, then isometric); ?time=HH:MM, ?season=, ?weather= and ?hemisphere= override the
+  // stored scene settings for this visit
+  if (q.get('scene') !== '3d') return (pixelOffice = createPixelOffice(root, ctx, { overrides: fromQuery(location.search), proj: proj === 'iso' || proj === 'front' ? proj : null }));
   root.dataset.scene = '3d';
   let real = null, visible = false;
   import('./ofis.js').then(m => { real = m.createOfis(root, ctx); if (visible) real.show(); })
@@ -170,17 +172,26 @@ const views = {
 let current = null;
 
 // The projection toggle in the header belongs to the pixel Office view; it is hidden on every other view and with ?scene=3d.
-const projSeg = document.getElementById('proj-seg');
+// The camera buttons exist twice, in the header and in the settings popover (both are `.proj-seg`); the popover (time, season, hemisphere,
+// weather) belongs to the pixel Office view as well.
+const projSeg = document.getElementById('proj-seg'), setWrap = document.getElementById('set-wrap');
+const keepUrl = (key, value) => {                                   // an explicit URL parameter follows a change made with the controls
+  const q = new URLSearchParams(location.search);
+  if (q.has(key)) { q.set(key, value); history.replaceState(null, '', '?' + q + location.hash); }
+};
+const panel = createSettingsPanel({ wrap: setWrap, getOffice: () => pixelOffice, afterChange: keepUrl });
 function syncProjSeg() {
-  projSeg.hidden = !(current === 'ofis' && pixelOffice);
-  for (const b of projSeg.querySelectorAll('button')) b.setAttribute('aria-pressed', String(!!pixelOffice && b.dataset.proj === pixelOffice.projection));
+  const on = current === 'ofis' && !!pixelOffice;
+  projSeg.hidden = !on;
+  setWrap.hidden = !on;
+  if (!on) panel.close();
+  for (const b of document.querySelectorAll('.proj-seg button')) b.setAttribute('aria-pressed', String(!!pixelOffice && b.dataset.proj === pixelOffice.projection));
 }
-projSeg.addEventListener('click', async e => {
+for (const seg of document.querySelectorAll('.proj-seg')) seg.addEventListener('click', async e => {
   const b = e.target.closest('button[data-proj]');
   if (!b || !pixelOffice) return;
   await pixelOffice.setProjection(b.dataset.proj);
-  const q = new URLSearchParams(location.search);
-  if (q.has('proj')) { q.set('proj', pixelOffice.projection); history.replaceState(null, '', '?' + q + location.hash); }     // an explicit ?proj= follows the toggle
+  keepUrl('proj', pixelOffice.projection);
   syncProjSeg();
 });
 

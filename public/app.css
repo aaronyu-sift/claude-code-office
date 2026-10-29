@@ -73,6 +73,21 @@ kbd { font: 10px/1 var(--mono); color: var(--faint); border: 1px solid var(--lin
 .proj-seg button[aria-pressed="true"] { background: var(--panel-3); color: var(--text); }
 .seg.small button { padding: 4px 11px; font-size: 12px; }
 
+/* the scene settings popover (pixel Office view) */
+.set-wrap { position: relative; }
+.set-wrap[hidden] { display: none; }
+.set-pop { position: absolute; left: 0; top: calc(100% + 10px); z-index: 60; width: 292px; padding: 12px 14px 10px; background: var(--panel-2); border: 1px solid var(--line-2); border-radius: 14px; box-shadow: 0 18px 40px -16px rgba(0, 0, 0, .8); display: grid; gap: 10px; }
+.set-pop[hidden] { display: none; }
+.set-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.set-l { color: var(--text-2); font-size: 12.5px; }
+.set-pop select { background: var(--panel-3); color: var(--text); border: 1px solid var(--line-2); border-radius: 8px; padding: 4px 8px; font: inherit; font-size: 12.5px; max-width: 168px; }
+.set-time { gap: 10px; }
+.set-time[hidden] { display: none; }
+.set-time input[type="range"] { flex: 1; accent-color: var(--accent); }
+.set-time output { min-width: 44px; text-align: right; font: 12.5px var(--mono); color: var(--text); }
+.set-pop .seg button[aria-pressed="true"] { background: var(--panel-3); color: var(--text); }
+.set-note { margin: 0; color: var(--muted); font-size: 11.5px; line-height: 1.4; }
+
 .kpis { display: flex; gap: 6px 16px; margin-left: auto; flex-wrap: wrap; align-items: center; }
 .kpi { display: inline-flex; align-items: center; gap: 7px; padding: 4px 0; white-space: nowrap; font-size: 12.5px; color: var(--muted); border: 0; background: none; }
 .kpi b { font-weight: 600; color: var(--text); font-variant-numeric: tabular-nums; }
@@ -547,7 +562,7 @@ main { flex: 1; min-height: 0; position: relative; }
 
 /* office pixel scene ------------------------------------------------------------------------------- */
 .view-ofis[data-scene="pixel"] .of-stage canvas { image-rendering: pixelated; position: absolute; inset: 0; }
-.view-ofis[data-scene="pixel"] .of-sky { pointer-events: none; }
+.view-ofis[data-scene="pixel"] .of-sky, .view-ofis[data-scene="pixel"] .of-wx { pointer-events: none; }
 .px-l {
   position: absolute; left: 0; top: 0; pointer-events: auto; cursor: pointer; width: max-content; max-width: 196px;
   padding: 3px 8px 4px 7px; border-radius: 7px; border-left: 3px solid var(--line-2);

@@ -26,6 +26,31 @@
     <button type="button" data-proj="iso" aria-pressed="true" title="Isometric view" data-i18n="proj.iso" data-i18n-title="proj.iso.tip">Isometric</button>
     <button type="button" data-proj="front" aria-pressed="false" title="Front three-quarter view" data-i18n="proj.front" data-i18n-title="proj.front.tip">Front</button>
   </div>
+  <div class="set-wrap" id="set-wrap" hidden>
+    <button type="button" class="icon-btn" id="set-btn" aria-haspopup="dialog" aria-expanded="false" aria-controls="set-pop" title="Scene settings" data-i18n-title="set.tip">
+      <svg class="ic" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" aria-hidden="true"><path d="M2.5 4.5h6M11.5 4.5h2M2.5 11.5h2M7.5 11.5h6"/><circle cx="10" cy="4.5" r="1.6"/><circle cx="6" cy="11.5" r="1.6"/></svg>
+    </button>
+    <div class="set-pop" id="set-pop" role="dialog" aria-label="Scene settings" data-i18n-aria="set.title" hidden>
+      <div class="set-row"><span class="set-l" data-i18n="set.camera">Camera</span>
+        <div class="seg small proj-seg" role="group" aria-label="Camera view" data-i18n-aria="proj.label">
+          <button type="button" data-proj="iso" aria-pressed="true" data-i18n="proj.iso">Isometric</button>
+          <button type="button" data-proj="front" aria-pressed="false" data-i18n="proj.front">Front</button>
+        </div></div>
+      <div class="set-row"><span class="set-l" data-i18n="set.time">Time of day</span>
+        <div class="seg small" id="set-time-mode" role="group">
+          <button type="button" data-v="auto" aria-pressed="true" data-i18n="set.timeAuto">Auto</button>
+          <button type="button" data-v="fixed" aria-pressed="false" data-i18n="set.timeFixed">Fixed</button>
+        </div></div>
+      <div class="set-row set-time"><input type="range" id="set-time" min="0" max="1435" step="5" value="720" aria-label="Time of day"><output id="set-time-out" for="set-time">12:00</output></div>
+      <div class="set-row"><label class="set-l" for="set-season" data-i18n="set.season">Season</label>
+        <select id="set-season"><option value="auto" data-i18n="set.seasonAuto">Auto (by date)</option><option value="spring" data-i18n="season.spring">Spring</option><option value="summer" data-i18n="season.summer">Summer</option><option value="autumn" data-i18n="season.autumn">Autumn</option><option value="winter" data-i18n="season.winter">Winter</option></select></div>
+      <div class="set-row"><label class="set-l" for="set-hemisphere" data-i18n="set.hemisphere">Hemisphere</label>
+        <select id="set-hemisphere"><option value="north" data-i18n="hemi.north">North</option><option value="south" data-i18n="hemi.south">South</option></select></div>
+      <div class="set-row"><label class="set-l" for="set-weather" data-i18n="set.weather">Weather</label>
+        <select id="set-weather"><option value="off" data-i18n="weather.off">Off</option><option value="auto" data-i18n="weather.auto">Auto (by date)</option><option value="clear" data-i18n="weather.clear">Clear</option><option value="cloudy" data-i18n="weather.cloudy">Cloudy</option><option value="rain" data-i18n="weather.rain">Rain</option><option value="snow" data-i18n="weather.snow">Snow</option><option value="fog" data-i18n="weather.fog">Fog</option></select></div>
+      <p class="set-note" id="set-note" hidden></p>
+    </div>
+  </div>
   <div class="kpis" id="kpis"></div>
   <div class="accts" id="accts"></div>
   <button id="lang" class="icon-btn lang-btn" type="button"></button>
