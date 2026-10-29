@@ -127,3 +127,18 @@ test('recent: days = 0 turns it off, and a missing projects directory is an empt
     assert.deepEqual(createRecent({ projDir: join(dir, 'nope'), read: s.read }).scan(), []);
   } finally { clean(dir); }
 });
+
+test('recent: the bytes read per file never exceed the tail, are counted per pass and in total, and are zero on a warm pass', () => {
+  const dir = makeProjects([['p', 'big', 1, 10000], ['p', 'small', 2, 300], ['p', 'mid', 3, 1500]]);
+  try {
+    const r = createRecent({ projDir: dir, read: spy().read, tail: 1000 });
+    r.scan();
+    assert.equal(r.stats.bytes, 1000 + 300 + 1000, 'min(size, tail) for each of the three files');
+    assert.equal(r.stats.read, 3);
+    r.scan();
+    assert.equal(r.stats.bytes, 0, 'a warm pass reads nothing');
+    assert.equal(r.stats.read, 0);
+    assert.deepEqual(r.stats.totals, { passes: 2, ms: r.stats.totals.ms, maxMs: r.stats.totals.maxMs, read: 3, bytes: 2300 });
+    assert.ok(r.stats.totals.maxMs >= r.stats.ms && r.stats.totals.maxMs <= r.stats.totals.ms, 'the longest pass is one of the passes');
+  } finally { clean(dir); }
+});

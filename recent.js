@@ -17,13 +17,15 @@ const DAY = 86400e3;
 
 function createRecent(o) {
   const {
-    projDir, read, days = 14, max = 50, budgetMs = 150,
+    projDir, read, tail = 256 * 1024, days = 14, max = 50, budgetMs = 150,
     now = Date.now, clock = () => performance.now(), fsx = fs,
   } = o;
   const files = new Map();                         // file -> { id, dir, size, mtimeMs, summary, tried }
   const dirs = new Map();                          // directory -> its mtime when it was last listed
   const observed = new Map();                      // session id -> when the server saw it close
-  let last = { ms: 0, dirs: 0, listed: 0, statted: 0, read: 0, readMs: 0, pending: 0, files: 0, window: days };
+  const empty = () => ({ ms: 0, dirs: 0, listed: 0, statted: 0, read: 0, bytes: 0, readMs: 0, pending: 0, files: 0, window: days });
+  let last = empty();
+  const totals = { passes: 0, ms: 0, maxMs: 0, read: 0, bytes: 0 };            // since the scanner was made: the cold cost is the total once nothing is pending
 
   const idOf = f => f.slice(0, -'.jsonl'.length);
   const newer = (a, b) => b.closedAt - a.closedAt || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0);
@@ -39,12 +41,14 @@ function createRecent(o) {
     try { s = read(file, { size: e.size, mtimeMs: e.mtimeMs }) || null; } catch { s = null; }     // an unreadable file is not retried until it changes
     e.summary = s; e.tried = true;
     last.read++; last.readMs += clock() - t0;
+    last.bytes += Math.min(e.size, tail);                                    // what the reader takes: the end of the file, `tail` bytes at most
+    totals.read++; totals.bytes += Math.min(e.size, tail);
   }
 
   // One pass. `live` is the set of session ids that have a live process (they are not closed). Returns the list, newest first.
   function scan(live = new Set()) {
     const t0 = clock(), deadline = t0 + budgetMs, t = now();
-    last = { ms: 0, dirs: 0, listed: 0, statted: 0, read: 0, readMs: 0, pending: 0, files: 0, window: days };
+    last = empty();
     if (days > 0) {
       let names = [];
       try { names = fsx.readdirSync(projDir); } catch { /* no projects yet */ }
@@ -80,6 +84,7 @@ function createRecent(o) {
     }
     for (const id of [...observed.keys()]) if (![...files.values()].some(e => e.id === id)) observed.delete(id);
     last.ms = clock() - t0;
+    totals.passes++; totals.ms += last.ms; totals.maxMs = Math.max(totals.maxMs, last.ms);
     return list(live);
   }
 
@@ -105,7 +110,7 @@ function createRecent(o) {
     return e.summary;
   }
 
-  return { scan, list, add, get stats() { return last; } };
+  return { scan, list, add, get stats() { return { ...last, totals: { ...totals } }; } };
 }
 
 module.exports = { createRecent };

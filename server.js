@@ -60,7 +60,8 @@ function configure(o) {
       .filter(l => l && l.file && l.key).map(l => ({ file: path.resolve(expandHome(l.file)), key: String(l.key) })),
   };
   const num = (v, d) => (v === undefined || v === null || v === '' || !Number.isFinite(Number(v)) ? d : Math.max(0, Number(v)));
-  RECENT_OPTS = { days: num(o.closedDays, 14), max: Math.max(1, num(o.closedMax, 50)), budgetMs: Math.max(10, num(o.closedBudgetMs, 150)) };
+  RECENT_OPTS = { days: num(o.closedDays, 14), max: Math.max(1, num(o.closedMax, 50)), budgetMs: Math.max(1, num(o.closedBudgetMs ?? process.env.CCO_CLOSED_BUDGET_MS, 150)) };
+  CLOSED_EVERY = Math.max(250, num(o.closedEveryMs ?? process.env.CCO_CLOSED_EVERY_MS, 30e3));
   DEMO = !!o.demo;
   SITE = o.site || null;
 }
@@ -74,7 +75,7 @@ const SUB_KEEP_MS = 3 * 3600e3;        // subagent files older than this are ign
 const SUB_STALE_MS = 45 * 60e3;        // an unfinished subagent with no new records counts as "stale"
 const MAX_EVENTS = 900;
 const CLOSED_TAIL = 256 * 1024;         // a closed session is read from the last 256 KB of its transcript, never all of it
-const CLOSED_EVERY = 30e3;             // the closed list is looked at again this often (a session that closes is added at once)
+let CLOSED_EVERY = 30e3;               // the closed list is looked at again this often (a session that closes is added at once)
 const SPARK_MIN = 60;
 
 // ---------------------------------------------------------------- helpers
@@ -533,9 +534,11 @@ function readClosed(file) {
   readNew(a, CLOSED_TAIL);
   if (!a.updated && !a.lastPrompt && !a.lastText && !a.title && !a.customTitle) return null;      // not a session transcript
   const project = baseName(a.cwd) || path.basename(path.dirname(file));
+  const toolCats = {};                                              // tool -> category, for the colours of its bar
+  for (const ev of a.events) if (a.tools[ev.n] && ev.c !== 'think' && ev.c !== 'wait' && ev.c !== 'prompt' && ev.c !== 'compact') toolCats[ev.n] = ev.c;
   return {
     name: a.customTitle || a.agentName || '', title: a.title, project, cwd: a.cwd, color: colorFor(project),
-    lastPrompt: a.lastPrompt, lastText: a.lastText, summary: a.summary, tools: a.tools, cats: a.cats,
+    lastPrompt: a.lastPrompt, lastText: a.lastText, summary: a.summary, tools: a.tools, cats: a.cats, toolCats,
     model: prettyModel(a.model), lastMessage: a.updated || null,
   };
 }
@@ -555,7 +558,7 @@ function refreshClosed(justClosed = []) {
   const live = new Set();
   for (const a of agents.values()) if (a.kind === 'main') live.add(a.id);
   const list = recent.scan(live);
-  recentAt = recent.stats.pending > 0 ? t - CLOSED_EVERY + 1000 : t;      // reads left over from the time budget: go on in a second
+  recentAt = recent.stats.pending > 0 ? t - CLOSED_EVERY + Math.min(1000, CLOSED_EVERY) : t;      // reads left over from the time budget: go on in a second
   publishClosed(list);
 }
 
@@ -814,7 +817,7 @@ function start() {
     closedList = demo.closed(now()); closedKey = JSON.stringify(closedList);
   } else {
     startCostWorker();
-    if (RECENT_OPTS.days > 0) recent = createRecent({ projDir: PROJ_DIR, read: readClosed, ...RECENT_OPTS });
+    if (RECENT_OPTS.days > 0) recent = createRecent({ projDir: PROJ_DIR, read: readClosed, tail: CLOSED_TAIL, ...RECENT_OPTS });
   }
   tick();
   setInterval(tick, 1000).unref();
@@ -826,6 +829,7 @@ function start() {
  *   claudeDir, dataDir, demo, cswapUrl, projectColorsFile, projectColors,
  *   costPrices (Vertex price table file), costDiscount (0.168 = 16.8%), costExtraLogs ([{ file, key }]),
  *   closedDays (14; 0 = no shelf of closed sessions), closedMax (50), closedBudgetMs (150: what one scan may spend reading transcripts),
+ *   closedEveryMs (30000: how often the list is looked at again),
  *   site: { name, home, links: [{ label, href }] }  – shown in the header when mounted into another site
  * Returns { handler(req, res, next), start(), listen(port, host, cb) }.
  */
@@ -892,5 +896,10 @@ function cli(argv) {
   });
 }
 
-module.exports = { createOffice, cli };
+// For tools/qa/scan-real.mjs: the closed-session scanner on its own (no server, no cost worker), over any Claude config directory.
+function closedScanner({ claudeDir, ...opts } = {}) {
+  return createRecent({ projDir: path.join(path.resolve(expandHome(claudeDir || path.join(HOME, '.claude'))), 'projects'), read: readClosed, tail: CLOSED_TAIL, ...opts });
+}
+
+module.exports = { createOffice, cli, closedScanner };
 if (require.main === module) cli(process.argv.slice(2));
