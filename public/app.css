@@ -668,7 +668,7 @@ main { flex: 1; min-height: 0; position: relative; }
 .of-sum .sep { color: var(--faint); }
 .of-sum .w { color: color-mix(in srgb, var(--warn) 70%, var(--text)); }
 .of-sum .w b { color: var(--warn); }
-.view-ofis[data-scene="pixel"]:not([hidden]) { display: flex; }          /* not for a hidden view: `.view[hidden]` has the same weight and this rule comes later */
+.view-ofis[data-scene="pixel"]:not([hidden]), .view-ofis[data-scene="3d"]:not([hidden]) { display: flex; }          /* both scenes: the scene's own box and the column beside it; not for a hidden view: `.view[hidden]` has the same weight and this rule comes later */
 .of-area { position: relative; flex: 1 1 auto; min-width: 0; height: 100%; overflow: hidden; }
 /* The right-hand column: the shelf card (the style of the cards of the Setup Atlas page: dark glass, hairline border, mono chip, round buttons) with the zoom
    buttons right under it. The Office is dark whatever the system theme is, so the colours here are fixed. With no card (the shelf is empty or folded) the
@@ -705,6 +705,7 @@ main { flex: 1; min-height: 0; position: relative; }
 .sh-item:hover, .sh-item:focus-visible { background: rgba(143, 176, 255, .12); outline: none; }
 .sh-item:focus-visible { box-shadow: inset 0 0 0 2px var(--sh-accent); }
 .sh-fig { flex: none; min-width: 18px; image-rendering: pixelated; }
+.view-ofis[data-scene="3d"] .sh-fig { image-rendering: auto; }          /* the people of the 3D scene are drawn smooth, not from the pixel atlas */
 .sh-txt { display: flex; flex-direction: column; gap: 1px; min-width: 0; }
 .sh-name { font: 600 14px/1.35 var(--font); color: var(--sh-ink); overflow-wrap: anywhere; }
 .sh-meta { display: flex; flex-wrap: wrap; align-items: baseline; gap: 0 10px; color: var(--sh-muted); font-size: 13px; line-height: 1.5; }
