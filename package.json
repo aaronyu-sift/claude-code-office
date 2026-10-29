@@ -47,9 +47,9 @@
     "demo": "node server.js --demo --open",
     "vendor": "npx esbuild node_modules/three/build/three.module.js --bundle --minify --format=esm --outfile=public/vendor/three/three.module.min.js && node -e \"const fs=require('fs');fs.mkdirSync('public/vendor/three/addons/geometries',{recursive:true});fs.copyFileSync('node_modules/three/examples/jsm/geometries/RoundedBoxGeometry.js','public/vendor/three/addons/geometries/RoundedBoxGeometry.js');fs.copyFileSync('node_modules/three/LICENSE','public/vendor/three/LICENSE')\"",
     "test": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --test test/",
+    "qa:3d-env": "node tools/qa/office3d-env-qa.mjs",
     "qa:pixel": "node tools/qa/pixel-qa.mjs",
     "qa:3d": "node tools/qa/office3d-qa.mjs",
-    "qa:3d-env": "node tools/qa/office3d-env-qa.mjs",
     "sprites": "node tools/sprites/build-atlas.mjs --proj iso",
     "sprites:check": "node tools/sprites/build-atlas.mjs --proj iso --check",
     "sprites:table": "node tools/sprites/content-table.mjs"
