@@ -57,12 +57,13 @@ function tools(S) {
   const view0 = () => O('({ zoom: o.zoom, origin: o.project(0, 0, 0) })');
   const settle = async () => { await sleep(120); for (let i = 0; i < 40; i++) { const n = await ev(`document.getAnimations().filter(a => (a.playState === 'running' || a.pending) && a.effect && a.effect.target && a.effect.target.closest && a.effect.target.closest('.of-card, .of-shelf, .of-shelf-tab, #drawer')).length`); if (!n) return; await sleep(100); } };
   const esc = () => S.page.send('Input.dispatchKeyEvent', { type: 'keyDown', key: 'Escape', code: 'Escape', windowsVirtualKeyCode: 27 }).then(() => S.page.send('Input.dispatchKeyEvent', { type: 'keyUp', key: 'Escape', code: 'Escape', windowsVirtualKeyCode: 27 }));
-  // Click an agent: some point of its figure that no label, bar or card covers. Returns the point, or null. A click on its floor or label opens it too.
-  async function openAgent(id, notThese = []) {
-    const box = await O(`u.agentBox(${JSON.stringify(id)})`);
-    if (!box) return null;
-    for (const [dx, dy] of [[0, -0.18], [0, -0.3], [0, 0], [0.18, -0.1], [-0.18, -0.1], [0, 0.18]]) {
-      const x = box.cx + dx * box.w, y = box.cy + dy * box.h;
+  // Click an agent: some point of its figure that no label, bar or card covers, found from the scene's own projection of the agent (`charScreen`: its position 0.8 m above the
+  // floor), not from the box the card is anchored to, so a wrong anchor cannot hide itself. Returns the point and the anchor box, or null.
+  async function openAgent(id) {
+    const at = await O(`o.charScreen(${JSON.stringify(id)})`), box = await O(`u.agentBox(${JSON.stringify(id)})`);
+    if (!at || !box) return null;
+    for (const [dx, dy] of [[0, -14], [0, -26], [0, -4], [8, -12], [-8, -12], [0, 8]]) {
+      const x = at[0] + dx, y = at[1] + dy;
       const free = await ev(`(() => { const e = document.elementFromPoint(${x}, ${y}); return !!e && !e.closest('.of-card, .of-side, .of-shelf-tab, .top, #attention, #drawer') && !(e.closest('.of-l') && e.closest('.of-l').dataset.id !== ${JSON.stringify(id)}); })()`);
       if (!free) continue;
       await closeCard();
@@ -119,7 +120,7 @@ if (want('bar')) {
     }
     await S.page.setViewport(VIEW.w, VIEW.h, 1);
     check('3d-bar', bad.length === 0 && errorsOf(S.page) === 0, `${bad.length ? 'FAILED: ' + bad.slice(0, 6).join('; ') + '; ' : ''}${rows.join('; ')}; console errors (not counting the optional local/ofis-extras.js probe) ${errorsOf(S.page)}`);
-  } finally { await S.done(); }
+  } catch (e) { check('3d-bar', false, `threw: ${(e && e.message) || e}`); } finally { await S.done(); }
 }
 
 // ---- 3d-card: a click on an agent (its figure or its label) opens the glass card beside that agent, anchored to its projected place and following it through pan and zoom; the
@@ -287,7 +288,7 @@ if (want('card')) {
       `the open agent is marked in the scene (ring at ${sel1 ? sel1.at.map(v => v.toFixed(0)) : '-'}) and unmarked after closing; the map did not move; ` +
       `drag: the agent moved ${moved.toFixed(0)} px and the card ${followed ? 'went with it' : 'DID NOT follow'}; zoom ${z0.toFixed(1)} → ${zoomed ? zoomed.z.toFixed(1) : '?'}: ${zoomed ? `gap ${zoomed.x.gap.toFixed(0)} px, not covering` : 'NOT beside the agent'}; out of the view the card waits (${gone.away}) and returns after fit (${!!back}); ` +
       `another agent moves it ${!!bOpen && !!aOpen}, a label opens its agent ${labelOk}; Esc closes the menu then the card, the cross ${!!afterX}, a click on the empty scene ${!!afterEmpty}; "All details" opens the glass side card (${dcard.w.toFixed(0)} px) ${detailsOk}; the old drawer was never opened by a click on an agent ${!drawerEver}; console errors ${errorsOf(S.page)}`);
-  } finally { await S.done(); }
+  } catch (e) { check('3d-card', false, `threw: ${(e && e.message) || e}`); } finally { await S.done(); }
 }
 
 // ---- 3d-shelf: the shelf card of the asleep and closed chats: rows, the cap with its footer (the button adds ten rows, or what is left), a row opens the card beside it, the zoom buttons right under it in the same
@@ -433,7 +434,7 @@ if (want('shelf')) {
     check('3d-shelf', bad.length === 0 && errorsOf(S.page) === 0,
       `${bad.length ? 'FAILED: ' + bad.slice(0, 6).join('; ') + '; ' : ''}${live.length} live (${asleep.length} asleep) + ${S.fx.closed.length} closed chats = ${TOTAL} on the shelf; ?shelf=5: ${a.rows.length} rows, the 5 newest by time ${ids(a) === want_(5)}, "${a.count}", footer "${a.foot.text}" with "${a.foot.button}"; the asleep chat has no room (${inScene.rooms.length} rooms for ${live.length - asleep.length} awake chats), waiting chats stay in theirs; figures drawn in every row (${a.rows[0].figure.w}x${a.rows[0].figure.h} px); ` +
       `the zoom buttons ${col.below.toFixed(0)} px below the card in the same column, always in the corner (${openCorner.gapR}/${openCorner.gapB} px from the right/bottom edge, open and folded); "${a.foot.button}" → ${b.rows.length} rows, no footer; a row opens the card to its left (${rowCard.side}) for "${(rowCard.title || '').slice(0, 30)}" with the VS Code link of its id ${rowOk}; the wheel on the list scrolled it to ${scrolled.scroll.top.toFixed(0)} and left the map alone; folded: tab "${folded.tab}", buttons ${foldedGeo.gapR.toFixed(0)}/${foldedGeo.gapB.toFixed(0)} px from the corner, map unchanged by folding and unfolding; ${geoRows.join('; ')}; narrow windows: ${narrowRows.join('; ')}; the zoom buttons' gaps to the right/bottom edge (px) do not change when the shelf opens or folds: ${cornerRows.join('; ')}; console errors ${errorsOf(S.page)}`);
-  } finally { await S.done(); }
+  } catch (e) { check('3d-shelf', false, `threw: ${(e && e.message) || e}`); } finally { await S.done(); }
 }
 
 // ---- 3d-motion: the rules of docs/motion.md hold on the card, the side card and the shelf of the 3D scene, through the same helpers as the pixel scene (21-motion in
@@ -596,7 +597,7 @@ if (want('motion')) {
     check('3d-motion', bad.length === 0 && errorsOf(S.page) === 0,
       bad.length ? `FAILED: ${bad.join('; ')}` :
       `tokens equal motion.js (${names.map(n => `${n} ${SPRING[n].duration} s/bounce ${SPRING[n].bounce} = ${SPRING[n].ms} ms`).join(', ')}); the card comes out of its agent (${side} side) on the enter spring: ${inMove.duration} ms, travel ${SLIDE} px and growth from ${SCALE}, a quarter of the way through the curve it is at ${pts[12].toFixed(2)} and it peaks at ${Math.max(...pts).toFixed(3)}, fade ${inFade.duration} ms; it glides to another agent on the glide spring (${SPRING.glide.ms} ms); the menu pops on the pop spring; the card leaves on the leave spring (${outMove.duration} ms, no bounce) and takes no clicks while it leaves; the details card and the shelf card use the same springs, as does the card of a shelf row; the camera (zoom and the place of the world on the screen, ${v0}) was identical after every one of these; reduced motion: ${fadeOf(inR).duration} ms fade, no travel, no menu pop; console errors ${errorsOf(S.page)}`);
-  } finally { await S.done(); }
+  } catch (e) { check('3d-motion', false, `threw: ${(e && e.message) || e}`); } finally { await S.done(); }
 }
 
 // ---- --shots <dir>: pictures for a look by eye (the card beside an agent, the shelf and the buttons at 1024 and 1500 px, folded, narrow, the side card, the selection ring close up)
@@ -634,7 +635,7 @@ if (shotsDir) {
     await T.ev(`document.querySelector('#view-ofis').__ofisUi.setShelfFolded(false)`); await sleep(900);
     await snap('3d-ui-11-narrow-700-shelf.png');
     await S.page.setViewport(VIEW.w, VIEW.h, 1);
-  } finally { await S.done(); }
+  } catch (e) { check('3d-shots', false, `threw: ${(e && e.message) || e}`); } finally { await S.done(); }
 }
 
 const failed = results.filter(r => !r.ok);
