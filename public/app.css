@@ -800,3 +800,26 @@ main { flex: 1; min-height: 0; position: relative; }
   .sitebar__links { height: 44px; align-items: center; margin: 0 -16px; padding: 0 16px 0 4px; }
 }
 @media (max-width: 520px) { .has-sitebar .top .brand { display: none; } }
+
+/* room boards: the chat name is the big text, the project folder (setting `project`, off by default) a small line in the bottom-right corner ------------------ */
+.of-sign .of-sp { align-self: flex-end; max-width: 100%; font-size: 10px; }
+/* the pixel scene's board: a plate on top of the room's back wall, sheared to the wall's slope by the script (board.js); it takes no pointer events and only fades */
+.px-board-layer { position: absolute; inset: 0; pointer-events: none; }
+.px-board {
+  --bc: #9a9a9a; --pb-s: 9px;
+  position: absolute; left: 0; top: 0; box-sizing: border-box; pointer-events: none; transform-origin: 50% 100%;
+  padding: .3em .55em .36em 1em; border-radius: .3em; color: #fff; font: 700 13px/1.12 var(--font-d); text-shadow: 0 1px 1px rgba(0, 0, 0, .45);
+  background: linear-gradient(180deg, color-mix(in srgb, var(--bc) 36%, #090c13) 0%, color-mix(in srgb, var(--bc) 20%, #090c13) 100%);
+  box-shadow: inset .42em 0 0 var(--bc), inset 0 0 0 1px rgba(255, 255, 255, .16), inset 0 .12em 0 rgba(255, 255, 255, .14), 0 .25em .6em -.1em rgba(0, 0, 0, .65);
+  opacity: 0; visibility: hidden; transition: opacity var(--m-fast) var(--ease-in), visibility 0s linear var(--m-fast);
+}
+.px-board.on { opacity: 1; visibility: visible; transition: opacity var(--m-fast) var(--ease-out), visibility 0s; }
+.px-board.on.dormant { opacity: .72; }
+.px-board.waiting, .px-board.ask { box-shadow: inset .42em 0 0 var(--bc), 0 0 0 .14em var(--warn), 0 0 1.4em -.1em color-mix(in srgb, var(--warn) 65%, transparent), 0 .25em .6em -.1em rgba(0, 0, 0, .65); }
+.pb-name { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; overflow-wrap: anywhere; }
+.pb-proj { margin-top: .22em; font: 500 var(--pb-s)/1.25 var(--font); text-align: right; color: rgba(236, 240, 247, .78); text-shadow: none; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.pb-badges { position: absolute; right: .55em; bottom: 100%; margin-bottom: -.12em; display: flex; gap: .3em; }
+.pb-badge { padding: 0 .65em; border-radius: 999px; font: 700 var(--pb-s)/1.55 var(--font); letter-spacing: .02em; white-space: nowrap; background: rgba(255, 255, 255, .24); color: #fff; text-shadow: none; box-shadow: 0 1px 3px rgba(0, 0, 0, .5); }
+.pb-badge.wait, .pb-badge.ask { background: var(--warn); color: #1b1405; }
+.pb-badge.sleep { background: rgba(255, 255, 255, .16); color: rgba(255, 255, 255, .78); }
+.view-ofis[data-project="off"] .px-l .px-proj { display: none; }                   /* the project folder is shown on a label only when the setting is on */

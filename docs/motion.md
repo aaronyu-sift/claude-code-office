@@ -16,6 +16,7 @@ QA check `21-motion` measures the real animations in Chrome.
 | Small control | the Open menu, the tooltip, the switch knob | spring with a hint of bounce, eased fade | 0.3 s bounce 0.15 (454 ms); fade 200 ms |
 | Feedback | hover, press, focus: colour, background, border | short ease-out, never moves anything | 150 ms |
 | Data change | a bar that fills | ease, longer | 450 ms |
+| Mounted sign | the board on a room's back wall (pixel scene) | eased fade of opacity, nothing moves (in with ease-out, out with ease-in); none under reduced motion, where the page's rule removes every CSS transition | fade 200 ms |
 | Camera and view | pan, zoom, fit, a change of frame | direct while the visitor drags, a spring when the view changes by itself, carrying velocity | follow 0.6 s bounce 0 (858 ms) |
 | Built thing | a new room, desk or prop | spring that rises from the ground and bounces once, neighbours 40 ms apart | build 0.5 s bounce 0.3 (804 ms), scale 0.6 to 1 |
 | Walker | an agent walking between desks | constant speed along the path with a short speed-up and slow-down at the ends, walk cycle paced by the speed | no feet sliding |

@@ -16,6 +16,8 @@ import {
   WALL_T, ROOM_D, CHEF_W, COL_W, FRONT_M, GAP, HALL_D, HALL_OPEN_D, HALL_GAP, COLS, CAP, roomW,
   MIN_ROWS, VACANT_CLS, minRoomsFrom, buildingPlan, classFor, nextClass, createSlots,
 } from './ofis-layout.js';
+import { boardName, boardProject, boardBadges, fitName } from './board-text.js';
+import { projectOn, onProjectChange } from './board-setting.js';
 
 // Models (ofis-assets.js has loaded them before this module runs): a piece that did not load is missing from PK and the procedural shape
 // below is drawn in its place. POLISH is the procedural polish: occlusion baked into the room batch, a noise floor, tone mapping, contact
@@ -1339,6 +1341,7 @@ export function createOfis(root, ctx) {
 
   // ---------------------------------------------------------- room sign: wall-mounted acrylic plaque
 
+  let projectSub = null;
   function makeSign(g, room, x, y, z, w, h) {
     const cv = document.createElement('canvas');
     cv.height = SIGN_PX;
@@ -1367,6 +1370,8 @@ export function createOfis(root, ctx) {
     lamp.visible = halo.visible = false;
     g.add(lamp, halo);
     Object.assign(room, { signCv: cv, signTex: tex, signFace: face, signKey: '', lamp, halo, signPos: new THREE.Vector3(x, y, z + 0.1) });
+    (root.__ofisSigns || (root.__ofisSigns = new Map())).set(room.id, cv);                       // verification only: tools/qa/office-board-qa.mjs reads the plaque's pixels
+    if (!projectSub) projectSub = onProjectChange(() => { for (const r of world.rooms.values()) r.signKey = ''; refreshLabels(); });       // the setting `project` shows or hides the project folder on every board
   }
 
   function fitText(g, s, max) {
@@ -1380,11 +1385,12 @@ export function createOfis(root, ctx) {
   }
 
   function drawSign(room, a) {
-    paintPlaque(room.signCv, { name: a.project || msg('of.session'), title: a.title || a.name || '', color: a.color, status: a.status, overflow: room.overflow });
+    paintPlaque(room.signCv, { name: boardName(a) || msg('of.session'), title: projectOn() ? boardProject(a) : '', color: a.color, status: a.status, overflow: room.overflow });
     room.signTex.needsUpdate = true;
   }
 
-  // Wall sign: dark acrylic plaque in the project color, a colored band, a large name and a small second line.
+  // Wall sign: dark acrylic plaque in the project color, a colored band, the name big (one line, or two smaller ones) and, only when there is one, a small
+  // line in the bottom-right corner (a room's project folder when the setting `project` is on; a caption on a sign of the local plugins).
   function paintPlaque(cv, o) {
     const g = cv.getContext('2d'), w = cv.width, h = cv.height;
     const st = o.status || '', wait = st === 'waiting' || st === 'ask';
@@ -1428,22 +1434,28 @@ export function createOfis(root, ctx) {
       g.fillText(txt, bx + h * 0.08, by + bh / 2 + 1);
       badgeW += bw + h * 0.05;
     };
-    if (wait) badge(msg(st === 'ask' ? 'of.badgeAsk' : 'of.badgeWait'), YELLOW, '#1b1405');
-    else if (st === 'dormant') badge(msg('of.badgeSleep'), 'rgba(255,255,255,.16)', 'rgba(255,255,255,.75)');
-    if (o.overflow) badge(`+${o.overflow}`, 'rgba(255,255,255,.2)', '#ffffff');
-    // text
-    const x0 = band + h * 0.2, right = w - h * 0.14;
+    const BADGE = { wait: [YELLOW, '#1b1405'], ask: [YELLOW, '#1b1405'], sleep: ['rgba(255,255,255,.16)', 'rgba(255,255,255,.75)'], more: ['rgba(255,255,255,.2)', '#ffffff'] };
+    for (const b of boardBadges(st, o.overflow)) badge(b.key ? msg(b.key) : b.text, ...BADGE[b.kind]);
+    // text: the name is big and may take two lines (it shrinks to fit, the way it always has); the small line sits at the bottom right and is never bigger than the name
+    const x0 = band + h * 0.2, right = w - h * 0.14, nameMax = right - x0 - (badgeW ? badgeW + h * 0.06 : 0);
+    const small = String(o.title || '').trim();
+    const top = h * 0.12, bottom = small ? h * 0.78 : h * 0.88;
+    const nameFont = fs => `700 ${fs}px ${SIGN_FONT_D}`;
+    const fit = fitName(o.name || '', fs => s => { g.font = nameFont(fs); return g.measureText(s).width; },
+      { w: nameMax, h: bottom - top, big: Math.round(h * 0.47), oneMin: Math.round(h * 0.3), twoMin: Math.round(h * 0.2), lead: 1.08 });
     g.textBaseline = 'alphabetic';
     g.fillStyle = '#ffffff';
-    let fs = Math.round(h * 0.47);
-    g.font = `700 ${fs}px ${SIGN_FONT_D}`;
-    const nameMax = right - x0 - (badgeW ? badgeW + h * 0.06 : 0);
-    const name = o.name || '';
-    while (fs > h * 0.28 && g.measureText(name).width > nameMax) { fs -= 4; g.font = `700 ${fs}px ${SIGN_FONT_D}`; }
-    g.fillText(fitText(g, name, nameMax), x0, h * 0.56);
-    g.fillStyle = 'rgba(236,240,247,.78)';
-    g.font = `500 ${Math.round(h * 0.21)}px ${SIGN_FONT}`;
-    g.fillText(fitText(g, o.title || '', right - x0), x0, h * 0.85);
+    g.font = nameFont(fit.fs);
+    const lead = fit.fs * 1.08, y0 = (top + bottom) / 2 - lead * fit.lines.length / 2 + (lead - fit.fs) / 2 + fit.fs * 0.8;
+    fit.lines.forEach((line, i) => g.fillText(line, x0, y0 + i * lead));
+    if (small) {
+      const sfs = Math.min(Math.round(h * 0.15), Math.round(fit.fs * 0.62));
+      g.fillStyle = 'rgba(236,240,247,.78)';
+      g.font = `500 ${sfs}px ${SIGN_FONT}`;
+      g.textAlign = 'right';
+      g.fillText(fitText(g, small, (right - x0) * 0.6), right, h * 0.9);
+      g.textAlign = 'left';
+    }
   }
 
   // ---------------------------------------------------------- optional local decorations (not in git)
@@ -2240,7 +2252,7 @@ export function createOfis(root, ctx) {
       const st = a.status;
       const wait = st === 'waiting' || st === 'ask';
       // 3D wall sign: redrawn only when its content changes
-      const key = [a.project, a.title, a.name, a.color, st, room.overflow].join('|');
+      const key = [a.project, a.title, a.name, a.color, st, room.overflow, projectOn()].join('|');
       if (room.signCv && room.signKey !== key) { room.signKey = key; drawSign(room, a); }
       if (room.signFace) room.signFace.color.set(st === 'dormant' ? '#9aa0ab' : '#ffffff');
       // from far away the wall text is unreadable, so a plain HTML fallback sign appears instead
@@ -2248,7 +2260,8 @@ export function createOfis(root, ctx) {
       if (!L) { L = mkLabel('of-signl', 90, 'mid', 0); L.maxZoom = SIGN_HTML_BELOW; signs.set(room.id, L); }
       if (room.signPos) L.pos.copy(room.signPos);
       const chip = wait ? `<span class="of-chip w">${esc(msg(st === 'ask' ? 'of.chipAsk' : 'of.chipWait'))} · ${fmtShort(t - a.since)}</span>` : '';
-      setLabel(L, `<div class="of-sign ${st}"><div class="r1"><span class="sw" style="background:${esc(a.color)}"></span><b>${esc(a.project)}</b>${chip}</div></div>`, room.id, wait ? 95 : 90);
+      const sub = projectOn() ? boardProject(a) : '';          // the chat name in bold; the project folder only when the setting is on, small and at the right
+      setLabel(L, `<div class="of-sign ${st}"><div class="r1"><span class="sw" style="background:${esc(a.color)}"></span><b>${esc(boardName(a) || msg('of.session'))}</b>${chip}</div>${sub ? `<div class="r2 of-sp">${esc(sub)}</div>` : ''}</div>`, room.id, wait ? 95 : 90);
     }
     for (const c of chars.values()) {
       const a = store.agents.get(c.id);

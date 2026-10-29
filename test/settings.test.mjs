@@ -4,11 +4,11 @@ import { KEY, DEFAULTS, clean, sanitize, fromQuery, merge, load, save, timeMinut
 
 const memory = (init = {}) => { const m = { ...init }; return { m, getItem: k => (k in m ? m[k] : null), setItem: (k, v) => { m[k] = String(v); } }; };
 
-test('settings: the defaults are automatic time and season, weather off, northern hemisphere, ten chats on the shelf', () => {
-  assert.deepEqual({ ...DEFAULTS }, { time: 'auto', season: 'auto', weather: 'off', hemisphere: 'north', shelf: 10 });
+test('settings: the defaults are automatic time and season, weather off, northern hemisphere, ten chats on the shelf, no project folder on the boards', () => {
+  assert.deepEqual({ ...DEFAULTS }, { time: 'auto', season: 'auto', weather: 'off', hemisphere: 'north', shelf: 10, project: 'off' });
   const { values, from } = merge({}, {});
   assert.deepEqual(values, { ...DEFAULTS });
-  assert.deepEqual(Object.values(from), ['default', 'default', 'default', 'default', 'default']);
+  assert.deepEqual(Object.values(from), ['default', 'default', 'default', 'default', 'default', 'default']);
 });
 test('settings: values are validated per key', () => {
   assert.equal(clean('time', 'auto'), 'auto'); assert.equal(clean('time', '22:05'), '22:05'); assert.equal(clean('time', '2205'), '22:05'); assert.equal(clean('time', '25:00'), null); assert.equal(clean('time', 'noon'), null);
@@ -17,6 +17,8 @@ test('settings: values are validated per key', () => {
   assert.equal(clean('hemisphere', 'south'), 'south'); assert.equal(clean('hemisphere', 'west'), null);
   assert.equal(clean('shelf', 10), 10); assert.equal(clean('shelf', '20'), 20); assert.equal(clean('shelf', 3), 3); assert.equal(clean('shelf', '200'), 200);
   for (const bad of [2, 201, 0, -5, 10.5, '10.5', '', 'ten', ' ', NaN, Infinity, null, undefined, true, [10], {}, '1e2', '0x10']) assert.equal(clean('shelf', bad), null, String(bad));
+  assert.equal(clean('project', 'on'), 'on'); assert.equal(clean('project', 'off'), 'off'); assert.equal(clean('project', ' ON '), 'on'); assert.equal(clean('project', 'Off'), 'off');
+  for (const bad of ['yes', 'true', '1', '', ' ', 'auto', 'onn', null, undefined, true, false, 1, 0, ['on'], {}]) assert.equal(clean('project', bad), null, String(bad));
   assert.equal(clean('proj', 'iso'), null);                                  // the camera has its own key
   assert.deepEqual(sanitize({ season: 'autumn', weather: 'hail', bogus: 1, time: '7:30' }), { season: 'autumn', time: '07:30' });
   assert.deepEqual(sanitize({ shelf: 25, season: 'winter' }), { season: 'winter', shelf: 25 }); assert.deepEqual(sanitize({ shelf: 1000 }), {});
@@ -27,13 +29,28 @@ test('settings: URL overrides beat stored settings, stored beat the defaults, an
   const url = fromQuery('?season=spring&time=06:30&bogus=1&weather=hail&shelf=5');
   assert.deepEqual(url, { season: 'spring', time: '06:30', shelf: 5 });
   const { values, from } = merge(stored, url);
-  assert.deepEqual(values, { time: '06:30', season: 'spring', weather: 'rain', hemisphere: 'south', shelf: 5 });
-  assert.deepEqual(from, { time: 'url', season: 'url', weather: 'stored', hemisphere: 'stored', shelf: 'url' });
+  assert.deepEqual(values, { time: '06:30', season: 'spring', weather: 'rain', hemisphere: 'south', shelf: 5, project: 'off' });
+  assert.deepEqual(from, { time: 'url', season: 'url', weather: 'stored', hemisphere: 'stored', shelf: 'url', project: 'default' });
   assert.equal(merge(stored, fromQuery('?shelf=2')).values.shelf, 20, 'a shelf size out of range in the address is ignored');
   assert.equal(merge({ shelf: 'many' }, {}).values.shelf, 10, 'and so is a broken stored one');
   assert.deepEqual(merge(stored, {}).values.season, 'winter');
   assert.deepEqual(fromQuery(''), {}); assert.deepEqual(fromQuery(undefined), {});
   assert.deepEqual(fromQuery('?weather=auto&hemisphere=south'), { weather: 'auto', hemisphere: 'south' });
+});
+test('settings: the project folder on a board is off unless it is stored or asked for in the address, and the address wins', () => {
+  assert.equal(merge({}, {}).values.project, 'off');
+  assert.deepEqual(fromQuery('?project=on'), { project: 'on' }); assert.deepEqual(fromQuery('?project=OFF'), { project: 'off' }); assert.deepEqual(fromQuery('?project=yes'), {});
+  assert.deepEqual(merge({ project: 'on' }, {}), { values: { ...DEFAULTS, project: 'on' }, from: { ...Object.fromEntries(Object.keys(DEFAULTS).map(k => [k, 'default'])), project: 'stored' } });
+  assert.equal(merge({ project: 'on' }, fromQuery('?project=off')).values.project, 'off', 'the address beats the store');
+  assert.equal(merge({ project: 'off' }, fromQuery('?project=on')).values.project, 'on');
+  assert.equal(merge({ project: 'maybe' }, {}).values.project, 'off', 'a broken stored value is ignored');
+  const s = memory();
+  save(s, { project: 'on' });
+  assert.deepEqual(JSON.parse(s.m[KEY]), { project: 'on' });
+  merge(load(s), fromQuery('?project=off'));
+  assert.deepEqual(load(s), { project: 'on' }, 'loading with an address override stores nothing');
+  save(s, { project: 'sometimes' });
+  assert.deepEqual(load(s), { project: 'on' }, 'an invalid change is dropped');
 });
 test('settings: saving merges into what is stored, a URL override is not stored by loading, a broken store is ignored', () => {
   const s = memory();
