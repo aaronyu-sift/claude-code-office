@@ -1,7 +1,8 @@
-// The shelf lane of the Office view: a column beside the scene (never over it) with one row per chat that has no room (shelf.js decides which):
-// a small sleeping or leaning pixel figure, the full chat name, the project and "closed 12m ago". It scrolls on its own, a click opens the details
-// panel, and it can be folded away (a tab at the edge of the scene brings it back). Rows are kept by id, so a refresh keeps the scroll position
-// and the focus; the times are refreshed every 20 s while the view is on screen, and nothing runs otherwise.
+// The shelf of the Office view: a card in the right-hand column (`.of-side`, beside the scene and never over it, with the zoom buttons right under it)
+// with one row per chat that has no room (shelf.js decides which): a small sleeping or leaning pixel figure, the full chat name, the project and
+// "closed 12m ago". It scrolls on its own, a click opens the details panel (`open(id, rowElement)`), and it can be folded away (a tab at the edge of the
+// scene brings it back). Rows are kept by id, so a refresh keeps the scroll position and the focus; the times are refreshed every 20 s while the view is
+// on screen, and nothing runs otherwise.
 import { workerId, APPEARANCES } from './ids.js';
 import { hashStr } from './layout.js';
 import { poseOf } from './shelf.js';
@@ -22,7 +23,7 @@ export function createShelfView({ root, area, msg, fmtShort, now, open, storage 
   const hideBtn = el('button', { type: 'button', className: 'sh-hide', textContent: '›', onclick: () => setCollapsed(true) });
   const host = el('aside', { className: 'of-shelf', hidden: true }, el('header', { className: 'sh-head' }, el('h3', { className: 'sh-title' }), count, hideBtn), list);
   const tab = el('button', { type: 'button', className: 'of-shelf-tab', hidden: true, onclick: () => setCollapsed(false) });
-  root.append(host);
+  (root.querySelector('.of-side') || root).prepend(host);                                 // above the zoom buttons
   area.append(tab);
 
   function setCollapsed(on) {
@@ -64,7 +65,7 @@ export function createShelfView({ root, area, msg, fmtShort, now, open, storage 
   function makeRow(e) {
     const fig = el('canvas', { className: 'sh-fig' });
     const name = el('span', { className: 'sh-name' }), sw = el('i', { className: 'sh-sw' }), proj = el('span', { className: 'sh-proj' }), when = el('span', { className: 'sh-when' });
-    const btn = el('button', { type: 'button', className: 'sh-item', onclick: () => open(e.id) }, fig, el('span', { className: 'sh-txt' }, name, el('span', { className: 'sh-meta' }, sw, proj, when)));
+    const btn = el('button', { type: 'button', className: 'sh-item' }, fig, el('span', { className: 'sh-txt' }, name, el('span', { className: 'sh-meta' }, el('span', { className: 'sh-pj' }, sw, proj), when)));
     const li = el('li', {}, btn);
     const row = { li, btn, fig, name, proj, when, sw, figKey: '' };
     rows.set(e.id, row);
@@ -78,7 +79,7 @@ export function createShelfView({ root, area, msg, fmtShort, now, open, storage 
     next.forEach((e, i) => {
       const row = rows.get(e.id) || makeRow(e);
       row.li.dataset.id = e.id; row.li.dataset.kind = e.kind;
-      row.btn.onclick = () => open(e.id);
+      row.btn.onclick = () => open(e.id, row.btn);                                     // the row's button too: the details can anchor to it
       if (row.name.textContent !== e.name) row.name.textContent = e.name;
       if (row.proj.textContent !== e.project) row.proj.textContent = e.project;
       row.sw.style.background = e.color || '#7d8597';

@@ -501,6 +501,8 @@ if (want('shelf')) {
     const overLabels = labels.filter(l => hit(l, sh.rect)).length;
     const overTargets = (await P(`p.figures().map(id => p.agentCss(id))`)).filter(f => f && hit({ x: A.left + f.x - 12, y: A.top + f.y - 12, w: 24, h: 24 }, sh.rect)).length;
     const sceneClear = A.right <= sh.rect.x + 1 && canvasR.right <= sh.rect.x + 1 && A.width + sh.rect.w <= (await ev('innerWidth')) + 1;
+    // the card is the first thing in the right-hand column and the zoom buttons come right after it, outside the scene area
+    const columnOk = await ev(`(() => { const h = document.querySelector('.of-shelf'), c = document.querySelector('.of-ctl'); return h.parentElement.classList.contains('of-side') && h.nextElementSibling === c && !document.querySelector('.of-area').contains(c) && c.getBoundingClientRect().top >= h.getBoundingClientRect().bottom - 0.5; })()`);
     const z0 = await P('p.zoom'), pan0 = await P('p.pan');
     await S.page.mouse.wheel(sh.rect.x + sh.rect.w / 2, sh.rect.y + sh.rect.h / 2, 260);
     await sleep(350);
@@ -533,11 +535,11 @@ if (want('shelf')) {
     check('15-shelf',
       S.ready && orderOk && namesOk && !whenBad.length && !figBad.length && !!longName && sh.count === `${expected.length} chats` &&
       !waitingOnShelf.length && waitingInRooms.length === waiting.length && waiting.length > 0 && asleepOnShelf.length === asleep.length && !asleepInRooms.length && asleep.length > 0 &&
-      sceneClear && overLabels === 0 && overTargets === 0 && sh.scroll.height > sh.scroll.client && sh.scroll.overflowY === 'auto' && scrolled.scroll.top > 0 && sceneStill &&
+      sceneClear && columnOk && overLabels === 0 && overTargets === 0 && sh.scroll.height > sh.scroll.client && sh.scroll.overflowY === 'auto' && scrolled.scroll.top > 0 && sceneStill &&
       folded.mode === 'collapsed' && !folded.tabHidden && /^Shelf · \d+$/.test(folded.tab) && foldedStore === 'closed' && foldedArea > A.width + 200 &&
       unfolded.mode === 'open' && unfolded.tabHidden && unfoldedStore === 'open' &&
       api1 === api2 && reloaded.rows.map(r => r.id).join() === idsBefore,
-      `${live.length} live + ${S.fx.closed.length} closed sessions: shelf "${sh.title}", ${sh.count} (${sh.rows.filter(r => r.kind === 'closed').length} closed, ${sh.rows.filter(r => r.kind === 'dormant').length} asleep); order newest first as expected ${orderOk}; full chat names ${namesOk} (longest ${Math.max(...sh.rows.map(r => r.name.length))} chars, emoji name included); times: ${sh.rows.slice(0, 4).map(r => `"${r.when}"`).join(', ')} … within tolerance of the fixture ages (off ${whenBad.length}); figures drawn in every row (${sh.rows.length - figBad.length}/${sh.rows.length}, ${sh.rows[0].figure.w}x${sh.rows[0].figure.h} px); waiting (${waiting.length}): on the shelf ${waitingOnShelf.length}, in rooms ${waitingInRooms.length}; asleep (${asleep.length}): on the shelf ${asleepOnShelf.length}, in rooms ${asleepInRooms.length}; lane x ${sh.rect.x.toFixed(0)}..${(sh.rect.x + sh.rect.w).toFixed(0)}, scene ends at ${A.right.toFixed(0)} (canvas ${canvasR.right.toFixed(0)}), overlap with ${labels.length} shown labels ${overLabels}, with figure targets ${overTargets}; own scroll: content ${sh.scroll.height} px in ${sh.scroll.client} px (${sh.scroll.overflowY}), wheel on the lane moved it to ${scrolled.scroll.top.toFixed(0)} and left the scene's zoom and pan alone ${sceneStill}; fold: ${folded.mode} (tab "${folded.tab}", saved "${foldedStore}", scene ${foldedArea.toFixed(0)} px wide against ${A.width.toFixed(0)}), unfold: ${unfolded.mode} (saved "${unfoldedStore}"); the server's list twice identical ${api1 === api2}; the shelf after a reload identical ${reloaded.rows.map(r => r.id).join() === idsBefore}`);
+      `${live.length} live + ${S.fx.closed.length} closed sessions: shelf "${sh.title}", ${sh.count} (${sh.rows.filter(r => r.kind === 'closed').length} closed, ${sh.rows.filter(r => r.kind === 'dormant').length} asleep); order newest first as expected ${orderOk}; full chat names ${namesOk} (longest ${Math.max(...sh.rows.map(r => r.name.length))} chars, emoji name included); times: ${sh.rows.slice(0, 4).map(r => `"${r.when}"`).join(', ')} … within tolerance of the fixture ages (off ${whenBad.length}); figures drawn in every row (${sh.rows.length - figBad.length}/${sh.rows.length}, ${sh.rows[0].figure.w}x${sh.rows[0].figure.h} px); waiting (${waiting.length}): on the shelf ${waitingOnShelf.length}, in rooms ${waitingInRooms.length}; asleep (${asleep.length}): on the shelf ${asleepOnShelf.length}, in rooms ${asleepInRooms.length}; lane x ${sh.rect.x.toFixed(0)}..${(sh.rect.x + sh.rect.w).toFixed(0)}, scene ends at ${A.right.toFixed(0)} (canvas ${canvasR.right.toFixed(0)}), the zoom buttons right under the card in the same column ${columnOk}, overlap with ${labels.length} shown labels ${overLabels}, with figure targets ${overTargets}; own scroll: content ${sh.scroll.height} px in ${sh.scroll.client} px (${sh.scroll.overflowY}), wheel on the lane moved it to ${scrolled.scroll.top.toFixed(0)} and left the scene's zoom and pan alone ${sceneStill}; fold: ${folded.mode} (tab "${folded.tab}", saved "${foldedStore}", scene ${foldedArea.toFixed(0)} px wide against ${A.width.toFixed(0)}), unfold: ${unfolded.mode} (saved "${unfoldedStore}"); the server's list twice identical ${api1 === api2}; the shelf after a reload identical ${reloaded.rows.map(r => r.id).join() === idsBefore}`);
 
     // ---- the details panel, from a shelf entry and from a figure in a room
     const dw = () => ev(`(() => {
@@ -609,6 +611,122 @@ if (want('shelf')) {
     const apiAfter = (await (await fetch(`http://127.0.0.1:${S.srv.port}/api/closed`)).json()).closed.find(c => c.id === victim.id);
     check('15-shelf-close', !!arrived && /^closed \d+s ago$/.test(arrived.rows[0].when) && !figsAfter.includes(victim.id) && !!apiAfter && apiAfter.observed === true && arrived.rows[0].name === victim.name,
       `a working session is closed while the page is open: ${arrived ? `first on the shelf after the next ticks, "${arrived.rows[0].when}", name in full ${arrived.rows[0].name === victim.name}` : 'never reached the shelf'}; its room is gone (figure drawn ${figsAfter.includes(victim.id)}); the server marks it as seen closing (${apiAfter && apiAfter.observed}); shelf now ${arrived ? arrived.count : '?'}`);
+  } finally { await S.done(); }
+}
+
+// ---- the shelf as a card of the Setup Atlas style, with the zoom buttons under it in the same right-hand column. The computed styles of the card, its chip, a
+// row and the round buttons are read back and compared with the tokens of the Atlas page; the geometry is measured in every window width from 360 to 2560 px
+// (the buttons below the card, inside the column, over no row and over no label or figure of the scene) and in the two states with no card (folded, and
+// nothing on the shelf), where the buttons float in the bottom-right corner and the scene spans the whole view.
+if (want('shelf-style')) {
+  const cssOf = (ev, sel, props) => ev(`(() => { const e = document.querySelector(${JSON.stringify(sel)}), c = getComputedStyle(e); return JSON.stringify(Object.fromEntries(${JSON.stringify(props)}.map(p => [p, c[p]]))); })()`).then(JSON.parse);
+  const geoOf = ev => ev(`(() => {
+    const r = e => { const b = e.getBoundingClientRect(); return { x: b.left, y: b.top, w: b.width, h: b.height, r: b.right, b: b.bottom }; };
+    const view = document.querySelector('#view-ofis'), side = view.querySelector('.of-side'), host = view.querySelector('.of-shelf'), list = view.querySelector('.sh-list'), area = view.querySelector('.of-area');
+    const btns = [...view.querySelectorAll('.of-ctl button')], lr = r(list);
+    return JSON.stringify({
+      mode: view.dataset.shelf, view: r(view), area: r(area), canvas: r(view.querySelector('.of-main')), side: r(side), host: host.hidden ? null : r(host),
+      btns: btns.map(r), inArea: btns.some(b => area.contains(b)), reachable: btns.map(b => { const q = b.getBoundingClientRect(), e = document.elementFromPoint(q.left + q.width / 2, q.top + q.height / 2); return e === b || b.contains(e); }),
+      rows: host.hidden ? [] : [...list.children].map(li => r(li)).filter(b => b.b > lr.y && b.y < lr.b).map(b => ({ x: b.x, w: b.w, y: Math.max(b.y, lr.y), h: Math.min(b.b, lr.b) - Math.max(b.y, lr.y) })),   // the part of each row that is on show (the rest is scrolled out and clipped)
+      names: host.hidden ? [] : [...list.querySelectorAll('.sh-name')].map(n => ({ clipped: n.scrollWidth > n.clientWidth + 1 || getComputedStyle(n).textOverflow === 'ellipsis' || getComputedStyle(n).webkitLineClamp !== 'none', lines: Math.round(n.getBoundingClientRect().height / parseFloat(getComputedStyle(n).lineHeight)) })),
+      vw: innerWidth, vh: innerHeight });
+  })()`).then(JSON.parse);
+  const hit = (a, b) => a.x < b.x + b.w && a.x + a.w > b.x && a.y < b.y + b.h && a.y + a.h > b.y;
+  const S = await scenario(10, { tag: 'shstyle', query: '?time=12:00', fixture: { closed: 12 } });
+  try {
+    const P = e => S.page.evaluate(px(e)), ev = e => S.page.evaluate(e), sleepUntil = async (fn, ms = 8000) => { let r; for (const t0 = Date.now(); Date.now() - t0 < ms; await sleep(200)) { r = await fn().catch(() => null); if (r) return r; } return r; };
+    await sleepUntil(async () => (await P('p.shelf().rows.length')) >= 12);
+    const bad = [];
+    const eq = (what, got, want_) => { if (JSON.stringify(got) !== JSON.stringify(want_)) bad.push(`${what}: ${JSON.stringify(got)} instead of ${JSON.stringify(want_)}`); };
+    // 1. the tokens of the Atlas card, in the window the scene is normally seen in (and again with a light operating system, the Office is dark either way)
+    const readStyles = async () => {
+      const card = await cssOf(ev, '.of-shelf', ['backgroundColor', 'backdropFilter', 'borderTopColor', 'borderTopWidth', 'borderTopStyle', 'borderTopLeftRadius', 'borderBottomRightRadius', 'paddingTop', 'paddingLeft', 'colorScheme']);
+      const chip = await cssOf(ev, '.sh-title', ['color', 'fontWeight', 'fontSize', 'textTransform', 'letterSpacing', 'fontFamily', 'borderTopColor', 'borderTopLeftRadius', 'paddingLeft']);
+      const hide = await cssOf(ev, '.sh-hide', ['borderTopLeftRadius', 'width', 'height', 'borderTopColor', 'backgroundColor', 'color']);
+      const row = await cssOf(ev, '.sh-item', ['borderTopLeftRadius', 'paddingTop', 'paddingLeft']);
+      const name = await cssOf(ev, '.sh-name', ['fontSize', 'fontWeight', 'color']);
+      const meta = await cssOf(ev, '.sh-meta', ['fontSize', 'color']);
+      const when = await cssOf(ev, '.sh-when', ['fontSize', 'fontFamily']);
+      const zoom = await cssOf(ev, '.of-ctl button', ['borderTopLeftRadius', 'borderTopColor', 'borderTopWidth', 'backgroundColor', 'color']);
+      return { card, chip, hide, row, name, meta, when, zoom };
+    };
+    const checkStyles = (st, tag) => {
+      eq(tag + ' card background', st.card.backgroundColor, 'rgba(9, 12, 28, 0.8)'); eq(tag + ' card blur', st.card.backdropFilter, 'blur(10px)');
+      eq(tag + ' card border', [st.card.borderTopWidth, st.card.borderTopStyle, st.card.borderTopColor], ['1px', 'solid', 'rgba(196, 208, 255, 0.32)']);
+      eq(tag + ' card radius', [st.card.borderTopLeftRadius, st.card.borderBottomRightRadius], ['18px', '18px']); eq(tag + ' card padding', [st.card.paddingTop, st.card.paddingLeft], ['14px', '16px']);
+      eq(tag + ' chip', [st.chip.color, st.chip.fontWeight, st.chip.fontSize, st.chip.textTransform, st.chip.letterSpacing, st.chip.borderTopColor, st.chip.borderTopLeftRadius, st.chip.paddingLeft], ['rgb(143, 176, 255)', '600', '12px', 'uppercase', '0.96px', 'rgba(150, 165, 255, 0.22)', '999px', '10px']);
+      if (!/ui-monospace/.test(st.chip.fontFamily) || !/ui-monospace/.test(st.when.fontFamily)) bad.push(tag + ' mono font ' + st.chip.fontFamily);
+      eq(tag + ' hide button', [st.hide.borderTopLeftRadius, st.hide.width, st.hide.height, st.hide.borderTopColor, st.hide.backgroundColor], ['50%', '28px', '28px', 'rgba(196, 208, 255, 0.32)', 'rgba(10, 14, 32, 0.55)']);
+      eq(tag + ' row', [st.row.borderTopLeftRadius, st.row.paddingTop, st.row.paddingLeft], ['10px', '6px', '8px']);
+      eq(tag + ' name', [st.name.fontSize, st.name.fontWeight, st.name.color], ['14px', '600', 'rgb(234, 238, 255)']); eq(tag + ' meta', [st.meta.fontSize, st.meta.color], ['13px', 'rgb(169, 179, 214)']); eq(tag + ' time', st.when.fontSize, '12px');
+      eq(tag + ' zoom button', [st.zoom.borderTopLeftRadius, st.zoom.borderTopWidth, st.zoom.borderTopColor, st.zoom.backgroundColor], ['50%', '1px', 'rgba(196, 208, 255, 0.32)', 'rgba(10, 14, 32, 0.55)']);
+    };
+    const dark = await readStyles(); checkStyles(dark, 'dark');
+    await S.page.send('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-color-scheme', value: 'light' }] });
+    await sleep(300);
+    const light = await readStyles(); checkStyles(light, 'light'); eq('light card color-scheme', light.card.colorScheme, 'dark');
+    await S.page.send('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-color-scheme', value: 'dark' }] });
+    // hover: a row gets the Atlas list hover colour, a round button the accent border
+    const rowC = await ev(`(() => { const b = document.querySelector('.sh-list li:nth-child(2) .sh-item').getBoundingClientRect(); return { x: b.left + b.width / 2, y: b.top + b.height / 2 }; })()`);
+    await S.page.mouse.move(rowC.x, rowC.y); await sleep(300);
+    const hov = await ev(`getComputedStyle(document.querySelector('.sh-list li:nth-child(2) .sh-item')).backgroundColor`);
+    const zC = await ev(`(() => { const b = document.querySelector('.of-ctl button[data-z="fit"]').getBoundingClientRect(); return { x: b.left + b.width / 2, y: b.top + b.height / 2 }; })()`);
+    await S.page.mouse.move(zC.x, zC.y); await sleep(450);
+    const hovZ = await ev(`getComputedStyle(document.querySelector('.of-ctl button[data-z="fit"]')).borderTopColor`);
+    eq('row hover background', hov, 'rgba(143, 176, 255, 0.12)'); eq('zoom button hover border', hovZ, 'rgb(143, 176, 255)');
+    await S.page.mouse.move(2, 2);
+
+    // 2. geometry in every width: the shelf open (the zoom buttons under the card, in the column), then folded (the buttons in the corner)
+    const rowsOut = [];
+    const around = async () => {
+      const g = await geoOf(ev), x = Math.min(...g.btns.map(b => b.x)), y = Math.min(...g.btns.map(b => b.y));
+      return { g, btnsRect: { x, y, w: Math.max(...g.btns.map(b => b.r)) - x, h: Math.max(...g.btns.map(b => b.b)) - y } };         // the three buttons as one box
+    };
+    const widths = [360, 700, 1024, 1500, 2560];
+    for (const w of widths) {
+      await S.page.setViewport(w, 900, 1);
+      await P('p.setShelfFolded(false)'); await sleep(700);
+      const { g, btnsRect } = await around();
+      const L = `${w}px open`, A = g.area, labs = (await P('p.labelRects()')).filter(l => l.shown).map(l => ({ x: A.x + l.x, y: A.y + l.y, w: l.w, h: l.h }));
+      const figs = (await P('p.figures().map(id => p.agentCss(id))')).filter(Boolean).map(f => ({ x: A.x + f.x - 12, y: A.y + f.y - 12, w: 24, h: 24 }));
+      const vOk = g.btns.every(b => b.x >= 0 && b.r <= g.vw + 0.5 && b.y >= 0 && b.b <= g.vh + 0.5) && g.host && g.host.x >= 0 && g.host.r <= g.vw + 0.5;
+      if (g.mode !== 'open' || !g.host) bad.push(`${L}: the shelf is ${g.mode}`);
+      if (g.inArea) bad.push(`${L}: the zoom buttons are inside the scene area`);
+      if (g.host && g.btns.some(b => b.y < g.host.b - 0.5)) bad.push(`${L}: a zoom button starts at ${Math.min(...g.btns.map(b => b.y)).toFixed(0)}, above the card's bottom edge ${g.host.b.toFixed(0)}`);
+      if (g.host && !(btnsRect.x >= g.side.x - 0.5 && btnsRect.x + btnsRect.w <= g.side.r + 0.5 && btnsRect.x >= g.host.x - 0.5 && btnsRect.x + btnsRect.w <= g.host.r + 0.5)) bad.push(`${L}: the zoom buttons (x ${btnsRect.x.toFixed(0)}..${(btnsRect.x + btnsRect.w).toFixed(0)}) leave the column (x ${g.side.x.toFixed(0)}..${g.side.r.toFixed(0)}, card ${g.host.x.toFixed(0)}..${g.host.r.toFixed(0)})`);
+      if (g.rows.some(r => hit(r, btnsRect))) bad.push(`${L}: a zoom button is over a list row`);
+      if (!g.reachable.every(Boolean)) bad.push(`${L}: a zoom button is covered by something (hit test)`);
+      if (!vOk) bad.push(`${L}: the card or a zoom button leaves the window`);
+      if (g.names.some(n => n.clipped)) bad.push(`${L}: a chat name is cut off`);
+      if (w >= 761) {            // a column beside the scene: the scene ends where the column starts, so nothing of the scene lies under the buttons or the card
+        if (!(g.area.r <= g.side.x + 0.5 && g.canvas.r <= g.side.x + 0.5)) bad.push(`${L}: the scene (to ${g.area.r.toFixed(0)}) reaches into the column (from ${g.side.x.toFixed(0)})`);
+        if (labs.some(l => hit(l, btnsRect) || hit(l, g.host)) || figs.some(f => hit(f, btnsRect) || hit(f, g.host))) bad.push(`${L}: a label or an agent lies under the card or the buttons`);
+        if (g.view.w - g.area.w < 300) bad.push(`${L}: the column is only ${(g.view.w - g.area.w).toFixed(0)} px wide`);
+      }
+      rowsOut.push(`${w}: open, card ${g.host ? `${g.host.w.toFixed(0)}x${g.host.h.toFixed(0)}` : '-'}, buttons ${btnsRect.w.toFixed(0)}x${btnsRect.h.toFixed(0)} ${(btnsRect.y - (g.host ? g.host.b : 0)).toFixed(0)} px under it, ${g.rows.length} rows on show, scene ${g.area.w.toFixed(0)} wide`);
+      // folded: no card, the buttons float in the corner and the scene is as wide as the view
+      await P('p.setShelfFolded(true)'); await sleep(700);
+      const f = (await around()).g, fb = f.btns[f.btns.length - 1], F = `${w}px folded`, gapR = f.view.r - fb.r, gapB = f.view.b - fb.b, want16 = w <= 640 ? 8 : 16;
+      if (f.mode !== 'collapsed' || f.host) bad.push(`${F}: the shelf is ${f.mode}`);
+      if (Math.abs(gapR - want16) > 1.5 || Math.abs(gapB - want16) > 1.5) bad.push(`${F}: the zoom buttons are ${gapR.toFixed(1)} px from the right and ${gapB.toFixed(1)} px from the bottom of the view, not ${want16}`);
+      if (Math.abs(f.area.w - f.view.w) > 1 || Math.abs(f.canvas.w - f.view.w) > 1) bad.push(`${F}: the scene is ${f.area.w.toFixed(0)} px wide in a ${f.view.w.toFixed(0)} px view`);
+      if (f.inArea || !f.reachable.every(Boolean)) bad.push(`${F}: the zoom buttons are in the area or covered`);
+      rowsOut.push(`${w}: folded, buttons ${gapR.toFixed(0)}/${gapB.toFixed(0)} px from the right/bottom corner, scene ${f.area.w.toFixed(0)} of ${f.view.w.toFixed(0)}`);
+    }
+    await S.page.setViewport(1500, 900, 1);
+    // 3. nothing on the shelf at all: the same corner, the same full-width scene (a second page: no asleep and no closed chats)
+    const N = await scenario(3, { tag: 'shnone', query: '?time=12:00', fixture: { statuses: ['working'] } });
+    let none;
+    try {
+      await sleep(900);
+      none = await geoOf(e => N.page.evaluate(e));
+      const nb = none.btns[none.btns.length - 1];
+      if (none.mode !== 'none' || none.host) bad.push(`empty shelf: mode ${none.mode}`);
+      if (Math.abs(none.view.r - nb.r - 16) > 1.5 || Math.abs(none.view.b - nb.b - 16) > 1.5) bad.push(`empty shelf: the zoom buttons are not in the corner (${(none.view.r - nb.r).toFixed(1)}/${(none.view.b - nb.b).toFixed(1)})`);
+      if (Math.abs(none.area.w - none.view.w) > 1 || none.inArea || !none.reachable.every(Boolean)) bad.push('empty shelf: the scene is not as wide as the view, or the buttons are misplaced');
+    } finally { await N.done(); }
+    check('15-shelf-style', bad.length === 0 && S.page.errors.length === 0,
+      `${bad.length ? 'FAILED: ' + bad.slice(0, 6).join('; ') + '; ' : ''}card ${dark.card.backgroundColor}, ${dark.card.backdropFilter}, border ${dark.card.borderTopWidth} ${dark.card.borderTopColor}, radius ${dark.card.borderTopLeftRadius}, padding ${dark.card.paddingTop} ${dark.card.paddingLeft}; chip ${dark.chip.color} ${dark.chip.fontWeight} ${dark.chip.fontSize} ${dark.chip.textTransform} spacing ${dark.chip.letterSpacing}; row radius ${dark.row.borderTopLeftRadius}, name ${dark.name.fontSize}/${dark.name.fontWeight} ${dark.name.color}, hover ${hov}; round buttons ${dark.zoom.borderTopColor} on ${dark.zoom.backgroundColor}, hover border ${hovZ}; the same in a light system theme ${JSON.stringify(light.card) === JSON.stringify(dark.card) && JSON.stringify(light.name) === JSON.stringify(dark.name)}; ${rowsOut.join('; ')}; empty shelf: ${none ? none.mode : '?'}, scene ${none ? none.area.w.toFixed(0) : '?'} of ${none ? none.view.w.toFixed(0) : '?'}; console errors ${S.page.errors.length}`);
   } finally { await S.done(); }
 }
 
