@@ -13,11 +13,16 @@ export const sleep = ms => new Promise(r => setTimeout(r, ms));
 export async function launchChrome({ width = 1500, height = 900, dpr = 1, reducedMotion = false, lang = 'en-US' } = {}) {
   if (!CHROME) throw new Error('no Chrome found; set CHROME_BIN');
   const profile = mkdtempSync(join(tmpdir(), 'cco-qa-chrome.'));
-  const proc = spawn(CHROME, [
+  // Chrome does not exit when its parent is killed (a QA run that times out, crashes or is cancelled), and a headless page with software GL
+  // then burns about two cores for as long as the machine is up. So Chrome runs in its own process group under a shell that polls the
+  // runner: when the runner is gone the shell kills the group, and kill() below kills the whole group, helpers included.
+  const WATCH = 'runner=$PPID; "$@" & chrome=$!; while kill -0 "$runner" 2>/dev/null && kill -0 "$chrome" 2>/dev/null; do sleep 1; done; kill -KILL -- -$$ 2>/dev/null';
+  const proc = spawn('/bin/sh', ['-c', WATCH, 'sh', CHROME,
     '--headless=new', `--user-data-dir=${profile}`, '--remote-debugging-port=0', '--no-first-run', '--no-default-browser-check', `--lang=${lang}`, `--accept-lang=${lang}`,
     '--use-gl=angle', '--use-angle=swiftshader', '--enable-unsafe-swiftshader', '--hide-scrollbars', `--window-size=${width},${height}`, 'about:blank',
-  ], { stdio: 'ignore' });
-  const kill = () => { try { proc.kill('SIGKILL'); } catch { /* gone */ } };
+  ], { stdio: 'ignore', detached: true });
+  proc.unref();
+  const kill = () => { try { process.kill(-proc.pid, 'SIGKILL'); } catch { /* gone */ } };
   try {
     const portFile = join(profile, 'DevToolsActivePort');
     for (let i = 0; i < 80 && !existsSync(portFile); i++) await sleep(250);
