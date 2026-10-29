@@ -24,6 +24,8 @@ const val = f => { const i = args.indexOf('--' + f); return i >= 0 ? args[i + 1]
 const only = val('only');
 const make = (name, ok, detail) => ({ name, ok, detail });
 const same = (a, b) => JSON.stringify(a) === JSON.stringify(b);
+// what the page stored, read without throwing: a store that holds nothing is a failed part, not a crashed check
+const stored = text => { try { return JSON.parse(text); } catch { return null; } };
 
 // ---- helpers run on the page
 const popRows = `(() => [...document.querySelectorAll('#set-pop .set-row')].filter(r => getComputedStyle(r).display !== 'none').map(r => r.dataset.row || (r.classList.contains('set-time') ? 'time-slider' : '?')))()`;
@@ -102,21 +104,21 @@ async function runSettings(ctx) {
       shown: s0.scene === '3d' && s0.wrapShown && !s0.headerCamera && opened && s1.open,
       rows: same(s1.rows, ['time', 'season', 'hemisphere', 'weather', 'shelf']) && !s1.rows.includes('camera'),
       slider: fixedBtn && same(s1b.rows, ['time', 'time-slider', 'season', 'hemisphere', 'weather', 'shelf']) && s1b.timeMode === 'fixed',
-      applied: s2.season === 'winter' && s2.weather === 'rain' && s2.hemi === 'south' && s2.shelf === '20' && s2.sliderOut === '22:00' && same(JSON.parse(s2.stored), E) && s2.url === '?scene=3d',
-      reload: s3.wrapShown && same(JSON.parse(s3.stored), E) && s3o.season === 'winter' && s3o.weather === 'rain' && s3o.hemi === 'south' && s3o.shelf === '20' && s3o.timeMode === 'fixed' && s3o.sliderOut === '22:00' && same(s3o.rows, s1b.rows),
+      applied: s2.season === 'winter' && s2.weather === 'rain' && s2.hemi === 'south' && s2.shelf === '20' && s2.sliderOut === '22:00' && same(stored(s2.stored), E) && s2.url === '?scene=3d',
+      reload: s3.wrapShown && same(stored(s3.stored), E) && s3o.season === 'winter' && s3o.weather === 'rain' && s3o.hemi === 'south' && s3o.shelf === '20' && s3o.timeMode === 'fixed' && s3o.sliderOut === '22:00' && same(s3o.rows, s1b.rows),
       pixel: pixel && same(pixel.settings, E) && Object.values(pixel.from).every(v => v === 'stored'),
-      url: same(JSON.parse(s4.stored), E) && s4o.season === 'spring' && s4o.weather === 'fog' && s4o.hemi === 'north' && s4o.shelf === '7' && s4o.timeMode === 'fixed' && s4o.sliderOut === '03:00'
+      url: same(stored(s4.stored), E) && s4o.season === 'spring' && s4o.weather === 'fog' && s4o.hemi === 'north' && s4o.shelf === '7' && s4o.timeMode === 'fixed' && s4o.sliderOut === '03:00'
         && /season=spring/.test(s4o.note) && /time=03:00/.test(s4o.note.replace(/\u2060/g, '')) && /shelf=7/.test(s4o.note.replace(/\u2060/g, '')),
-      hour: s5o.timeMode === 'fixed' && s5o.sliderOut === '21:30' && /time=21:30/.test(s5o.note.replace(/\u2060/g, '')) && same(JSON.parse(s5.stored), E),
+      hour: s5o.timeMode === 'fixed' && s5o.sliderOut === '21:30' && /time=21:30/.test(s5o.note.replace(/\u2060/g, '')) && same(stored(s5.stored), E),
       keepHour: /time=23%3A00/.test(s5c.url) && !/hour=/.test(s5c.url),
-      keepSeason: /season=autumn/.test(s6.url) && JSON.parse(s6.stored).season === 'autumn',
+      keepSeason: /season=autumn/.test(s6.url) && stored(s6.stored)?.season === 'autumn',
       noErrors: page.errors.filter(e => !/\/local\/ofis-extras\.js/.test(e)).length === 0,
     };
     const bad = Object.keys(C).filter(k => !C[k]), ok = bad.length === 0;
     return [make('3d-settings', ok,
       `${ok ? '' : 'FAILED PARTS: ' + bad.join(', ') + '; '}3D scene: popover button shown ${s0.wrapShown}, header camera toggle shown ${s0.headerCamera}, rows ${s1.rows.join('/')} (camera row hidden), after Fixed: ${s1b.rows.join('/')}; `
       + `chosen winter, rain, south, shelf 20, 22:00 -> stored ${s2.stored}, address unchanged ${s2.url}; after a reload the popover reads ${s3o.season}, ${s3o.weather}, ${s3o.hemi}, shelf ${s3o.shelf}, ${s3o.timeMode} ${s3o.sliderOut}; `
-      + `the pixel scene (default scene) starts with ${pixel ? JSON.stringify(pixel.settings) : 'no scene'}; address ?season=spring&weather=fog&time=03:00&hemisphere=north&shelf=7 -> popover ${s4o.season}, ${s4o.weather}, ${s4o.hemi}, shelf ${s4o.shelf}, ${s4o.timeMode} ${s4o.sliderOut}, store unchanged ${same(JSON.parse(s4.stored), E)}, note "${s4o.note.replace(/\u2060/g, '').slice(0, 90)}"; `
+      + `the pixel scene (default scene) starts with ${pixel ? JSON.stringify(pixel.settings) : 'no scene'}; address ?season=spring&weather=fog&time=03:00&hemisphere=north&shelf=7 -> popover ${s4o.season}, ${s4o.weather}, ${s4o.hemi}, shelf ${s4o.shelf}, ${s4o.timeMode} ${s4o.sliderOut}, store unchanged ${same(stored(s4.stored), E)}, note "${s4o.note.replace(/\u2060/g, '').slice(0, 90)}"; `
       + `?hour=21.5 -> ${s5o.timeMode} ${s5o.sliderOut}, then a change of the slider gives address ${s5c.url}; ?season=spring then autumn chosen -> ${s6.url}`)];
   } finally { await S.done(); }
 }
