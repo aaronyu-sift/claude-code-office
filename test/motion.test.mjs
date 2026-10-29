@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { join, dirname } from 'node:path';
-import { DUR, EASE, LOOP, SLIDE, SCALE, SPRING, wave, Spring, springParams, springState, settleTime, springLinear, slideFrom, comesFrom, enter, leave, setShown } from '../public/js/motion.js';
+import { DUR, EASE, LOOP, CYCLE, SLIDE, SCALE, SPRING, wave, Spring, springParams, springState, settleTime, springLinear, slideFrom, comesFrom, enter, leave, setShown } from '../public/js/motion.js';
 import { block } from '../tools/motion/gen-springs.mjs';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
@@ -232,4 +232,9 @@ test('motion: an element without the Web Animations API is shown and hidden at o
   assert.equal(el.hidden, false);
   await leave(el);
   assert.equal(el.hidden, true);
+});
+
+test('cycle: day and night and the weather move at a pace of their own, slower than every spring', () => {
+  for (const s of Object.values(SPRING)) assert.ok(CYCLE.turn > s.ms, 'slower than ' + s.ms);
+  assert.ok(CYCLE.turn <= 10000, 'but a change made by hand does not keep the visitor waiting');
 });

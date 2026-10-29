@@ -10,6 +10,7 @@
 //   setShown(el, on, opts)       enter or leave, only when the state really changes
 //   Spring                       the same physics for script: a value that moves toward a target and keeps its velocity when the target changes
 //   LOOP, wave                   the two tempos of an indicator that loops, and the sine they follow
+//   CYCLE                        the pace of a cycle (day and night, the weather): the time a full change of the light takes, at a constant rate
 //   springState / springLinear   the closed-form motion, and the CSS easing made from it
 //   reduced()                    the visitor asked for less motion: the travel is dropped and what is left is a short fade
 //
@@ -23,6 +24,9 @@ export const EASE = {
   inOut: 'cubic-bezier(0.2, 0, 0, 1)',            // a change that stays on screen: Material 3 standard
 };
 export const LOOP = { slow: 2400, quick: 1200 };  // ms: an indicator that loops: a state that continues pulses slowly, something that wants a look moves quickly (WCAG 2.3.1: at most 3 flashes a second)
+// A cycle follows the clock: a day that turns into night is not pushed by anything and has no easing. The light moves at a constant rate, so a change that is made by hand
+// (a time or a weather chosen in the popover) is slow and never a step; the real clock moves it a little every minute. `turn` is the time a full change of the light (0 to 1) takes.
+export const CYCLE = { turn: 4000 };               // ms
 export const SLIDE = 20;                          // px: how far an element travels while it appears (never a full-width slide)
 export const SCALE = 0.94;                        // an arriving card also grows from this size, out of the point it belongs to (its tail), so it opens like something unfolding
 

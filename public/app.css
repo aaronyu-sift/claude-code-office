@@ -823,3 +823,6 @@ main { flex: 1; min-height: 0; position: relative; }
 .pb-badge.wait, .pb-badge.ask { background: var(--warn); color: #1b1405; }
 .pb-badge.sleep { background: rgba(255, 255, 255, .16); color: rgba(255, 255, 255, .78); }
 .view-ofis[data-project="off"] .px-l .px-proj { display: none; }                   /* the project folder is shown on a label only when the setting is on */
+/* Scene settings and the atmosphere of the 3D scene (office-settings.js, ofis-weather.js; docs/motion.md, kinds cycle and ambient scenery) */
+.set-row[hidden] { display: none; }                                   /* a row the scene does not support (settings-panel.js): `.set-row` is flex, which would beat the hidden attribute */
+.of-stage .of-wx { position: absolute; inset: 0; pointer-events: none; }  /* the weather canvas over the 3D canvas: it takes no pointer event, the scene below does */

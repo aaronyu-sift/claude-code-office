@@ -1,7 +1,9 @@
-// The scene settings popover in the header (pixel Office view): time of day, season, hemisphere, weather and how many chats the shelf shows. The camera buttons inside it
-// belong to the same handler as the toggle in the header (main.js). Every change is applied to the scene at once, without a reload, and
-// remembered by the scene (settings.js); `afterChange(key, value)` lets the page keep an explicit URL parameter in step.
+// The scene settings popover in the header (Office view, either scene): time of day, season, hemisphere, weather and how many chats the shelf shows. The camera buttons
+// inside it belong to the same handler as the toggle in the header (main.js). Every change is applied to the scene at once, without a reload, and remembered by the scene
+// (settings.js, office-settings.js); `afterChange(key, value)` lets the page keep an explicit URL parameter in step. The rows follow the scene: a scene lists the rows it
+// supports (`settingRows`, see rowsOf in office-settings.js) and the others are hidden, so the 3D scene shows no camera row.
 import { t as msg } from './i18n.js';
+import { rowsOf } from './office-settings.js';
 
 const pad = n => String(n).padStart(2, '0');
 const clock = min => `${pad(Math.floor(min / 60))}:${pad(min % 60)}`;
@@ -32,9 +34,10 @@ export function createSettingsPanel({ wrap, getOffice, afterChange = () => {} })
   function refresh() {
     const o = getOffice();
     if (!o) return;
-    const s = o.settings, from = o.settingsFrom, fixed = s.time !== 'auto';
+    const s = o.settings, from = o.settingsFrom, fixed = s.time !== 'auto', rows = rowsOf(o);
+    for (const row of wrap.querySelectorAll('.set-row[data-row]')) row.hidden = !rows.includes(row.dataset.row);
     for (const b of timeMode.querySelectorAll('button')) b.setAttribute('aria-pressed', String(b.dataset.v === (fixed ? 'fixed' : 'auto')));
-    timeRow.hidden = !fixed;
+    timeRow.hidden = !fixed || !rows.includes('time');
     if (fixed) { slider.value = String(minutesOf(s.time)); out.textContent = s.time; }
     season.value = s.season; hemi.value = s.hemisphere; weather.value = s.weather; showShelf(s.shelf);
     const notes = [];
