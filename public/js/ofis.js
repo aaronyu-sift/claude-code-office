@@ -2015,7 +2015,7 @@ export function createOfis(root, ctx) {
       heading: -Math.PI / 2, th: -Math.PI / 2, sit: 1, walkPh: 0, ph: (h % 1000) / 159, doneAt: 0,
       tag: null, bal: null,
     };
-    c.tag = mkLabel('of-tagl', main ? 70 : 40, 'down', 3, main ? 0 : 17);
+    c.tag = mkLabel('of-tagl', main ? 70 : 40, 'down', 3, main ? 0 : 12);
     c.bal = mkLabel('of-ball', main ? 60 : 30, 'up', 6, main ? 0 : 22);
     c.tag.agent = true;
     c.tag.charId = id;

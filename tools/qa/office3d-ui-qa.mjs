@@ -186,18 +186,29 @@ if (want('card')) {
     eq('nothing moved the map', await T.view(), v0);
 
     // 2. it follows the agent: drag the scene, then zoom about the agent; the card keeps its place beside the agent
-    const rel0 = { dx: c1s.rect.x - a1.box.cx, dy: c1s.rect.y - a1.box.cy, side: c1s.side };
+    // at "fit" the whole building is in the window and the pan is clamped, so the map is zoomed in one step (about the agent) before it is dragged; the card stays beside the agent
+    const zFit = await T.O('o.zoom');
+    await S.page.mouse.wheel(a1.box.cx, a1.box.cy, -450);
+    await until(async () => (await T.O('o.zoom')) > zFit * 1.25, 4000, 150);
+    await T.settle();
+    const c1z = await T.card(), a1z = await around(A.agent.id, c1z);
+    const rel0 = { dx: c1z.rect.x - a1z.box.cx, dy: c1z.rect.y - a1z.box.cy, side: c1z.side };
     const grass = { x: 24, y: 520 };                                   // an empty part of the scene (the left edge: grass and river)
     const emptyAt = await T.ev(`(() => { const e = document.elementFromPoint(${grass.x}, ${grass.y}); return !!e && !!e.closest('.of-stage') && !e.closest('.of-l'); })()`);
     if (!emptyAt) bad.push('the point used to drag the scene is not empty');
-    await S.page.mouse.drag(grass.x, grass.y, grass.x + 70, grass.y - 45);
-    const followed = await until(async () => {
-      const c = await T.card(), x = await around(A.agent.id, c);
-      return c.open && !c.away && (c.side !== rel0.side || (Math.abs((c.rect.x - x.box.cx) - rel0.dx) <= 3 && Math.abs((c.rect.y - x.box.cy) - rel0.dy) <= 3)) && Math.hypot(x.box.cx - a1.box.cx, x.box.cy - a1.box.cy) > 30 ? { c, x } : null;
-    }, 4000, 150);
+    // the pan is limited to the world: drag in the first direction that has room (right and up, then left and down, ...) until the agent has moved
+    let followed = null;
+    for (const [dx, dy] of [[70, -45], [-20, 45], [70, 45], [-20, -45]]) {
+      await S.page.mouse.drag(grass.x + (dx < 0 ? 40 : 0), grass.y, grass.x + (dx < 0 ? 40 : 0) + dx, grass.y + dy);
+      followed = await until(async () => {
+        const c = await T.card(), x = await around(A.agent.id, c);
+        return c.open && !c.away && (c.side !== rel0.side || (Math.abs((c.rect.x - x.box.cx) - rel0.dx) <= 3 && Math.abs((c.rect.y - x.box.cy) - rel0.dy) <= 3)) && Math.hypot(x.box.cx - a1z.box.cx, x.box.cy - a1z.box.cy) > 15 ? { c, x } : null;
+      }, 1800, 150);
+      if (followed) break;
+    }
     if (!followed) bad.push('after a drag of the scene the card did not follow its agent');
-    const moved = followed ? Math.hypot(followed.x.box.cx - a1.box.cx, followed.x.box.cy - a1.box.cy) : 0;
-    const z0 = await T.O('o.zoom'), at = followed ? followed.x.box : a1.box;
+    const moved = followed ? Math.hypot(followed.x.box.cx - a1z.box.cx, followed.x.box.cy - a1z.box.cy) : 0;
+    const z0 = await T.O('o.zoom'), at = followed ? followed.x.box : a1z.box;
     await S.page.mouse.wheel(at.cx, at.cy, -320);
     const zoomed = await until(async () => {
       const z = await T.O('o.zoom'), c = await T.card(), x = await around(A.agent.id, c);
