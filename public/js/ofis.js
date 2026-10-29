@@ -426,6 +426,7 @@ export function createOfis(root, ctx) {
   let slotsSaved = '';
   let fitKey = '';               // the building the camera was last fitted to: only a different building refits an automatic view
   let fits = 0;                  // how many times a building change refitted the view (verification only)
+  let builds = 0;                // how many times the building was built (verification only)
   const chars = new Map();       // agent id → character
   const labels = new Set();
   const signs = new Map();       // session id → sign label
@@ -534,6 +535,7 @@ export function createOfis(root, ctx) {
   // plan: { rows, slotOf } from syncRooms; list: the chats with a room ({ id, cls, slot }). Every slot without a chat becomes a vacant office.
   function rebuild(list, plan) {
     const t0 = performance.now();
+    builds++;
     floorJobs = [];
     disposeWorld();
     const g = new THREE.Group();
@@ -688,6 +690,7 @@ export function createOfis(root, ctx) {
     get info() { const i = renderer.info; return { calls: i.render.calls, tris: i.render.triangles, geos: i.memory.geometries, tex: i.memory.textures }; },
     get rebuildMs() { return +rebuildMs.toFixed(1); },
     get fits() { return fits; },
+    get builds() { return builds; },
     get models() { return { loaded: Object.keys(PK), failed: [...AS.packs.failed.keys()] }; },
     get look() { return { assets: AS.look.assets, polish: POLISH }; },
     figures() { return [...chars.values()].map(c => ({ id: c.id, main: c.main, pack: !!c.pk, shirt: c.shirt, tinted: c.tinted, mode: c.mode, x: c.root.position.x, z: c.root.position.z })); },
@@ -1258,6 +1261,9 @@ export function createOfis(root, ctx) {
     tex.colorSpace = THREE.SRGBColorSpace;
     tex.anisotropy = aniso;
     paintPlaque(cv, { name: msg('of.vacant'), title: '', color: '#8a93a3', status: '' });
+    const g2 = cv.getContext('2d');                      // a veil over it: quiet next to the signs of the chats
+    g2.fillStyle = 'rgba(70,76,88,.5)';
+    g2.fillRect(0, 0, cv.width, cv.height);
     const face = new THREE.MeshBasicMaterial({ map: tex });
     const mesh = new THREE.Mesh(new THREE.BoxGeometry(w, h, 0.06), [MAT.signSide, MAT.signSide, MAT.signSide, MAT.signSide, face, MAT.signSide]);
     mesh.position.set(x, y, z + 0.055);

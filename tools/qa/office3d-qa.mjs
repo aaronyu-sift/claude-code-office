@@ -212,6 +212,7 @@ const MUTATIONS = [
   { name: 'slots are not sticky: every chat is handed a slot again on every update', file: 'public/js/ofis-layout.js', from: 'const fresh = chats.filter(c => !slotOf.has(c.id))', to: 'const fresh = chats.filter(() => true)', group: 'stable', fails: ['3d-stable-layout', '3d-expand'] },
   { name: 'an expansion repacks the rows: the row size follows the number of chats', file: 'public/js/ofis.js', from: 'const P = buildingPlan(plan.rows, slots.perRow, leads);', to: 'const P = buildingPlan(plan.rows, Math.max(slots.perRow, Math.ceil(list.length / 2)), leads);', group: 'stable', fails: '3d-expand' },
   { name: 'the camera refits at every rebuild, not only when the building changed', file: 'public/js/ofis.js', from: 'const changed = key !== fitKey;', to: 'const changed = true;', group: 'stable', fails: ['3d-stable-layout', '3d-expand'] },
+  { name: 'a room is built for 3 desks: the fourth sub-agent changes it', file: 'public/js/ofis-layout.js', from: 'export const BASE_CLS = 1;', to: 'export const BASE_CLS = 0;', group: 'stable', fails: '3d-stable-layout' },
   { name: 'a rebuild seats the sub-agents that are still walking', file: 'public/js/ofis.js', from: "if (c.mode === 'walk' && c.path && (c.slot < 0", to: "if (false && c.mode === 'walk' && c.path && (c.slot < 0", group: 'stable', fails: '3d-expand' },
 ];
 
@@ -242,13 +243,13 @@ async function runMutations() {
 // change must not refit the camera (`o.fits` counts the refits a changed building caused, `s.zoom` is the view).
 const CHAT_STATUS = ['working', 'working', 'waiting', 'working', 'working', 'ask', 'working', 'waiting', 'working', 'waiting', 'working', 'dormant', 'working', 'waiting', 'working', 'working'];
 const WALK_SPEED = 2.2;                                  // units per second (WALK in ofis.js)
-const MANY = 3;                                          // the chat with nine working sub-agents: five from the start, four come later (the room has 6 desks)
+const MANY = 3;                                          // the chat with nine working sub-agents: two from the start, four more within its 6 desks, three more beyond them
 const rectKey = s => [...[s.X, s.Z, s.W, s.D].map(v => +v.toFixed(3)), s.door, s.hall].join(',');            // to the millimetre
 
 async function runStable(ctx) {
   const dirs = {};
   const putAway = new Set([3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15]);          // every session but the first three
-  const lateSubs = [5, 6, 7, 8];
+  const lateSubs = [2, 3, 4, 5, 6, 7, 8];
   const subFiles = (fx, i, k) => {
     const a = fx.agents[i], id = a.subs[k].id.split(':')[1];
     const d = join(dirs.dir, 'projects', `/qa/ws/${a.project}`.replace(/[^a-zA-Z0-9]/g, '-'), a.id, 'subagents');
@@ -269,13 +270,13 @@ async function runStable(ctx) {
     const { page, fx } = S;
     const id = i => fx.agents[i].id;
     const open = i => renameSync(join(dirs.dir, 'stash', fx.pids[i] + '.json'), join(dirs.dir, 'sessions', fx.pids[i] + '.json'));
-    const openSubs = () => lateSubs.forEach(k => subFiles(fx, MANY, k).forEach((f, j) => { renameSync(join(dirs.dir, 'stash', 'subs', `${k}.${j}`), f); utimesSync(f, Date.now() / 1000, Date.now() / 1000); }));
+    const openSubs = ks => ks.forEach(k => subFiles(fx, MANY, k).forEach((f, j) => { renameSync(join(dirs.dir, 'stash', 'subs', `${k}.${j}`), f); utimesSync(f, Date.now() / 1000, Date.now() / 1000); }));
     const wake = i => {
       const f = join(dirs.dir, 'sessions', fx.pids[i] + '.json');
       writeFileSync(f, JSON.stringify({ ...JSON.parse(readFileSync(f, 'utf8')), status: 'busy', statusUpdatedAt: Date.now() }));
     };
     const read = () => page.evaluate(o3(`({ office: o.office(), figs: o.figures().map(f => ({ id: f.id, main: f.main, mode: f.mode, x: +f.x.toFixed(3), z: +f.z.toFixed(3) })),
-      rooms: s.rooms.map(r => ({ id: r.id, slot: r.slot, cls: r.cls })), zoom: s.zoom, fits: o.fits, t: performance.now(), err: v.dataset.hata || null })`));
+      rooms: s.rooms.map(r => ({ id: r.id, slot: r.slot, cls: r.cls })), zoom: s.zoom, fits: o.fits, builds: o.builds, t: performance.now(), err: v.dataset.hata || null })`));
     // wait until the scene shows `n` chats with a room (and a chief each), then give a rebuild a moment to finish
     const settle = async (n, more = () => true) => {
       for (let t = 0; t < 100; t++) {
@@ -307,6 +308,8 @@ async function runStable(ctx) {
       return bad;
     };
     const vacant = st => st.office.slots.filter(s => s.vacant).length;
+    const room3 = st => st.office.slots.find(s => s.id === id(MANY));
+    const subsOf3 = st => st.figs.filter(f => f.id.startsWith(id(MANY) + ':')).length;
     const problems = [], notes = [];
 
     // ---- 3 chats
@@ -353,18 +356,22 @@ async function runStable(ctx) {
     if (sTen.office.slots.length !== 10 || vacant(sTen) !== 0 || slotOf(sTen).get(id(12)) !== 6 || slotOf(sTen).get(id(13)) !== 8) {
       problems.push(`10 chats again: ${sTen.office.slots.length} offices, ${vacant(sTen)} vacant, slots ${slotOf(sTen).get(id(12))},${slotOf(sTen).get(id(13))} (want 10, 0, 6, 8)`);
     }
+    // ---- sub-agents join a chat that has desks free (2 to 6 of its 6): nothing is rebuilt and nothing moves
+    openSubs([2, 3, 4, 5]);
+    const sSub = await settle(10, st => subsOf3(st) >= 6);
+    problems.push(...compare(sTen, sSub, 'four sub-agents within the 6 desks'));
+    if (sSub.builds !== sTen.builds) problems.push(`four sub-agents within the 6 desks rebuilt the scene (${sTen.builds} -> ${sSub.builds} builds)`);
+    if (room3(sSub).cap !== 6 || subsOf3(sSub) !== 6) problems.push(`the chat has ${room3(sSub).cap} desks and ${subsOf3(sSub)} sub-agent figures (want 6 and 6)`);
     res.push(make('3d-stable-layout', S.ready.ok && problems.length === 0,
-      `3, 7 and 10 chats came, 4 closed, 1 came, 1 slept and woke, 2 came: ${stats.offices} office rectangles compared (all ${first.length} offices exist at 3 chats: ${vacant(s3)} vacant), ${stats.kept} chat slots kept, ${stats.figs} seated figures kept their place, `
-      + `camera refits ${s3.fits} -> ${sTen.fits} at zoom ${s3.zoom.toFixed(2)} -> ${sTen.zoom.toFixed(2)}; new chats took the lowest free slots; a sleeping chat had no room and took slot ${slotOf(s8).get(id(11))} on waking`
+      `3, 7 and 10 chats came, 4 closed, 1 came, 1 slept and woke, 2 came, then 4 sub-agents joined one chat within its desks (${sSub.builds - sTen.builds} rebuilds): ${stats.offices} office rectangles compared (all ${first.length} offices exist at 3 chats: ${vacant(s3)} vacant), ${stats.kept} chat slots kept, ${stats.figs} seated figures kept their place, `
+      + `camera refits ${s3.fits} -> ${sSub.fits} at zoom ${s3.zoom.toFixed(2)} -> ${sSub.zoom.toFixed(2)}; new chats took the lowest free slots; a sleeping chat had no room and took slot ${slotOf(s8).get(id(11))} on waking`
       + (problems.length ? '; PROBLEMS: ' + problems.slice(0, 4).join(' | ') + (problems.length > 4 ? ` (and ${problems.length - 4} more)` : '') : '')));
 
     // ---- 3d-expand: a chat whose sub-agents outgrow its room, then the 11th chat
     const ex = [];
-    const room3 = st => st.office.slots.find(s => s.id === id(MANY));
-    const before = sTen, desks0 = room3(before).cap;
-    openSubs();
+    const before = sSub, desks0 = room3(before).cap;
+    openSubs([6, 7, 8]);
     const sGrow = await settle(10, st => room3(st).cap > desks0);
-    const subsOf3 = st => st.figs.filter(f => f.id.startsWith(id(MANY) + ':')).length;
     ex.push(...compare(before, sGrow, 'a chat with nine sub-agents', { grow: [room3(before).slot] }));
     if (room3(sGrow).cap !== 12 || room3(sGrow).cls !== 2) ex.push(`its room has ${room3(sGrow).cap} desks in class ${room3(sGrow).cls} (want 12 and 2)`);
     if (sGrow.office.rows !== 2) ex.push(`${sGrow.office.rows} rows (want 2: no chat was added)`);
@@ -390,7 +397,7 @@ async function runStable(ctx) {
     const sLater = await read();
     ex.push(...compare(s11, sLater, 'a quiet moment after the expansion'));
     res.push(make('3d-expand', S.ready.ok && ex.length === 0,
-      `a chat went from 5 to 9 working sub-agents (6 desks): its room grew ${desks0} -> ${room3(sGrow).cap} desks inside its cell (${rectKey(room3(sGrow))} unchanged), no other office, chat or seated figure changed and the view did not refit; `
+      `a chat went from 6 to 9 working sub-agents (it has 6 desks): its room grew ${desks0} -> ${room3(sGrow).cap} desks inside its cell (${rectKey(room3(sGrow))} unchanged), no other office, chat or seated figure changed and the view did not refit; `
       + `the 11th chat took slot ${slotOf(s11).get(id(14))}: ${s11.office.slots.length} offices in ${s11.office.rows} rows, the first ten offices and their ${tenSlots.size} chats unchanged, ${subsOf3(s11)} sub-agent figures kept, `
       + `${walkers.length} walkers went on walking, one refit (zoom ${growWait.zoom.toFixed(2)} -> ${s11.zoom.toFixed(2)})`
       + (ex.length ? '; PROBLEMS: ' + ex.slice(0, 4).join(' | ') + (ex.length > 4 ? ` (and ${ex.length - 4} more)` : '') : '')));
