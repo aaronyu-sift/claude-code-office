@@ -4,10 +4,12 @@
 //   agentBox(id) -> { cx, cy, w, h } the agent on the screen, in CSS px from the top left of the view (`api.agentScreen` of the add-on API, ofis.js), or null
 //   covered()    -> { top, right } what floats over the view (the bar, the shelf card), in CSS px: "fit" frames the offices in the rest
 //   syncZoom(zoom, min, max) disables the zoom button that cannot go any further
+//   blocked()    -> [{ x, y, w, h }] what floats over the scene (the agent card, the shelf card, the zoom buttons) in CSS px of the scene's box: no label is drawn under it
+//   figureRects(ids) -> Map id -> rect of the agents on the screen (at least MIN_TARGET wide and high, the click target): the labels give way to them
 import * as THREE from 'three';
 import { hash } from './util.js';
 import { merge, load as loadSettings, fromQuery } from './pixel/settings.js';
-import { createOfficeUi } from './office-ui.js';
+import { createOfficeUi, MIN_TARGET } from './office-ui.js';
 
 // ------------------------------------------------------------ the figure of a shelf row
 // The pixel scene draws the sleeping or leaning pixel worker from its atlas; here a row gets a small flat-shaded person in the style of the scene's own people (a round head
@@ -99,11 +101,36 @@ export function createOfisUi({ root, area, ctx, camera, size, charOf, setSelecte
     }
   }
 
+  // what floats over the scene, in CSS px of the area; read once per frame by the label layout
+  function blocked() {
+    const a = area.getBoundingClientRect(), out = [];
+    const add = el => {
+      if (!el || el.hidden) return;
+      const r = el.getBoundingClientRect();
+      if (r.width > 0 && r.height > 0) out.push({ x: r.left - a.left, y: r.top - a.top, w: r.width, h: r.height });
+    };
+    if (ui.card.id && !ui.card.el.classList.contains('away')) add(ui.card.el);
+    if (root.dataset.shelf === 'open') add(root.querySelector('.of-shelf'));
+    add(root.querySelector('.of-ctl'));
+    add(root.querySelector('.of-shelf-tab'));
+    return out;
+  }
+  function figureRects(ids) {
+    const out = new Map();
+    for (const id of ids) {
+      const f = agentBox(id);
+      if (!f) continue;
+      const w = Math.max(f.w, MIN_TARGET), h = Math.max(f.h, MIN_TARGET);
+      out.set(id, { x: f.cx - w / 2, y: f.cy - h / 2, w, h });
+    }
+    return out;
+  }
+
   // read-only state for verification (from the console: document.querySelector('#view-ofis').__ofisUi)
   root.__ofisUi = {
     get card() { return ui.card.read(); }, shelf: () => ui.shelf.read(), setShelfFolded: on => ui.shelf.setCollapsed(!!on),
-    agentBox, covered: ui.covered, get shelfMax() { return ui.shelf.read().max; },
+    agentBox, blocked, covered: ui.covered, get shelfMax() { return ui.shelf.read().max; },
   };
 
-  return { ...ui, agentBox, syncZoom };
+  return { ...ui, agentBox, syncZoom, blocked, figureRects };
 }

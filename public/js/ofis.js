@@ -3,18 +3,20 @@
 // The scene is drawn with three.js. Signs, name tags and balloons live in an HTML layer so they stay crisp.
 import * as THREE from 'three';
 import { RoundedBoxGeometry } from 'three/addons/geometries/RoundedBoxGeometry.js';
-import { catColor, hash, esc, icon, fmtShort } from './util.js';
+import { catColor, hash, esc, icon } from './util.js';
 import { t as msg } from './i18n.js';
+import { labelParts, labelHtml } from './office-labels.js';
 import { createEnv } from './ofis-env.js';
 import { LOOP, wave } from './motion.js';
 import { createOfisUi } from './ofis-ui.js';
+import { layoutLabels } from './ofis-label-layout.js';
 import { isShelved } from './pixel/shelf.js';
 
 // ------------------------------------------------------------ dimensions (1 unit ≈ 1 meter)
 
 const WALL_H = 2.2, WALL_T = 0.16, LOW_H = 0.3;
 const SIGN_H = 1.24, SIGN_Y = 1.5;       // room sign on the wall (center height)
-const SIGN_HTML_BELOW = 19;               // below this zoom, an HTML fallback sign replaces the wall text
+const SUB_LABEL_REACH = 70;               // px a sub-agent's label may be from its agent: farther away it would read as another agent's
 const SIGN_PX = 288;                      // sign texture height in pixels (for crisp text)
 const SIGN_FONT = '"Segoe UI Variable Text", "Segoe UI", system-ui, sans-serif';
 const SIGN_FONT_D = '"Segoe UI Variable Display", "Segoe UI", system-ui, sans-serif';
@@ -75,19 +77,6 @@ function angTo(a, b, k) {
 }
 const lerp = (a, b, k) => a + (b - a) * k;
 const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
-
-function shortDesc(s) {
-  const d = String(s.desc || s.atype || msg('agent.sub')).trim().replace(/\s+/g, ' ');
-  if (d.length <= 14) return d;
-  let out = '';
-  for (const w of d.split(' ')) {
-    const nx = out ? out + ' ' + w : w;
-    if (nx.length > 14) break;
-    out = nx;
-  }
-  if (!out) out = d.slice(0, 12) + '…';
-  return out.replace(/[\s:;,.\-–—]+$/, '');
-}
 
 // ------------------------------------------------------------ shared geometries
 
@@ -449,6 +438,7 @@ export function createOfis(root, ctx) {
   const roomState = new Map();   // session id → { cls, low }
   const chars = new Map();       // agent id → character
   const labels = new Set();
+  let labelSeq = 0;
   const signs = new Map();       // session id → sign label
   const themeOf = new Map();     // project → theme index; open projects get distinct colors when possible
   let extras = null;             // optional local decoration module { mod, w }
@@ -495,7 +485,7 @@ export function createOfis(root, ctx) {
     el.style.zIndex = String(pri);
     el.style.visibility = 'hidden';
     layer.appendChild(el);
-    const L = { el, pri, mode, gap, minZoom, pos: new THREE.Vector3(), want: true, shown: false, html: '', dirty: true, w: 0, h: 0, force: false };
+    const L = { el, pri, mode, gap, minZoom, pos: new THREE.Vector3(), want: true, shown: false, html: '', dirty: true, w: 0, h: 0, force: false, uid: 'l' + (++labelSeq), agent: false, rank: 0 };
     labels.add(L);
     return L;
   }
@@ -511,10 +501,12 @@ export function createOfis(root, ctx) {
     L.el.style.visibility = on ? 'visible' : 'hidden';
   }
 
+  // The labels of the agents (`agent`) may leave their spot for a free one near their agent; every other label keeps its spot and is dropped when it touches a label of higher
+  // priority; nothing is drawn under the card or the shelf (ofis-label-layout.js).
   const PV = new THREE.Vector3();
   function placeLabels() {
     const s = clamp(zoom / 38, 0.74, 1);
-    const list = [];
+    const fixed = [], tags = [], byId = new Map();
     for (const L of labels) {
       if (!L.want || L.off || zoom < L.minZoom || (L.maxZoom && zoom >= L.maxZoom)) { showLabel(L, false); continue; }
       if (L.dirty) { L.w = L.el.offsetWidth; L.h = L.el.offsetHeight; L.dirty = false; }
@@ -525,21 +517,17 @@ export function createOfis(root, ctx) {
       const x = sx - w / 2;
       const y = L.mode === 'up' ? sy - h - L.gap * k : L.mode === 'mid' ? sy - h / 2 : sy + L.gap * k;
       if (x > vw + 4 || x + w < -4 || y > vh + 4 || y + h < -4) { showLabel(L, false); continue; }
-      L.x = x; L.y = y; L.sw = w; L.sh = h; L.k = k;
-      list.push(L);
+      L.k = k;
+      byId.set(L.uid, L);
+      (L.agent ? tags : fixed).push({ id: L.uid, x, y, w, h, pri: L.pri, rank: L.rank, force: L.force, maxGap: L.force ? Infinity : SUB_LABEL_REACH });
     }
-    list.sort((a, b) => b.pri - a.pri || b.y - a.y);
-    const placed = [];
-    for (const L of list) {
-      let ok = true;
-      if (!L.force) {
-        for (const P of placed) {
-          if (L.x < P.x + P.sw + 3 && L.x + L.sw + 3 > P.x && L.y < P.y + P.sh + 2 && L.y + L.sh + 2 > P.y) { ok = false; break; }
-        }
-      }
-      if (!ok) { showLabel(L, false); continue; }
-      placed.push(L);
-      L.el.style.transform = `translate(${L.x.toFixed(1)}px,${L.y.toFixed(1)}px) scale(${L.k.toFixed(3)})`;
+    const figs = ui.figureRects(chars.keys());
+    for (const T of tags) { const L = byId.get(T.id); T.near = figs.get(L.charId); }
+    const shown = layoutLabels({ fixed, tags, blocked: ui.blocked(), figures: [...figs.values()], vw, vh });
+    for (const [id, L] of byId) {
+      const p = shown.get(id);
+      if (!p) { showLabel(L, false); continue; }
+      L.el.style.transform = `translate(${p.x.toFixed(1)}px,${p.y.toFixed(1)}px) scale(${L.k.toFixed(3)})`;
       showLabel(L, true);
     }
   }
@@ -1789,8 +1777,10 @@ export function createOfis(root, ctx) {
       heading: -Math.PI / 2, th: -Math.PI / 2, sit: 1, walkPh: 0, ph: (h % 1000) / 159, doneAt: 0,
       tag: null, bal: null,
     };
-    c.tag = mkLabel('of-tagl', main ? 70 : 40, 'down', 3, main ? 8 : 17);
+    c.tag = mkLabel('of-tagl', main ? 70 : 40, 'down', 3, main ? 0 : 17);
     c.bal = mkLabel('of-ball', main ? 60 : 30, 'up', 6, main ? 0 : 22);
+    c.tag.agent = true;
+    c.tag.charId = id;
     c.tag.el.dataset.id = id;
     c.bal.el.dataset.id = id;
     return c;
@@ -1954,36 +1944,28 @@ export function createOfis(root, ctx) {
     return `<div class="of-bal${sm}" style="--c:${catColor(cat)}">${icon(cat)}</div>`;
   }
 
-  const clipTxt = (s, n) => { s = String(s || ''); return s.length > n ? s.slice(0, n - 1) + '…' : s; };
-
   function refreshLabels() {
     const t = store.now();
     for (const room of world.rooms.values()) {
       const a = store.agents.get(room.id);
       if (!a) continue;
       const st = a.status;
-      const wait = st === 'waiting' || st === 'ask';
       // 3D wall sign: redrawn only when its content changes
       const key = [a.project, a.title, a.name, a.color, st, room.overflow].join('|');
       if (room.signCv && room.signKey !== key) { room.signKey = key; drawSign(room, a); }
       if (room.signFace) room.signFace.color.set(st === 'dormant' ? '#9aa0ab' : '#ffffff');
-      // from far away the wall text is unreadable, so a plain HTML fallback sign appears instead
-      let L = signs.get(room.id);
-      if (!L) { L = mkLabel('of-signl', 90, 'mid', 0); L.maxZoom = SIGN_HTML_BELOW; signs.set(room.id, L); }
-      if (room.signPos) L.pos.copy(room.signPos);
-      const chip = wait ? `<span class="of-chip w">${esc(msg(st === 'ask' ? 'of.chipAsk' : 'of.chipWait'))} · ${fmtShort(t - a.since)}</span>` : '';
-      setLabel(L, `<div class="of-sign ${st}"><div class="r1"><span class="sw" style="background:${esc(a.color)}"></span><b>${esc(a.project)}</b>${chip}</div></div>`, room.id, wait ? 95 : 90);
+      // the HTML fallback sign for the far zoom is gone: the label under the main agent carries the project and the chip at every zoom (office-labels.js)
     }
     for (const c of chars.values()) {
       const a = store.agents.get(c.id);
       if (!a) continue;
       const wait = c.main && (a.status === 'waiting' || a.status === 'ask');
-      const txt = c.main ? a.name || a.project : shortDesc(a);
-      const doing = c.main && a.status === 'working' && a.doing
-        ? `<span class="of-doing">${esc(a.doing.n)} · ${esc(clipTxt(a.doing.l, 46))}</span>` : '';
-      const say = c.main && a.say
-        ? `<span class="of-say ${a.say.dir}">${a.say.dir === 'in' ? '← ' : '→ '}${esc(clipTxt(a.say.text, 56))}</span>` : '';
-      setLabel(c.tag, `<div class="of-tag ${c.main ? 'chef' : ''} ${a.status}${doing || say ? ' more' : ''}">${esc(txt)}${doing}${say}</div>`);
+      // the same text as the pixel scene's label (office-labels.js), with the "what it does" line for sub-agents too
+      const room = c.main ? world.rooms.get(c.id) : null;
+      const parts = labelParts(a, { main: c.main, overflow: room ? room.overflow || 0 : 0, activity: true });
+      setLabel(c.tag, `<div class="px-l ${c.main ? 'px-main' : 'px-sub'} ${a.status}">${labelHtml(parts, { now: t, p: 'px' })}</div>`);
+      c.tag.force = c.main;
+      c.tag.rank = c.main ? (wait ? 120 : 100) : 10;      // as in the pixel scene: the chats that wait for you first, then the other main agents, then the sub-agents
       const bh = balloonHtml(a, c);
       setLabel(c.bal, bh, undefined, wait ? 100 : c.main ? 60 : a.status === 'done' ? 50 : 30);
       c.bal.want = !!bh;

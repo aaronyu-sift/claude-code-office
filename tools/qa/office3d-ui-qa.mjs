@@ -2,7 +2,7 @@
 // docs/motion.md, and the glass bar over a scene that spans the whole view. The same interface as the pixel scene has (pixel-qa.mjs checks 15, 16, 20 and 21), measured on the real
 // page in headless Chrome with software WebGL (cdp.mjs: a throw-away profile, never the user's Chrome). Prints one `CHECK <name> PASS|FAIL <detail>` line per check and a final
 // `QA PASS` or `QA FAIL`.
-//   node tools/qa/office3d-ui-qa.mjs [--only card|shelf|motion|bar] [--shots <dir>]
+//   node tools/qa/office3d-ui-qa.mjs [--only card|shelf|motion|bar|labels] [--shots <dir>]
 import { mkdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
@@ -598,6 +598,137 @@ if (want('motion')) {
       bad.length ? `FAILED: ${bad.join('; ')}` :
       `tokens equal motion.js (${names.map(n => `${n} ${SPRING[n].duration} s/bounce ${SPRING[n].bounce} = ${SPRING[n].ms} ms`).join(', ')}); the card comes out of its agent (${side} side) on the enter spring: ${inMove.duration} ms, travel ${SLIDE} px and growth from ${SCALE}, a quarter of the way through the curve it is at ${pts[12].toFixed(2)} and it peaks at ${Math.max(...pts).toFixed(3)}, fade ${inFade.duration} ms; it glides to another agent on the glide spring (${SPRING.glide.ms} ms); the menu pops on the pop spring; the card leaves on the leave spring (${outMove.duration} ms, no bounce) and takes no clicks while it leaves; the details card and the shelf card use the same springs, as does the card of a shelf row; the camera (zoom and the place of the world on the screen, ${v0}) was identical after every one of these; reduced motion: ${fadeOf(inR).duration} ms fade, no travel, no menu pop; console errors ${errorsOf(S.page)}`);
   } catch (e) { check('3d-motion', false, `threw: ${(e && e.message) || e}`); } finally { await S.done(); }
+}
+
+// ---- 3d-labels: every live agent and sub-agent has a label under it with what the pixel scene's label says (a main agent: project with the your-turn chip, chat name, what it does,
+// what it just said; a sub-agent: its short description, and what it does while it works), in the same states; no label overlaps another, lies outside the view or sits under the
+// card, the shelf card or the zoom buttons; the main agents keep their label at every zoom (there is no fallback sign any more)
+if (want('labels')) {
+  const S = await scenario3d(6, { tag: 'labels', query: '?shelf=10', fixture: { closed: 12 } });
+  try {
+    const T = tools(S);
+    const bad = [], rows = [];
+    if (!S.ready) throw new Error('the scene did not become ready');
+    const clip = (str, n) => (String(str || '').length > n ? String(str).slice(0, n - 1) + '…' : String(str || ''));
+    // what the page has now: the live agents with a character in the scene, from the server's own list (not from the code under test)
+    const live = async () => {
+      const all = await apiAgents(S.srv.port), mains = all.filter(a => a.kind === 'main' && a.status !== 'dormant');
+      const subs = all.filter(a => a.kind === 'sub' && mains.some(m => m.id === a.parent));
+      const withChar = [];
+      for (const a of [...mains, ...subs]) if (await T.O(`o.charScreen(${JSON.stringify(a.id)})`)) withChar.push(a);
+      return withChar;
+    };
+    const labelsNow = () => T.ev(`(() => JSON.stringify([...document.querySelectorAll('#view-ofis .of-l.of-tagl[data-id]')].map(el => {
+      const r = el.getBoundingClientRect(), cs = getComputedStyle(el), px = el.querySelector('.px-l'), norm = e => e ? e.textContent.replace(/\\s+/g, ' ').trim() : '';
+      return { id: el.dataset.id, shown: cs.visibility === 'visible', x: r.left, y: r.top, w: r.width, h: r.height, text: norm(el), cls: px ? px.className : '', proj: norm(el.querySelector('.px-proj')), name: norm(el.querySelector('.px-name')),
+        chip: norm(el.querySelector('.of-chip.w')), doing: norm(el.querySelector('.px-doing')), say: norm(el.querySelector('.px-say')), since: !!el.querySelector('.of-chip.w [data-since]'), sw: !!el.querySelector('.sw') };
+    })))()`).then(JSON.parse);
+    const blockedNow = () => T.O('u.blocked()');
+    const area = await T.rectOf('.of-area');
+    const inView = l => l.x >= -0.5 && l.y >= -0.5 && l.x + l.w <= area.w + 0.5 && l.y + l.h <= area.h + 0.5;
+    const stateChecks = (all, labs, where) => {          // the text and state of each label against the agent's own data
+      for (const a of all) {
+        const L = labs.find(l => l.id === a.id);
+        if (!L) { bad.push(`${where}: ${a.kind} ${a.id} (${a.status}) has no label`); continue; }
+        if (!L.shown) { bad.push(`${where}: the label of ${a.kind} ${a.id} (${a.status}) is not shown`); continue; }
+        if (!L.cls.split(/\s+/).includes(a.status) || !L.cls.split(/\s+/).includes(a.kind === 'main' ? 'px-main' : 'px-sub')) bad.push(`${where}: ${a.kind} ${a.id} label classes "${L.cls}" for status ${a.status}`);
+        if (!L.sw) bad.push(`${where}: ${a.id} has no colour swatch`);
+        const doing = a.status === 'working' && a.doing ? `${a.doing.n} · ${clip(a.doing.l, 46)}` : '';
+        if (a.kind === 'main') {
+          const name = a.name || a.title || a.project;
+          if (L.proj !== a.project) bad.push(`${where}: main ${a.id} project "${L.proj}" instead of "${a.project}"`);
+          if (L.name !== name) bad.push(`${where}: main ${a.id} name "${L.name}" instead of "${name}"`);
+          const wait = a.status === 'waiting' ? 'Your turn' : a.status === 'ask' ? 'Needs answer' : '';
+          if (wait ? !(L.chip.startsWith(wait + ' · ') && L.since) : L.chip) bad.push(`${where}: main ${a.id} (${a.status}) chip "${L.chip}"`);
+          if (L.doing !== doing) bad.push(`${where}: main ${a.id} doing "${L.doing}" instead of "${doing}"`);
+          if (a.say ? !L.say.endsWith(clip(a.say.text, 56)) : L.say) bad.push(`${where}: main ${a.id} say "${L.say}"`);
+        } else {
+          const desc = String(a.desc || a.atype || 'Subagent').trim().replace(/\s+/g, ' ');
+          const first = desc.split(' ')[0];
+          if (!L.text.startsWith(first) || L.text.length > 18 + doing.length + 4) bad.push(`${where}: sub ${a.id} text "${L.text}" for description "${desc}"`);
+          if (L.doing !== doing) bad.push(`${where}: sub ${a.id} (${a.status}) doing "${L.doing}" instead of "${doing}"`);
+          if (L.chip || L.say) bad.push(`${where}: sub ${a.id} shows a chip or a say line`);
+        }
+      }
+    };
+    const layoutChecks = (labs, blocked, where) => {      // no label overlaps another, leaves the view or lies under what floats over the scene
+      const shown = labs.filter(l => l.shown);
+      for (let i = 0; i < shown.length; i++) for (let j = i + 1; j < shown.length; j++) if (hit(shown[i], shown[j])) bad.push(`${where}: labels of ${shown[i].id} and ${shown[j].id} overlap`);
+      for (const l of shown) {
+        if (!inView(l)) bad.push(`${where}: the label of ${l.id} leaves the view (${l.x.toFixed(0)},${l.y.toFixed(0)} ${l.w.toFixed(0)}x${l.h.toFixed(0)} in ${area.w.toFixed(0)}x${area.h.toFixed(0)})`);
+        const under = blocked.filter(b => hit(l, b));
+        if (under.length) bad.push(`${where}: the label of ${l.id} lies under the card, the shelf or the buttons`);
+      }
+    };
+
+    // 1. every live agent and sub-agent at "fit", card closed
+    await until(async () => { const l = await labelsNow(); return l.length >= (await live()).length && l.every(x => x.shown); }, 6000, 300);
+    const all = await live(), mains = all.filter(a => a.kind === 'main'), subs = all.filter(a => a.kind === 'sub');
+    const subsWorking = subs.filter(a => a.status === 'working' && a.doing), subsDone = subs.filter(a => a.status !== 'working');
+    if (mains.length < 4 || subsWorking.length < 2 || !mains.some(a => a.status === 'waiting' || a.status === 'ask') || !mains.some(a => a.status === 'working' && a.doing)) bad.push(`the fixture lacks the cases: ${mains.length} mains, ${subsWorking.length} working sub-agents`);
+    let labs = await labelsNow();
+    stateChecks(all, labs, 'fit');
+    layoutChecks(labs, await blockedNow(), 'fit');
+    if (await T.ev(`document.querySelectorAll('#view-ofis .of-signl, #view-ofis .of-sign').length`)) bad.push('an HTML fallback sign is still in the page');
+    rows.push(`at fit: ${mains.length} main agents (${mains.filter(a => a.status === 'waiting' || a.status === 'ask').length} waiting for you) and ${subs.length} sub-agents (${subsWorking.length} working with a doing line, ${subsDone.length} not) all with a shown label of the right text and state; ${labs.filter(l => l.shown).length} labels shown, ${(await blockedNow()).length} blocked areas, none overlapping`);
+
+    // 2. a card open beside an agent: no label under it, and the labels that are not near it stay
+    const target = mains.find(a => a.status === 'working') || mains[0];
+    const o = await T.openAgent(target.id);
+    if (!o) bad.push('the card did not open on ' + target.id);
+    await T.settle();
+    await S.page.mouse.move(8, 880);
+    await sleep(500);
+    const c = await T.card();
+    labs = await labelsNow();
+    const blocked = await blockedNow();
+    if (!c.open || !blocked.some(b => Math.abs(b.x - c.rect.x) < 2 && Math.abs(b.y - c.rect.y) < 2)) bad.push('the card is not among the blocked areas');
+    layoutChecks(labs, blocked, 'card open');
+    const shownCard = labs.filter(l => l.shown);
+    for (const l of shownCard) if (c.open && hit(l, c.rect)) bad.push(`card open: the label of ${l.id} overlaps the card`);
+    if (shownCard.length < Math.ceil(all.length / 3)) bad.push(`card open: only ${shownCard.length} of ${all.length} labels are shown`);
+    // the hidden ones are only those that would lie under the card: they come back when it closes
+    await T.closeCard();
+    await T.settle();
+    await until(async () => (await labelsNow()).filter(l => l.shown).length === all.length, 4000, 200);
+    labs = await labelsNow();
+    if (labs.filter(l => l.shown).length !== all.length) bad.push(`after the card closed ${labs.filter(l => l.shown).length} of ${all.length} labels are shown`);
+    rows.push(`with the card open on ${target.id.slice(0, 8)}: ${shownCard.length} of ${all.length} labels shown, none overlapping the card (${c.rect.w.toFixed(0)}x${c.rect.h.toFixed(0)}), the rest back after it closed`);
+
+    // 3. zoomed out as far as it goes: every main agent keeps its label (the fallback sign is gone), none lies under the shelf card or the buttons
+    const zoom0 = await T.O('o.zoom');
+    for (let i = 0; i < 30 && !(await T.ev(`document.querySelector('.of-ctl [data-z="out"]').disabled`)); i++) { await T.click('.of-ctl [data-z="out"]'); await sleep(150); }
+    await sleep(800);
+    const zoomMin = await T.O('o.zoom');
+    labs = await labelsNow();
+    for (const a of mains) { const l = labs.find(x => x.id === a.id); if (!l || !l.shown) bad.push(`zoomed out (${zoomMin.toFixed(1)}): main ${a.id} has no shown label`); }
+    const blockedFar = await blockedNow();
+    for (const l of labs.filter(x => x.shown)) if (blockedFar.some(b => hit(l, b))) bad.push(`zoomed out: the label of ${l.id} lies under the shelf or the buttons`);
+    rows.push(`zoomed out from ${zoom0.toFixed(1)} to ${zoomMin.toFixed(1)}: ${mains.filter(a => labs.find(x => x.id === a.id && x.shown)).length} of ${mains.length} main labels shown, ${labs.filter(l => l.shown && subs.some(a => a.id === l.id)).length} of ${subs.length} sub-agent labels`);
+
+    // 4. a sub-agent's label sits near its agent: within the reach the scene allows
+    await T.click('.of-ctl [data-z="fit"]');
+    await sleep(900);
+    labs = await labelsNow();
+    let farthest = 0;
+    for (const a of subs) {
+      const l = labs.find(x => x.id === a.id), box = await T.O(`u.agentBox(${JSON.stringify(a.id)})`);
+      if (!l || !l.shown || !box) continue;
+      const dx = Math.max(0, Math.abs(l.x + l.w / 2 - box.cx) - (l.w + box.w) / 2), dy = Math.max(0, Math.abs(l.y + l.h / 2 - box.cy) - (l.h + box.h) / 2);
+      farthest = Math.max(farthest, dx, dy);
+      if (Math.max(dx, dy) > 80) bad.push(`sub ${a.id}: its label is ${Math.max(dx, dy).toFixed(0)} px from its agent`);
+    }
+    rows.push(`the farthest sub-agent label is ${farthest.toFixed(0)} px from its agent (limit 80)`);
+
+    // 5. the state follows the agent: a working sub-agent that finishes shows its description in the finished state and no "what it does" line
+    const fin = subsWorking[0];
+    S.fx.finishSub(fin.id);
+    const doneLabel = await until(async () => { const l = (await labelsNow()).find(x => x.id === fin.id); return l && l.shown && l.cls.split(/\s+/).includes('done') ? l : null; }, 10000, 300);
+    if (!doneLabel) bad.push(`the label of the finished sub-agent ${fin.id} did not turn to the done state`);
+    else if (doneLabel.doing) bad.push(`the finished sub-agent ${fin.id} still shows "${doneLabel.doing}"`);
+    else rows.push(`a sub-agent that finished shows "${doneLabel.text}" in the done state without a doing line`);
+    check('3d-labels', bad.length === 0 && errorsOf(S.page) === 0, bad.length ? `FAILED: ${bad.slice(0, 8).join('; ')}${bad.length > 8 ? `; and ${bad.length - 8} more` : ''}` : `${rows.join('; ')}; console errors ${errorsOf(S.page)}`);
+  } catch (e) { check('3d-labels', false, `threw: ${(e && e.message) || e}`); } finally { await S.done(); }
 }
 
 // ---- --shots <dir>: pictures for a look by eye (the card beside an agent, the shelf and the buttons at 1024 and 1500 px, folded, narrow, the side card, the selection ring close up)

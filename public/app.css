@@ -756,6 +756,9 @@ main { flex: 1; min-height: 0; position: relative; }
 .px-l.dormant, .px-l.stale { opacity: .72; }
 .px-l.px-sub { max-width: 150px; padding: 1px 6px 2px; font-size: 10.5px; font-weight: 500; border-left-width: 0; }
 .px-l.px-sub.done { color: var(--ok); }
+/* the three.js scene puts the same label (office-labels.js) inside its own positioned element: the box is part of the flow there, and a sub-agent's "what it does" line may be wider than its description */
+.view-ofis[data-scene="3d"] .of-l > .px-l { position: relative; left: auto; top: auto; }
+.view-ofis[data-scene="3d"] .px-l.px-sub { max-width: 170px; }
 
 @media (max-width: 640px) {
   .of-hud { left: 8px; top: calc(var(--top-h, 72px) + 4px); right: 52px; }
