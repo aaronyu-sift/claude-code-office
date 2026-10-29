@@ -46,8 +46,8 @@ export function progressBarEl(progress, { now = Date.now(), text = true } = {}) 
     const { item, kind } = cur;
     const row = el('div', 'cco-prog-now');
     row.dataset.kind = kind;
-    row.append(el('span', 'k', msg(kind === 'doing' ? 'progress.now' : 'progress.next')));
-    if (item.id) row.append(el('b', 'id', item.id));
+    row.append(el('span', 'k', msg(kind === 'doing' ? 'progress.now' : 'progress.next')), ' ');          // (the spaces only matter to copy and paste and to a screen reader)
+    if (item.id) row.append(el('b', 'id', item.id), ' ');
     const title = el('span', 't', item.title || '');
     if (item.title) title.title = item.title;
     row.append(title);
@@ -56,7 +56,7 @@ export function progressBarEl(progress, { now = Date.now(), text = true } = {}) 
       const clock = el('span', 'el', fmtShort(ran));
       clock.dataset.since = String(toMs(item.doingSince));
       clock.dataset.fmt = 'short';
-      row.append(clock);
+      row.append(' ', clock);
     }
     root.append(row);
   }
