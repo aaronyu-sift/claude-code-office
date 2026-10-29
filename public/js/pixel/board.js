@@ -9,7 +9,8 @@
 //
 // Pointer: a board takes no pointer events (the scene's own picking asks `hit`): a click on it is a click on the room's main agent, a drag still pans, the wheel
 // still zooms. It gives way to labels: it is hidden while it would touch a label of an agent (labels are placed first, `place` gets their rectangles).
-// Motion (docs/motion.md, kind "surface that only fades"): it fades in and out with its room, nothing travels or scales; under reduced motion the fade is shorter.
+// Motion (docs/motion.md): it fades in and out with its room (opacity and visibility, the token duration), nothing travels or scales; with prefers-reduced-motion the
+// page's own rule removes every transition, so it simply appears and disappears.
 //
 // Pure parts (tested without a browser): boardFonts, boardFrame, frameCorners, frameStrips, frameHit, quadHitsRect.
 import { esc } from '../util.js';
