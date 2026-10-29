@@ -15,6 +15,7 @@ import { resolveWeather, planFor, createField, drawRainbow, rainbowFor, PARTICLE
 import { createLabelLayer, placeLabels } from './labels.js';
 import { shelfEntries, isShelved } from './shelf.js';
 import { createShelfView } from './shelf-view.js';
+import { createBoardLayer } from './board.js';
 import { createAgentCard } from './card.js';
 import { ZOOMS, fitZoom, minZoom, stepZoom, centerPan, clampPan, zoomAbout } from './input.js';
 
@@ -203,6 +204,7 @@ export function createPixelOffice(root, ctx, opts = {}) {
     else if (key === 'hemisphere') { updateSeason(); applyTime(nowClock(), true); }
     else if (key === 'weather') updateWeather();
     else if (key === 'shelf') shelf.setMax(v);
+    else if (key === 'project') { boards.setProject(v === 'on'); root.dataset.project = v; for (const id of labels.ids()) labels.get(id).dirty = true; labelsDirty = true; }
     redraw(false);
     return true;
   }
@@ -346,6 +348,13 @@ export function createPixelOffice(root, ctx, opts = {}) {
     setSource('ambient', actors.some(a => a.status !== 'dormant' && a.status !== 'stale'));
   }
 
+  // ---------------------------------------------------------- room boards
+  // A plate on top of each room's back wall: the chat name big and, when the setting `project` is on, the project folder small at its bottom right (board.js).
+  // The labels keep clear of the boards where they can and a board that a label still touches is not shown; a click on a board is a click on the room's main
+  // agent (`pickAt`). The same setting decides whether a label shows the project folder (CSS on `data-project`).
+  const boards = createBoardLayer(layer, { msg, project: settings.project === 'on' });
+  root.dataset.project = settings.project;
+
   // ---------------------------------------------------------- labels
   function mainLabel(room, a) {
     const wait = a.status === 'waiting' || a.status === 'ask';
@@ -372,6 +381,7 @@ export function createPixelOffice(root, ctx, opts = {}) {
       labels.set(id, `<span class="sw" style="background:${esc(a.color)}"></span>${esc(shortDesc(a))}`, `px-sub ${a.status}`, { room, slot: s.slot, main: false });
     }
     for (const id of labels.ids()) if (!live.has(id)) labels.drop(id);
+    boards.sync(layout.rooms.filter(r => store.agents.has(r.id)).map(r => { const a = store.agents.get(r.id); return { id: r.id, name: a.name, title: a.title, project: a.project, color: a.color, status: a.status, overflow: r.overflow }; }));
     labelsDirty = true;
   }
   function placeLabelsNow() {
@@ -402,11 +412,16 @@ export function createPixelOffice(root, ctx, opts = {}) {
       const w = Math.max(f.w * zoom / dpr, MIN_TARGET), h = Math.max(f.h * zoom / dpr, MIN_TARGET);
       obstacles.push({ x: (f.cx * zoom + panX) / dpr - w / 2, y: (f.cy * zoom + panY) / dpr - h / 2, w, h });
     }
+    const board = { rooms: layout.rooms, proj, at: (x, y, z) => { const [vx, vy] = scene.toVirtual(x, y, z); return [(vx * zoom + panX) / dpr, (vy * zoom + panY) / dpr]; }, scale: zoom / dpr, view: { w: vw, h: vh } };
+    obstacles.push(...boards.layout(board));                         // the labels keep clear of the boards where they can
     const res = placeLabels(items, vw, vh, 6, 3, obstacles);
     for (const [id, L] of by) {
       const p = res.get(id);
       if (p && (p.ok || L.extra.main)) labels.show(L, p.x, p.y); else labels.hide(L);
     }
+    const avoid = [];                                                // a board that a label could not keep clear of is not shown
+    for (const [id, L] of by) { const p = res.get(id); if (p && L.shown) avoid.push({ x: p.x, y: p.y, w: L.w, h: L.h }); }
+    boards.settle(avoid);
   }
 
   // ---------------------------------------------------------- summary
@@ -497,6 +512,8 @@ export function createPixelOffice(root, ctx, opts = {}) {
     const [vx, vy] = toVirtual(cx, cy);
     const hit = scene.pick(vx, vy, (MIN_TARGET / 2) * view.dpr / view.zoom);
     if (hit) return { t: 'agent', id: hit.id };
+    const onBoard = boards.hit(cx, cy);                               // a board stands for its room's main agent
+    if (onBoard) return { t: 'agent', id: onBoard };
     const room = scene.roomAt(vx, vy);
     return room ? { t: 'room', id: room } : null;
   }
