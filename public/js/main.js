@@ -175,12 +175,19 @@ function createOffice(root) {
   const settings = createOfficeSettings({ overrides: officeQuery(location.search) });
   const atmosphere = createAtmosphere({ settings });              // the clock, season and weather of the surroundings (time of day: ofis-env.js)
   root.__office = { settings, atmosphere };                       // read-only state for QA (tools/qa/office3d-env-qa.mjs)
-  let real = null, visible = false;
-  import('./ofis.js').then(m => { real = m.createOfis(root, ctx, { settings, atmosphere }); if (visible) real.show(); })
+  let real = null, weather = null, visible = false;
+  // the weather is a canvas over the 3D canvas (ofis-weather.js), loaded with the scene
+  Promise.all([import('./ofis.js'), import('./ofis-weather.js')])
+    .then(([m, w]) => {
+      real = m.createOfis(root, ctx, { settings, atmosphere });
+      const stage = root.querySelector('.of-stage');
+      if (stage) weather = root.__office.weather = w.createOfisWeather({ stage, atmosphere, visible });
+      if (visible) real.show();
+    })
     .catch(e => { console.error('[ofis]', e); root.innerHTML = `<div class="empty">${esc(msg('view.failed'))}<br><span class="faint mono">${esc(e && e.message || e)}</span></div>`; });
   return (sceneSettings = {
-    show() { visible = true; if (real) real.show(); },
-    hide() { visible = false; if (real) real.hide(); },
+    show() { visible = true; if (real) real.show(); if (weather) weather.setVisible(true); },
+    hide() { visible = false; if (real) real.hide(); if (weather) weather.setVisible(false); },
     update(...a) { if (real) real.update(...a); },
     settingRows: OFFICE3D_ROWS,
     get settings() { return settings.get(); },
