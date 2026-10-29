@@ -117,8 +117,15 @@ The Office view draws a pixel-art scene: voxel models written as code in [`tools
 |---|---|
 | `?proj=iso` or `?proj=front` | The view: isometric (default) or front three-quarter. The toggle in the header does the same and the choice is remembered in the browser; the URL wins over the remembered choice. |
 | `?time=HH:MM` | Pin the time of day (for example `?time=22:00`) instead of following the browser's local clock. |
+| `?season=spring`, `summer`, `autumn` or `winter` | Show that season instead of the one that matches today's date. |
+| `?weather=clear`, `cloudy`, `rain`, `snow` or `fog` (also `auto`, `off`) | Turn the weather on. It is off by default; `auto` picks the weather of the day from the date and the season. |
+| `?hemisphere=south` | Seasons (and the length of the days) for the southern hemisphere; north is the default. |
 | `?gallery=1` | List every sprite of the atlas with its id. Add `&proj=front` for the other atlas. |
 | `?scene=3d` | The original three.js office. |
+
+**Time, seasons and weather.** The light follows the browser's local clock: a tint over the rooms and the garden, a sky behind the island, and lit windows, lamps and monitors after dark; the agents and their labels stay readable at every hour. The seasons follow the date (and the hemisphere): spring blossom, summer green, autumn leaves, winter snow with bare trees, a snowman, pumpkins, a bird bath and a pile of leaves; they are baked into the atlas as `<id>@spring`, `@autumn` and `@winter` sprites (summer is the plain sprite), nothing is recoloured while it runs. The weather is optional and **off by default**: clear, cloudy, rain, snow and fog, or `auto`, which picks a weather for the day from a seeded hash of the date and the season (the same day always gives the same weather; nothing is fetched from anywhere). It lives on one overlay canvas with at most 120 particles, drawn at most 10 times a second, never while the page is hidden, and not at all with `prefers-reduced-motion`; with it on, clear days bring petals in spring, falling leaves in autumn, a few flakes in winter and fireflies on summer nights, and a clear day after rain sometimes has a rainbow. Butterflies and birds by day are part of the garden in every setting.
+
+**Settings.** The sliders button in the header (Office view) opens a small popover: camera, time of day (automatic, or fixed with a slider), season (automatic or fixed), hemisphere and weather. Changes apply at once without a reload and are remembered in the browser. A URL option beats what is remembered for that visit and is not remembered itself; changing the same setting in the popover while the URL has it also updates the URL.
 
 **Look and controls.** The scene scales in whole-number steps (no blur): `+`, `-`, the mouse wheel and pinch zoom; drag to pan; the fit button or a double click shows everything. Click an agent or its label for the drawer. Rooms keep their place when agents come and go, and the theme of a room (library, lounge, lab, studio) follows its project.
 
@@ -132,9 +139,9 @@ node tools/sprites/build-atlas.mjs --proj iso --check    # fails if the committe
 npm run sprites:table                                # the content lists of the plan against the manifest
 ```
 
-The models are in `tools/sprites/` (`models.mjs`, `props.mjs`, `decor.mjs`; `catalog.mjs` lists every sprite); [`tools/sprites/README.md`](tools/sprites/README.md) has the details.
+The models are in `tools/sprites/` (`models.mjs`, `props.mjs`, `decor.mjs`; `catalog.mjs` lists every sprite; `seasons.mjs` makes the seasonal variants out of the same models with another palette, snow caps, bare branches and the four seasonal props); [`tools/sprites/README.md`](tools/sprites/README.md) has the details.
 
-**Tests.** `npm test` runs the unit tests (projections, layout in both views, depth order, labels, scheduler, time of day, manifest). `node tools/qa/pixel-qa.mjs --proj iso` (or `--proj front`) starts the server against a fake `~/.claude`, drives headless Chrome in a throw-away profile and prints one `CHECK … PASS|FAIL` line per check (occlusion, click targets, labels, frame budget, idle, time of day, gallery, projection toggle) and a final `QA PASS` or `QA FAIL`. `--shots <dir>` also writes screenshots. The plan, its decisions and the deviations are in [docs/pixel-scene-plan.md](docs/pixel-scene-plan.md).
+**Tests.** `npm test` runs the unit tests (projections, layout in both views, depth order, labels, scheduler, time of day, seasons, weather, settings, manifest). `node tools/qa/pixel-qa.mjs --proj iso` (or `--proj front`) starts the server against a fake `~/.claude`, drives headless Chrome in a throw-away profile and prints one `CHECK … PASS|FAIL` line per check (occlusion, click targets, labels, frame budget, idle, time of day, seasons, weather, settings, gallery, projection toggle) and a final `QA PASS` or `QA FAIL`. The checks run in one fixed season (`--season summer` by default, `--season auto` follows the date) so the date they run on does not matter. `--shots <dir> --set m4` also writes the screenshots of the seasons, the weather and the times of day. The plan, its decisions and the deviations are in [docs/pixel-scene-plan.md](docs/pixel-scene-plan.md).
 
 ## About the cost numbers
 
