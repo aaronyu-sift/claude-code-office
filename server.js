@@ -762,6 +762,7 @@ const TYPES = {
   '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.mjs': 'text/javascript; charset=utf-8',
   '.css': 'text/css; charset=utf-8', '.json': 'application/json; charset=utf-8', '.svg': 'image/svg+xml',
   '.png': 'image/png', '.jpg': 'image/jpeg', '.webp': 'image/webp', '.ico': 'image/x-icon', '.woff2': 'font/woff2',
+  '.glb': 'model/gltf-binary', '.txt': 'text/plain; charset=utf-8',
 };
 const json = (res, body) => {
   res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store' });
@@ -800,13 +801,21 @@ function handler(req, res, next) {
   try { p = url.pathname === '/' ? '/index.html' : decodeURIComponent(url.pathname); } catch { res.writeHead(400); return res.end(); }
   const file = path.normalize(path.join(PUBLIC, p));
   if (!file.startsWith(PUBLIC + path.sep)) { res.writeHead(403); return res.end(); }
-  fs.readFile(file, (err, buf) => {
+  const serveFile = etag => fs.readFile(file, (err, buf) => {
     if (err) {
       if (typeof next === 'function') return next();
       res.writeHead(404); return res.end('not found');
     }
-    res.writeHead(200, { 'Content-Type': TYPES[path.extname(file)] || 'application/octet-stream', 'Cache-Control': 'no-store' });
+    res.writeHead(200, { 'Content-Type': TYPES[path.extname(file)] || 'application/octet-stream', ...(etag ? { 'Cache-Control': 'public, max-age=3600', ETag: etag } : { 'Cache-Control': 'no-store' }) });
     res.end(buf);
+  });
+  // The 3D scene's models (public/models, about 1.5 MB) are the one thing worth keeping in the browser: an hour without asking, then an ETag.
+  if (!p.startsWith('/models/')) return serveFile(null);
+  fs.stat(file, (err, st) => {
+    if (err || !st.isFile()) return serveFile(null);
+    const etag = `W/"${st.size.toString(16)}-${Math.floor(st.mtimeMs).toString(16)}"`;
+    if (req.headers['if-none-match'] === etag) { res.writeHead(304, { 'Cache-Control': 'public, max-age=3600', ETag: etag }); return res.end(); }
+    serveFile(etag);
   });
 }
 

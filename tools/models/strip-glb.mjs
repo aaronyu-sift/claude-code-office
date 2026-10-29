@@ -31,6 +31,17 @@ export function readGlb(buf) {
   return { json, bin };
 }
 
+// The values of one accessor as { data: flat array, size: components per element } (floats, and unsigned bytes, shorts and ints as they are)
+const COMPONENT = { 5120: ['getInt8', 1], 5121: ['getUint8', 1], 5122: ['getInt16', 2], 5123: ['getUint16', 2], 5125: ['getUint32', 4], 5126: ['getFloat32', 4] };
+const SIZE = { SCALAR: 1, VEC2: 2, VEC3: 3, VEC4: 4, MAT2: 4, MAT3: 9, MAT4: 16 };
+export function readAccessor(json, bin, index) {
+  const a = json.accessors[index], v = json.bufferViews[a.bufferView], size = SIZE[a.type], [get, bytes] = COMPONENT[a.componentType];
+  const stride = v.byteStride || size * bytes, base = (v.byteOffset || 0) + (a.byteOffset || 0);
+  const dv = new DataView(bin.buffer, bin.byteOffset, bin.length), data = new Array(a.count * size);
+  for (let k = 0; k < a.count; k++) for (let c = 0; c < size; c++) data[k * size + c] = dv[get](base + k * stride + c * bytes, true);
+  return { data, size };
+}
+
 export function writeGlb({ json, bin }) {
   let js = Buffer.from(JSON.stringify(json), 'utf8');
   js = Buffer.concat([js, Buffer.alloc(pad4(js.length) - js.length, 0x20)]);
