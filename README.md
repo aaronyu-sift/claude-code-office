@@ -20,7 +20,8 @@ That's it: the server starts on <http://127.0.0.1:7321> and your browser opens. 
 
 > **About this fork.** This is a fork of [azorkai/claude-code-office](https://github.com/azorkai/claude-code-office) (MIT) with these additions:
 > an optional [agent chat bridge](#agent-chat-bridge-optional), optional [Vertex AI pricing](#pricing-like-a-vertex-ai-bill-optional) for the cost tab (and each message id counted once across transcript files),
-> the current tool and its description on the avatar tag, an "Open in VS Code" link in the session drawer, and English fallback labels for tool events.
+> the current tool and its description on the avatar tag, an "Open in VS Code" link in the session drawer, English fallback labels for tool events,
+> and a [pixel-art Office view](#pixel-office) (isometric and front views, time of day, a sprite gallery) that replaces the 3D scene as the default; the 3D scene stays available at `?scene=3d`.
 > Run it with `npx github:aaronyu-sift/claude-code-office`. Everything below is the upstream README, extended where the fork differs.
 
 ---
@@ -38,7 +39,11 @@ Claude Code Office answers those questions live, from the data Claude Code alrea
 ## Features
 
 - **"Your turn" radar.** Sessions that finished and are waiting for you are pulled to the front, highlighted in amber and counted in the header and the tab title. An optional chime and desktop notification play when an agent hands the turn back.
-- **3D isometric office.** It is a tycoon-game style building on a little diorama island, with streets, a river, trees and mountains. Every session is a room with its project name on the wall.
+- **Pixel-art office** (the default Office view, see [Pixel office](#pixel-office)). Every session is a themed room on a garden island, drawn from pre-rendered voxel sprites on a 2D canvas, in an isometric or a front three-quarter view.
+  - Your full chat name hangs over each lead agent; a thought bubble shows the tool in use; a beam of light and a "!" balloon mark the agent that waits for you.
+  - Day and night follow your local clock: tinted light, a sky, lit windows, lamps and monitors after dark.
+  - Only small things move (steam, plants, butterflies, birds), at most 10 frames per second, nothing while the tab is hidden.
+- **3D isometric office** (`?scene=3d`, the original scene). It is a tycoon-game style building on a little diorama island, with streets, a river, trees and mountains. Every session is a room with its project name on the wall.
   - The lead agent sits at the big desk; subagents work at the other desks.
   - Monitors glow in the color of the current activity: thinking, shell, reading, editing, web/MCP or delegating.
   - New subagents walk in through the hall and leave when they finish. Idle rooms dim, and waiting rooms light up.
@@ -101,6 +106,35 @@ npm start            # or double-click start-windows.bat  (macOS/Linux: ./start-
 | `…/<sessionId>/subagents/agent-*.jsonl` + `.meta.json` | Every subagent's own transcript, type and task description |
 
 The server tails these files once per second. It reads only the last few MB of long transcripts on first start, then only the new bytes. It turns the records into agent states and events, and streams them to the browser over Server-Sent Events. Nothing is uploaded anywhere.
+
+## Pixel office
+
+The Office view draws a pixel-art scene: voxel models written as code in [`tools/sprites/`](tools/sprites/) are rendered once into sprite atlases (`public/pixel/atlas-iso.png`, `atlas-front.png`, with `manifest.json`), and the browser draws them on a 2D canvas. No 3D, no runtime dependencies, no build step for the app.
+
+**Options** (URL query, for the Office view):
+
+| Option | Effect |
+|---|---|
+| `?proj=iso` or `?proj=front` | The view: isometric (default) or front three-quarter. The toggle in the header does the same and the choice is remembered in the browser; the URL wins over the remembered choice. |
+| `?time=HH:MM` | Pin the time of day (for example `?time=22:00`) instead of following the browser's local clock. |
+| `?gallery=1` | List every sprite of the atlas with its id. Add `&proj=front` for the other atlas. |
+| `?scene=3d` | The original three.js office. |
+
+**Look and controls.** The scene scales in whole-number steps (no blur): `+`, `-`, the mouse wheel and pinch zoom; drag to pan; the fit button or a double click shows everything. Click an agent or its label for the drawer. Rooms keep their place when agents come and go, and the theme of a room (library, lounge, lab, studio) follows its project.
+
+**Regenerating the art.** The atlases are committed, so this is only needed after changing a model. You need [bun](https://bun.sh) and the pinned VoxPix renderer (MIT, see [THIRD_PARTY.md](THIRD_PARTY.md)):
+
+```bash
+git clone https://github.com/andyeswong/voxpix .tools/voxpix && git -C .tools/voxpix checkout c8e9843   # pinned, git-ignored
+node tools/sprites/build-atlas.mjs --proj iso       # writes public/pixel/atlas-iso.png, manifest.json, public/js/pixel/footprints.js
+node tools/sprites/build-atlas.mjs --proj front
+node tools/sprites/build-atlas.mjs --proj iso --check    # fails if the committed files differ from a fresh render (also --proj front)
+npm run sprites:table                                # the content lists of the plan against the manifest
+```
+
+The models are in `tools/sprites/` (`models.mjs`, `props.mjs`, `decor.mjs`; `catalog.mjs` lists every sprite); [`tools/sprites/README.md`](tools/sprites/README.md) has the details.
+
+**Tests.** `npm test` runs the unit tests (projections, layout in both views, depth order, labels, scheduler, time of day, manifest). `node tools/qa/pixel-qa.mjs --proj iso` (or `--proj front`) starts the server against a fake `~/.claude`, drives headless Chrome in a throw-away profile and prints one `CHECK … PASS|FAIL` line per check (occlusion, click targets, labels, frame budget, idle, time of day, gallery, projection toggle) and a final `QA PASS` or `QA FAIL`. `--shots <dir>` also writes screenshots. The plan, its decisions and the deviations are in [docs/pixel-scene-plan.md](docs/pixel-scene-plan.md).
 
 ## About the cost numbers
 
