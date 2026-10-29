@@ -271,11 +271,312 @@ if (want('card')) {
     await T.click('#dw-close');
     await sleep(500);
 
+    // 7. leaving the Office closes the card, and the Office comes back without one
+    await T.openAgent(A.agent.id);
+    await T.ev(`document.querySelector('.top .seg button[data-view="pano"]').click()`);
+    await sleep(800);
+    const awayState = await T.ev(`JSON.stringify({ hidden: document.querySelector('#view-ofis').hidden, cardOpen: document.querySelector('#view-ofis').__ofisUi.card.open })`).then(JSON.parse);
+    await T.ev(`document.querySelector('.top .seg button[data-view="ofis"]').click()`);
+    await sleep(1800);
+    const backState = await T.ev(`JSON.stringify({ hidden: document.querySelector('#view-ofis').hidden, cardOpen: document.querySelector('#view-ofis').__ofisUi.card.open, cardShown: !document.querySelector('.of-card').hidden, chars: document.querySelector('#view-ofis').__ofis.chars, ring: document.querySelector('#view-ofis').__ofis.selection })`).then(JSON.parse);
+    eq('leaving the Office closes the card', [awayState.hidden, awayState.cardOpen], [true, false]);
+    eq('back in the Office: no card, no ring, the scene is alive', [backState.hidden, backState.cardOpen, backState.cardShown, backState.chars >= S.roomed.length, backState.ring], [false, false, false, true, null]);
+
     check('3d-card', bad.length === 0 && errorsOf(S.page) === 0,
       `${bad.length ? 'FAILED: ' + bad.slice(0, 6).join('; ') + '; ' : ''}click on "${A.agent.name.slice(0, 30)}": card on the ${c1s.side} of the agent for the right id, ${a1.gap.toFixed(0)} px from its box, not covering it, inside the window, anchored to the projected figure ${anchored}, glass ${look.bg} ${look.blur} ${look.radius}, no scrim and no drawer; ` +
       `the open agent is marked in the scene (ring at ${sel1 ? sel1.at.map(v => v.toFixed(0)) : '-'}) and unmarked after closing; the map did not move; ` +
       `drag: the agent moved ${moved.toFixed(0)} px and the card ${followed ? 'went with it' : 'DID NOT follow'}; zoom ${z0.toFixed(1)} → ${zoomed ? zoomed.z.toFixed(1) : '?'}: ${zoomed ? `gap ${zoomed.x.gap.toFixed(0)} px, not covering` : 'NOT beside the agent'}; out of the view the card waits (${gone.away}) and returns after fit (${!!back}); ` +
       `another agent moves it ${!!bOpen && !!aOpen}, a label opens its agent ${labelOk}; Esc closes the menu then the card, the cross ${!!afterX}, a click on the empty scene ${!!afterEmpty}; "All details" opens the glass side card (${dcard.w.toFixed(0)} px) ${detailsOk}; the old drawer was never opened by a click on an agent ${!drawerEver}; console errors ${errorsOf(S.page)}`);
+  } finally { await S.done(); }
+}
+
+// ---- 3d-shelf: the shelf card of the asleep and closed chats: rows, the cap with its footer (the button adds ten rows, or what is left), a row opens the card beside it, the zoom buttons right under it in the same
+// column, the folded state with the buttons in the corner, and nothing of the scene (figure or label) under the card or the buttons at 1024 and 1500 px
+if (want('shelf')) {
+  const S = await scenario3d(10, { tag: 'shelf', query: '?shelf=5', fixture: { closed: 12 } });
+  try {
+    const T = tools(S);
+    const bad = [];
+    const short = x => { const t = JSON.stringify(x); return t.length > 110 ? t.slice(0, 110) + '…' : t; };
+    const eq = (what, got, want_) => { if (JSON.stringify(got) !== JSON.stringify(want_)) bad.push(`${what}: ${short(got)} instead of ${short(want_)}`); };
+    if (!S.ready) throw new Error('the scene did not become ready');
+    await T.ev(`document.addEventListener('click', e => { if (e.target.closest && e.target.closest('.of-card a')) e.preventDefault(); }, true)`);
+    const live = S.agents.filter(a => a.kind === 'main'), asleep = live.filter(a => a.status === 'dormant'), waiting = live.filter(a => a.status === 'waiting' || a.status === 'ask');
+    const expected = [...S.fx.closed.map(c => ({ id: c.id, at: c.closedAt, name: c.name, kind: 'closed' })), ...asleep.map(a => ({ id: a.id, at: a.updated || a.since, name: a.name, kind: 'dormant' }))].sort((p, q) => q.at - p.at || (p.id < q.id ? -1 : 1));
+    const TOTAL = expected.length, ids = sh => sh.rows.map(r => r.id).join(), want_ = n => expected.slice(0, n).map(e => e.id).join();
+    await until(async () => (await T.shelf()).total === TOTAL, 15000, 250);
+    const v0 = await T.view();
+
+    // 1. ?shelf=5: exactly the 5 newest, the footer says so and offers ten more; the asleep chat has no room; waiting chats are in their rooms
+    const a = await T.shelf();
+    eq('total', a.total, TOTAL); eq('rows with ?shelf=5', a.rows.length, 5); eq('the rows are the 5 newest by time', ids(a), want_(5)); eq('header', [a.title, a.count], ['Asleep and closed', '5 chats']);
+    eq('footer', [a.foot.hidden, a.foot.text, a.foot.button], [false, `Showing the newest 5 of ${TOTAL}`, `Show ${Math.min(10, TOTAL - 5)} more`]);
+    const inCard = r => r.x >= a.rect.x - 0.5 && r.x + r.w <= a.rect.x + a.rect.w + 0.5 && r.y >= a.rect.y - 0.5 && r.y + r.h <= a.rect.y + a.rect.h + 0.5;
+    const last = a.rows[a.rows.length - 1];
+    if (!inCard(a.foot.rect) || !inCard(a.foot.buttonRect) || a.foot.rect.y < last.rect.y + last.rect.h - 0.5) bad.push('the footer or its button is outside the card, or over the list');
+    const inScene = await T.O(`({ rooms: o.rooms.map(r => r.id), chars: o.chars, asleep: ${JSON.stringify(asleep.map(x => x.id))}.map(id => o.charScreen(id)) })`);
+    eq('rooms: the live chats that are awake', inScene.rooms.sort(), S.roomed.map(x => x.id).sort());
+    eq('the asleep chat has no figure in the scene', inScene.asleep.filter(Boolean).length, 0);
+    eq('waiting chats are in rooms and not on the shelf', [waiting.every(w => inScene.rooms.includes(w.id)), waiting.some(w => a.rows.some(r => r.id === w.id))], [true, false]);
+    const figs = a.rows.filter(r => !r.figure || r.figure.w < 20 || r.figure.h < 30 || r.figure.ink < 150);
+    if (figs.length) bad.push(`${figs.length} rows have no figure drawn`);
+    eq('the shown rows say when they closed', a.rows.every(r => /^(closed|idle) (\d+[dhms] ?)+ago$/.test(r.when)), true);
+
+    // 2. the zoom buttons are right under the card in the same column, outside the scene's box
+    const col = await T.ev(`(() => { const h = document.querySelector('.of-shelf'), c = document.querySelector('.of-ctl'), hb = h.getBoundingClientRect(), cb = c.getBoundingClientRect(), sb = document.querySelector('.of-side').getBoundingClientRect();
+      return JSON.stringify({ sibling: h.nextElementSibling === c, inSide: h.parentElement.classList.contains('of-side') && c.parentElement === h.parentElement, inArea: !!document.querySelector('.of-area').contains(c), below: cb.top - hb.bottom, within: cb.left >= hb.left - 0.5 && cb.right <= hb.right + 0.5 && hb.right <= sb.right + 0.5 }); })()`).then(JSON.parse);
+    if (!col.sibling || !col.inSide || col.inArea || col.below < -0.5 || col.below > 24 || !col.within) bad.push(`the zoom buttons are not right under the card in its column: ${JSON.stringify(col)}`);
+
+    // 3. the button adds ten rows (here the 8 that are left) and the footer is gone when nothing is left out
+    await T.click('.sh-more-btn');
+    await sleep(500);
+    const b = await T.shelf();
+    eq('rows after the footer button', [b.rows.length, ids(b), b.foot.hidden, b.count], [TOTAL, want_(TOTAL), true, `${TOTAL} chats`]);
+
+    // 4. a row opens the card beside it (to its left, the shelf is at the right edge), with the closed chat's details; Esc closes it
+    const target = expected.filter(e => e.kind === 'closed')[2];
+    await T.ev(`document.querySelector('.sh-list li[data-id="${target.id}"]').scrollIntoView({ block: 'nearest' })`);
+    await T.click(`.sh-list li[data-id="${target.id}"] .sh-item`);
+    const fromRow = await until(async () => { const d = await T.card(); return d.open && d.id === target.id ? d : null; }, 3000, 100);
+    await T.settle();
+    const rowCard = await T.card(), rowRect = await T.rectOf(`.sh-list li[data-id="${target.id}"] .sh-item`);
+    const rowOk = !!fromRow && rowCard.side === 'left' && rowCard.rect.x + rowCard.rect.w <= rowRect.x + 0.5 && rowCard.rect.x + rowCard.rect.w >= rowRect.x - 40 && rowCard.title === target.name && /closed/.test(rowCard.pillClass || '') && rowCard.mainText === 'Open in VS Code' && rowCard.mainHref === `vscode://anthropic.claude-code/open?session=${target.id}`;
+    if (!rowOk) bad.push(`a row did not open its card beside it: ${short({ side: rowCard.side, title: rowCard.title, href: rowCard.mainHref, card: rowCard.rect, row: rowRect })}`);
+    eq('the card of a row marks no agent in the scene', await T.O('o.selection'), null);
+    await T.esc(); await sleep(300);
+    eq('Esc closes the card of a row', (await T.card()).open, false);
+
+    // 5. the shelf is fixed beside the scene: the wheel on its list scrolls the list and never the map; folding and unfolding it never move the map
+    const sh1 = await T.shelf(), listR = sh1.listRect;
+    await S.page.mouse.wheel(listR.x + listR.w / 2, listR.y + listR.h / 2, 260);
+    await sleep(350);
+    const scrolled = await T.shelf();
+    eq('the map after the wheel on the list', await T.view(), v0);
+    await T.click('.sh-hide');
+    await until(async () => (await T.shelf()).mode === 'collapsed', 3000, 100);
+    await T.settle();
+    const folded = await T.shelf(), foldedGeo = await T.ev(`(() => { const v = document.querySelector('#view-ofis').getBoundingClientRect(), bs = [...document.querySelectorAll('.of-ctl button')].map(b => b.getBoundingClientRect()), last = bs[bs.length - 1], a = document.querySelector('.of-area').getBoundingClientRect(); return JSON.stringify({ gapR: v.right - last.right, gapB: v.bottom - last.bottom, area: a.width, view: v.width, inArea: bs.some(b => document.querySelector('.of-area').contains(document.elementFromPoint(b.left + b.width / 2, b.top + b.height / 2)) && !document.elementFromPoint(b.left + b.width / 2, b.top + b.height / 2).closest('.of-ctl')) }); })()`).then(JSON.parse);
+    eq('folded', [folded.mode, folded.hidden, folded.tabHidden, folded.tab], ['collapsed', true, false, `Shelf · ${TOTAL}`]);
+    if (Math.abs(foldedGeo.gapR - 16) > 1.5 || Math.abs(foldedGeo.gapB - 16) > 1.5 || Math.abs(foldedGeo.area - foldedGeo.view) > 1) bad.push(`folded: the zoom buttons are ${foldedGeo.gapR.toFixed(1)} px from the right and ${foldedGeo.gapB.toFixed(1)} px from the bottom (want 16), the scene is ${foldedGeo.area.toFixed(0)} of ${foldedGeo.view.toFixed(0)} px wide`);
+    eq('the map after folding', await T.view(), v0);
+    eq('the fold is remembered', await T.ev(`localStorage.getItem('ajan-ofisi.shelf')`), 'closed');
+    await T.click('.of-shelf-tab');
+    await until(async () => (await T.shelf()).mode === 'open', 3000, 100);
+    await T.settle();
+    eq('the map after unfolding', await T.view(), v0);
+
+    // 6. nothing of the scene under the card, the buttons or the bar at 1024 and 1500 px: "fit" frames the offices in what they leave free
+    const geoRows = [];
+    for (const w of [1024, 1500]) {
+      await S.page.setViewport(w, 900, 1);
+      await sleep(1500);
+      const g = await T.ev(`(() => {
+        const r = e => { const b = e.getBoundingClientRect(); return { x: b.left, y: b.top, w: b.width, h: b.height }; }, o = document.querySelector('#view-ofis').__ofis, u = document.querySelector('#view-ofis').__ofisUi;
+        const host = document.querySelector('.of-shelf'), btns = [...document.querySelectorAll('.of-ctl button')].map(r), bx = Math.min(...btns.map(b => b.x)), by = Math.min(...btns.map(b => b.y));
+        const labels = [...document.querySelectorAll('.of-l')].filter(e => e.style.visibility === 'visible').map(e => ({ cls: e.className.replace('of-l ', ''), ...r(e) }));
+        const figs = ${JSON.stringify(S.roomed.map(x => x.id))}.map(id => u.agentBox(id)).filter(Boolean).map(f => ({ x: f.cx - Math.max(f.w, 24) / 2, y: f.cy - Math.max(f.h, 24) / 2, w: Math.max(f.w, 24), h: Math.max(f.h, 24) }));
+        return JSON.stringify({ host: r(host), btns: { x: bx, y: by, w: Math.max(...btns.map(b => b.x + b.w)) - bx, h: Math.max(...btns.map(b => b.y + b.h)) - by }, bar: r(document.querySelector('.top')), labels, figs, mode: document.querySelector('#view-ofis').dataset.shelf, zoom: o.zoom }); })()`).then(JSON.parse);
+      const under = (o, what) => [['the card', g.host], ['the buttons', g.btns], ['the bar', g.bar]].filter(([n, r]) => hit(o, r) && !(n === 'the bar' && what === 'label')).map(([n]) => n).join(' and ');
+      const hits = [...g.figs.map(o => ({ what: 'figure', o })), ...g.labels.map(o => ({ what: 'label', o }))].filter(({ o, what }) => under(o, what));
+      if (g.mode !== 'open') bad.push(`${w}px: the shelf is ${g.mode}`);
+      if (hits.length) bad.push(`${w}px: ${hits.length} figures or labels lie under the card, the buttons or the bar: ${hits.slice(0, 3).map(({ what, o }) => `${what}${o.cls ? ' ' + o.cls : ''} at ${o.x.toFixed(0)},${o.y.toFixed(0)} ${o.w.toFixed(0)}x${o.h.toFixed(0)} under ${under(o, what)}`).join('; ')}`);
+      geoRows.push(`${w}: card ${g.host.x.toFixed(0)}..${(g.host.x + g.host.w).toFixed(0)} x ${g.host.y.toFixed(0)}..${(g.host.y + g.host.h).toFixed(0)}, ${g.figs.length} figures and ${g.labels.length} labels shown, ${hits.length} of them under the card, the buttons or the bar, zoom ${g.zoom.toFixed(1)}`);
+    }
+    await S.page.setViewport(VIEW.w, VIEW.h, 1);
+
+    // 7. narrow windows (the breakpoints of the pixel scene): the shelf starts folded, a tab at the edge of the scene, the buttons in the corner (8 px from it at 640 px or less, 16 px
+    // above that); the tab brings the card back, over the scene, and unfolding never moves the map
+    const narrowRows = [];
+    for (const w of [700, 360]) {
+      const N = await scenario3d(10, { tag: 'shelfw' + w, width: w, query: '?shelf=5', fixture: { closed: 12 } });
+      try {
+        const TN = tools(N);
+        if (!N.ready) { bad.push(`${w}px: the scene did not become ready`); continue; }
+        await until(async () => (await TN.shelf()).total === TOTAL, 15000, 250);
+        await sleep(600);
+        const g0 = await TN.shelf(), nv0 = await TN.view();
+        const corner = await TN.ev(`(() => { const v = document.querySelector('#view-ofis').getBoundingClientRect(), bs = [...document.querySelectorAll('.of-ctl button')].map(b => b.getBoundingClientRect()), last = bs[bs.length - 1]; return JSON.stringify({ gapR: v.right - last.right, gapB: v.bottom - last.bottom, area: document.querySelector('.of-area').getBoundingClientRect().width, view: v.width }); })()`).then(JSON.parse);
+        const wantGap = w <= 640 ? 8 : 16;
+        eq(`${w}px: starts folded`, [g0.mode, g0.hidden, g0.tabHidden, g0.tab], ['collapsed', true, false, `Shelf · ${TOTAL}`]);
+        if (Math.abs(corner.gapR - wantGap) > 1.5 || Math.abs(corner.gapB - wantGap) > 1.5 || Math.abs(corner.area - corner.view) > 1) bad.push(`${w}px: the buttons are ${corner.gapR.toFixed(1)}/${corner.gapB.toFixed(1)} px from the corner (want ${wantGap}), the scene is ${corner.area.toFixed(0)} of ${corner.view.toFixed(0)} px wide`);
+        await TN.click('.of-shelf-tab');
+        await until(async () => (await TN.shelf()).mode === 'open', 3000, 100);
+        await TN.settle();
+        const g1 = await TN.shelf(), over = await TN.ev(`(() => { const r = document.querySelector('.of-shelf').getBoundingClientRect(), e = document.elementFromPoint(r.left + r.width / 2, r.top + 40), b = document.querySelector('.of-ctl button').getBoundingClientRect(), f = document.elementFromPoint(b.left + b.width / 2, b.top + b.height / 2); return JSON.stringify({ card: !!e && !!e.closest('.of-shelf'), buttons: !!f && !!f.closest('.of-ctl'), x: r.left, r: r.right, vw: innerWidth }); })()`).then(JSON.parse);
+        eq(`${w}px: the tab opens the card`, [g1.mode, g1.hidden, g1.tabHidden, g1.rows.length], ['open', false, true, 5]);
+        if (!over.card || !over.buttons || over.x < -0.5 || over.r > over.vw + 0.5) bad.push(`${w}px: the opened card or the buttons are covered or leave the window: ${JSON.stringify(over)}`);
+        eq(`${w}px: the map after unfolding`, await TN.view(), nv0);
+        narrowRows.push(`${w}: folded at first, tab "${g0.tab}", buttons ${corner.gapR.toFixed(0)}/${corner.gapB.toFixed(0)} px from the corner, the tab opens a card ${over.r - over.x > 0 ? (over.r - over.x).toFixed(0) : '?'} px wide over the scene`);
+        if (errorsOf(N.page)) bad.push(`${w}px: ${errorsOf(N.page)} console errors`);
+      } finally { await N.done(); }
+    }
+
+    check('3d-shelf', bad.length === 0 && errorsOf(S.page) === 0,
+      `${bad.length ? 'FAILED: ' + bad.slice(0, 6).join('; ') + '; ' : ''}${live.length} live (${asleep.length} asleep) + ${S.fx.closed.length} closed chats = ${TOTAL} on the shelf; ?shelf=5: ${a.rows.length} rows, the 5 newest by time ${ids(a) === want_(5)}, "${a.count}", footer "${a.foot.text}" with "${a.foot.button}"; the asleep chat has no room (${inScene.rooms.length} rooms for ${live.length - asleep.length} awake chats), waiting chats stay in theirs; figures drawn in every row (${a.rows[0].figure.w}x${a.rows[0].figure.h} px); ` +
+      `the zoom buttons ${col.below.toFixed(0)} px under the card in the same column; "${a.foot.button}" → ${b.rows.length} rows, no footer; a row opens the card to its left (${rowCard.side}) for "${(rowCard.title || '').slice(0, 30)}" with the VS Code link of its id ${rowOk}; the wheel on the list scrolled it to ${scrolled.scroll.top.toFixed(0)} and left the map alone; folded: tab "${folded.tab}", buttons ${foldedGeo.gapR.toFixed(0)}/${foldedGeo.gapB.toFixed(0)} px from the corner, map unchanged by folding and unfolding; ${geoRows.join('; ')}; narrow windows: ${narrowRows.join('; ')}; console errors ${errorsOf(S.page)}`);
+  } finally { await S.done(); }
+}
+
+// ---- 3d-motion: the rules of docs/motion.md hold on the card, the side card and the shelf of the 3D scene, through the same helpers as the pixel scene (21-motion in
+// pixel-qa.mjs): the card comes out of its agent on the enter spring (a click has no momentum: no overshoot) with the base-ease fade, glides to another agent on the glide spring,
+// leaves on the quicker leave spring and takes no clicks while it leaves; the details card and the shelf card use the same springs; the camera (pan and zoom) is exactly the same
+// after every one of these; reduced motion leaves only a short fade
+if (want('motion')) {
+  const { DUR, EASE, SPRING, SLIDE, SCALE } = await import('../../public/js/motion.js');
+  const S = await scenario3d(10, { tag: 'motion', query: '?shelf=200', fixture: { closed: 12 } });
+  try {
+    const T = tools(S);
+    const bad = [];
+    const eq = (what, got, want_) => { if (JSON.stringify(got) !== JSON.stringify(want_)) bad.push(`${what}: ${JSON.stringify(got)} instead of ${JSON.stringify(want_)}`); };
+    const norm = s => String(s).replace(/\s+/g, '');
+    const lin = str => { const m = /linear\(([^)]*)\)/.exec(str); return m ? m[1].split(',').map(x => parseFloat(x.trim())) : []; };
+    const sameCurve = (got, spring) => { const a = lin(got), b = lin(spring.css); return a.length === b.length && a.every((v, i) => Math.abs(v - b[i]) < 1e-3); };
+    if (!S.ready) throw new Error('the scene did not become ready');
+    await T.ev(`document.addEventListener('click', e => { if (e.target.closest && e.target.closest('.of-card a')) e.preventDefault(); }, true)`);
+    const anims = sel => T.ev(`(() => { const e = document.querySelector(${JSON.stringify(sel)}); if (!e) return '[]'; return JSON.stringify(e.getAnimations().map(a => ({ name: a.animationName || 'waapi', duration: a.effect.getTiming().duration, easing: a.effect.getTiming().easing, kf: a.effect.getKeyframes().map(k => ({ opacity: k.opacity, translate: k.translate, scale: k.scale })) }))); })()`).then(JSON.parse);
+    const style = (sel, props) => T.ev(`(() => { const e = document.querySelector(${JSON.stringify(sel)}), c = getComputedStyle(e); return JSON.stringify(Object.fromEntries(${JSON.stringify(props)}.map(p => [p, c[p]]))); })()`).then(JSON.parse);
+    const atRest = o => (o.translate === 'none' || o.translate === '0px' || o.translate === '0px 0px') && (o.scale === 'none' || o.scale === '1');
+    const vecOf = t => { const [x = 0, y = 0] = String(t || '0px 0px').split(' ').map(v => parseFloat(v) || 0); return [x, y]; };
+    const moveOf = list => list.find(a => a.kf[0] && a.kf[0].translate !== undefined);
+    const fadeOf = list => list.find(a => a.kf[0] && a.kf[0].opacity !== undefined && a.kf[0].translate === undefined);
+
+    // 1. the tokens the 3D page uses are the ones of motion.js (the same app.css as the pixel scene)
+    const names = ['enter', 'leave', 'glide', 'pop'];
+    const tokens = await T.ev(`(() => { const c = getComputedStyle(document.documentElement); return JSON.stringify(Object.fromEntries(['--m-hover', '--m-fast', '--ease-out', '--ease-in', '--slide', '--scale-from', ...${JSON.stringify(names)}.flatMap(n => ['--spring-' + n, '--spring-' + n + '-ms'])].map(k => [k, c.getPropertyValue(k).trim()]))); })()`).then(JSON.parse);
+    eq('token --m-hover', tokens['--m-hover'], DUR.hover + 'ms'); eq('token --m-fast', tokens['--m-fast'], DUR.fast + 'ms');
+    eq('token --ease-out', norm(tokens['--ease-out']), norm(EASE.out)); eq('token --ease-in', norm(tokens['--ease-in']), norm(EASE.in));
+    eq('token --slide', tokens['--slide'], SLIDE + 'px'); eq('token --scale-from', Number(tokens['--scale-from']), SCALE);
+    for (const n of names) { eq(`token --spring-${n}-ms`, tokens[`--spring-${n}-ms`], SPRING[n].ms + 'ms'); if (!sameCurve(tokens['--spring-' + n], SPRING[n])) bad.push(`token --spring-${n} differs from motion.js`); }
+
+    // two agents whose card can be opened without a label, the bar or a control over them (B is not under A's card, so a glide can start from a click on it)
+    const spots = [];
+    for (const a of S.roomed) { const o = await T.openAgent(a.id); if (o) spots.push({ agent: a, ...o }); if (spots.length >= 4) break; }
+    await T.closeCard(); await T.settle();
+    if (spots.length < 2) throw new Error('fewer than two agents can be clicked');
+    const [A] = spots;
+    const v0 = await T.view();
+
+    // 2. a click on an agent: the card comes out of its agent: it fades in (base ease) while it travels and grows on the enter spring, which does not overshoot
+    await S.page.mouse.click(A.x, A.y);
+    await until(async () => (await T.card()).open, 2000, 40);
+    const inA = await anims('.of-card'), inFade = fadeOf(inA), inMove = moveOf(inA);
+    const side = await T.ev(`document.querySelector('.of-card').dataset.side`);
+    let pts = [0];
+    if (!inFade || !inMove) bad.push(`the card has no enter animation (${inA.length} animations)`);
+    else {
+      eq('card enter fade', [inFade.duration, norm(inFade.easing), Number(inFade.kf[0].opacity), Number(inFade.kf[1].opacity)], [DUR.fast, norm(EASE.out), 0, 1]);
+      eq('card enter spring duration', inMove.duration, SPRING.enter.ms);
+      if (!sameCurve(inMove.easing, SPRING.enter)) bad.push(`card enter easing is not the enter spring: ${inMove.easing.slice(0, 60)}`);
+      const [dx, dy] = vecOf(inMove.kf[0].translate); pts = lin(inMove.easing);
+      eq('card enter size', [Math.hypot(dx, dy), Number(inMove.kf[0].scale)], [SLIDE, SCALE]);
+      eq('card enter ends in place', [vecOf(inMove.kf[1].translate), Number(inMove.kf[1].scale)], [[0, 0], 1]);
+      if (!(pts[12] > 0.5 && Math.max(...pts) <= 1.0001)) bad.push(`the enter curve is not a spring without overshoot (a quarter through: ${pts[12]}, peak ${Math.max(...pts)})`);
+      const comes = { right: dx < 0, left: dx > 0, below: dy < 0, above: dy > 0, dock: dy > 0 }[side];
+      if (!comes) bad.push(`the card on the ${side} of its agent travels from (${dx}, ${dy}), not out of the agent`);
+      const o = await T.ev(`(() => { const c = document.querySelector('.of-card'), s = getComputedStyle(c); return JSON.stringify({ tail: c.dataset.tail, w: c.offsetWidth, h: c.offsetHeight, origin: s.transformOrigin, at: parseFloat(s.getPropertyValue('--tail')) }); })()`).then(JSON.parse);
+      const [ox, oy] = o.origin.split(' ').map(parseFloat), near = (u, w) => Math.abs(u - w) < 1.5;
+      const originOk = { left: near(ox, 0) && near(oy, o.at), right: near(ox, o.w) && near(oy, o.at), top: near(oy, 0) && near(ox, o.at), bottom: near(oy, o.h) && near(ox, o.at) }[o.tail] ?? true;
+      if (!originOk) bad.push(`the card does not grow out of its tail (${o.tail} at ${o.at}, origin ${o.origin})`);
+    }
+    await T.settle();
+    eq('map after the card opened', await T.view(), v0);
+    const rest = await style('.of-card', ['opacity', 'translate', 'scale']);
+    eq('card at rest', [rest.opacity, atRest(rest)], ['1', true]);
+
+    // 3. it glides to another agent on the glide spring (a transition on its position); the map still does not move
+    const cardRect = await T.ev(`document.querySelector('.of-card').getBoundingClientRect().toJSON()`);
+    const B = spots.find(q => q !== A && !(q.x > cardRect.left - 14 && q.x < cardRect.right + 14 && q.y > cardRect.top - 14 && q.y < cardRect.bottom + 14));
+    if (!B) bad.push('every other agent is under the open card, so the glide could not be started');
+    else {
+      await S.page.mouse.click(B.x, B.y);
+      await until(async () => (await T.card()).id === B.agent.id, 2000, 40);
+      const gl = await style('.of-card', ['transitionDuration', 'transitionProperty', 'transitionTimingFunction']);
+      eq('card glide', [await T.ev(`document.querySelector('.of-card').classList.contains('glide')`), gl.transitionDuration, gl.transitionProperty], [true, SPRING.glide.ms / 1000 + 's', 'transform']);
+      if (!sameCurve(gl.transitionTimingFunction, SPRING.glide)) bad.push('the glide easing is not the glide spring');
+      await T.settle(); await sleep(SPRING.glide.ms);
+      eq('map after the card moved to another agent', await T.view(), v0);
+    }
+
+    // 4. the Open menu pops in on the pop spring; the cross: the card leaves (fade, then a quick spring back toward its agent, no bounce) and is hidden afterwards
+    await T.ev(`document.querySelector('.of-card .oc-caret').click()`);
+    const menu = await style('.of-card .oc-menu', ['animationName', 'animationDuration', 'animationTimingFunction']);
+    eq('menu pop', [menu.animationName, menu.animationDuration], ['m-pop-move, m-pop-fade', `${SPRING.pop.ms / 1000}s, ${DUR.fast / 1000}s`]);
+    if (!sameCurve(menu.animationTimingFunction, SPRING.pop)) bad.push('the menu does not move on the pop spring');
+    await T.ev(`document.querySelector('.of-card .oc-x').click()`);
+    const outA = await anims('.of-card'), outFade = fadeOf(outA), outMove = moveOf(outA);
+    if (!outFade || !outMove) bad.push('the card has no leave animation');
+    else {
+      eq('card leave fade', [outFade.duration, norm(outFade.easing)], [DUR.fast, norm(EASE.in)]);
+      eq('card leave spring duration', outMove.duration, SPRING.leave.ms);
+      if (!sameCurve(outMove.easing, SPRING.leave)) bad.push('the card leaves on another curve than the leave spring');
+      if (Math.max(...lin(outMove.easing)) > 1.0001) bad.push('the leave spring bounces');
+    }
+    eq('a leaving card takes no clicks (data-motion)', await T.ev(`document.querySelector('.of-card').dataset.motion`), 'out');
+    await T.settle(); await sleep(250);
+    eq('card hidden after it left', await T.ev(`document.querySelector('.of-card').hidden`), true);
+    eq('map after the card closed', await T.view(), v0);
+
+    // 5. the details card: closed, it waits 20 px to the right and a little smaller; "All details" brings it in on the enter spring, the cross sends it out on the leave spring
+    const dClosed = await style('#drawer', ['translate', 'scale', 'visibility']);
+    eq('details card closed', [dClosed.translate, Number(dClosed.scale), dClosed.visibility], [SLIDE + 'px', SCALE, 'hidden']);
+    await S.page.mouse.click(A.x, A.y); await until(async () => (await T.card()).open, 2000, 40); await T.settle();
+    await T.ev(`document.querySelector('.of-card .oc-more').click()`);
+    await sleep(80);
+    const dOpen = await style('#drawer', ['transitionProperty', 'transitionDuration', 'transitionTimingFunction']);
+    eq('details card enter', dOpen.transitionDuration.split(',').map(x => x.trim()), [SPRING.enter.ms / 1000 + 's', SPRING.enter.ms / 1000 + 's', DUR.fast / 1000 + 's']);
+    if (!sameCurve(dOpen.transitionTimingFunction, SPRING.enter)) bad.push('the details card does not arrive on the enter spring');
+    await T.settle(); await sleep(SPRING.enter.ms);
+    const dRest = await style('#drawer', ['translate', 'scale', 'opacity', 'visibility']);
+    eq('details card at rest', [dRest.opacity, dRest.visibility, atRest(dRest)], ['1', 'visible', true]);
+    eq('map after the details card opened', await T.view(), v0);
+    await T.ev(`document.querySelector('#dw-close').click()`);
+    const dLeave = await style('#drawer', ['transitionDuration', 'transitionTimingFunction']);
+    eq('details card leave', dLeave.transitionDuration.split(',').slice(0, 2).map(x => x.trim()), [SPRING.leave.ms / 1000 + 's', SPRING.leave.ms / 1000 + 's']);
+    if (!sameCurve(dLeave.transitionTimingFunction, SPRING.leave)) bad.push('the details card does not leave on the leave spring');
+    await sleep(SPRING.leave.ms + 200);
+    eq('details card hidden after it left', await style('#drawer', ['visibility']).then(x => x.visibility), 'hidden');
+    eq('map after the details card closed', await T.view(), v0);
+
+    // 6. the shelf card goes out to the right edge and comes back on the same springs; folding and unfolding never move the map
+    await T.ev(`document.querySelector('.sh-hide').click()`);
+    const shOut = await anims('.of-shelf');
+    if (!fadeOf(shOut) || !moveOf(shOut)) bad.push('the shelf card has no leave animation');
+    else eq('shelf leave', [fadeOf(shOut).duration, moveOf(shOut).duration, sameCurve(moveOf(shOut).easing, SPRING.leave)], [DUR.fast, SPRING.leave.ms, true]);
+    await T.settle(); await sleep(250);
+    eq('shelf card hidden after it left', await T.ev(`document.querySelector('.of-shelf').hidden`), true);
+    eq('map after the shelf folded', await T.view(), v0);
+    await T.ev(`document.querySelector('.of-shelf-tab').click()`);
+    const shIn = await anims('.of-shelf');
+    if (!fadeOf(shIn) || !moveOf(shIn)) bad.push('the shelf card has no enter animation');
+    else eq('shelf enter', [fadeOf(shIn).duration, moveOf(shIn).duration, sameCurve(moveOf(shIn).easing, SPRING.enter), Number(moveOf(shIn).kf[0].scale)], [DUR.fast, SPRING.enter.ms, true, SCALE]);
+    await T.settle();
+    eq('map after the shelf unfolded', await T.view(), v0);
+
+    // 7. a click on a shelf row opens the card on the same springs, and the map stays; the menu of the Open button too
+    const row = (await T.shelf()).rows[0];
+    await T.click(`.sh-list li[data-id="${row.id}"] .sh-item`);
+    await until(async () => (await T.card()).open, 2000, 40);
+    const rowIn = await anims('.of-card');
+    if (!fadeOf(rowIn) || !moveOf(rowIn) || !sameCurve(moveOf(rowIn).easing, SPRING.enter)) bad.push('the card of a shelf row does not arrive on the enter spring');
+    await T.settle();
+    eq('map after a shelf row opened a card', await T.view(), v0);
+    await T.ev(`document.querySelector('.of-card .oc-x').click()`); await T.settle(); await sleep(250);
+
+    // 8. less motion on request: only a short fade, no travel, no spring, no menu pop
+    await S.page.send('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-reduced-motion', value: 'reduce' }] });
+    await sleep(200);
+    await S.page.mouse.click(A.x, A.y);
+    await until(async () => (await T.card()).open, 2000, 40);
+    const inR = await anims('.of-card');
+    if (!fadeOf(inR)) bad.push('reduced motion: the card has no fade'); else eq('reduced motion card', [fadeOf(inR).duration, moveOf(inR) === undefined], [DUR.hover, true]);
+    await T.ev(`document.querySelector('.of-card .oc-caret').click()`);
+    eq('reduced motion menu', (await style('.of-card .oc-menu', ['animationName'])).animationName, 'none');
+    await T.ev(`document.querySelector('.of-card .oc-x').click()`);
+    await S.page.send('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-reduced-motion', value: 'no-preference' }] });
+
+    check('3d-motion', bad.length === 0 && errorsOf(S.page) === 0,
+      bad.length ? `FAILED: ${bad.join('; ')}` :
+      `tokens equal motion.js (${names.map(n => `${n} ${SPRING[n].duration} s/bounce ${SPRING[n].bounce} = ${SPRING[n].ms} ms`).join(', ')}); the card comes out of its agent (${side} side) on the enter spring: ${inMove.duration} ms, travel ${SLIDE} px and growth from ${SCALE}, a quarter of the way through the curve it is at ${pts[12].toFixed(2)} and it peaks at ${Math.max(...pts).toFixed(3)}, fade ${inFade.duration} ms; it glides to another agent on the glide spring (${SPRING.glide.ms} ms); the menu pops on the pop spring; the card leaves on the leave spring (${outMove.duration} ms, no bounce) and takes no clicks while it leaves; the details card and the shelf card use the same springs, as does the card of a shelf row; the camera (zoom and the place of the world on the screen, ${v0}) was identical after every one of these; reduced motion: ${fadeOf(inR).duration} ms fade, no travel, no menu pop; console errors ${errorsOf(S.page)}`);
   } finally { await S.done(); }
 }
 
