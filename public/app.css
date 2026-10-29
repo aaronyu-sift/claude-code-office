@@ -787,3 +787,6 @@ main { flex: 1; min-height: 0; position: relative; }
   .sitebar__links { height: 44px; align-items: center; margin: 0 -16px; padding: 0 16px 0 4px; }
 }
 @media (max-width: 520px) { .has-sitebar .top .brand { display: none; } }
+
+/* room boards: the chat name is the big text, the project folder (setting `project`, off by default) a small line in the bottom-right corner ------------------ */
+.of-sign .of-sp { align-self: flex-end; max-width: 100%; font-size: 10px; }
