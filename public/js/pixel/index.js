@@ -1,7 +1,7 @@
 // The pixel office view: same interface as the old three.js view (createOfis): { show, hide, update }.
 // It owns the DOM (canvas, labels, summary, zoom buttons), turns the store into rooms and seated agents, and wires input to the scene.
 import { t as msg } from '../i18n.js';
-import { esc, fmtShort } from '../util.js';
+import { esc } from '../util.js';
 import { projectionByName } from './projection.js';
 import { loadAtlas } from './atlas.js';
 import { layoutOffice, roomCap, hashStr } from './layout.js';
@@ -15,20 +15,12 @@ import { resolveWeather, planFor, createField, drawRainbow, rainbowFor, PARTICLE
 import { createLabelLayer, placeLabels } from './labels.js';
 import { isShelved } from './shelf.js';
 import { createOfficeUi, MIN_TARGET } from '../office-ui.js';
+import { labelParts, labelHtml } from '../office-labels.js';
 import { ZOOMS, fitZoom, minZoom, stepZoom, centerPan, clampPan, zoomAbout } from './input.js';
 
 const FIT_ICON = '<svg class="ic" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M2.5 6V2.5H6M10 2.5h3.5V6M13.5 10v3.5H10M6 13.5H2.5V10"/></svg>';
 const DONE_MS = 4500;                 // a finished subagent stays at its desk this long
 const PROJ_KEY = 'ajan-ofisi.proj';       // the chosen view (iso or front) is kept in localStorage; ?proj= wins over it and is not stored
-const clipTxt = (s, n) => { s = String(s || ''); return s.length > n ? s.slice(0, n - 1) + '…' : s; };
-
-function shortDesc(s) {
-  const d = String(s.desc || s.atype || msg('agent.sub')).trim().replace(/\s+/g, ' ');
-  if (d.length <= 18) return d;
-  let out = '';
-  for (const w of d.split(' ')) { const nx = out ? out + ' ' + w : w; if (nx.length > 18) break; out = nx; }
-  return (out || d.slice(0, 16) + '…').replace(/[\s:;,.\-–—]+$/, '');
-}
 
 function storedProj() { try { return localStorage.getItem(PROJ_KEY) || 'iso'; } catch { return 'iso'; } }
 
@@ -333,16 +325,7 @@ export function createPixelOffice(root, ctx, opts = {}) {
   }
 
   // ---------------------------------------------------------- labels
-  function mainLabel(room, a) {
-    const wait = a.status === 'waiting' || a.status === 'ask';
-    const chip = wait ? `<span class="of-chip w">${esc(msg(a.status === 'ask' ? 'of.chipAsk' : 'of.chipWait'))} · <span data-since="${a.since}" data-fmt="short">${fmtShort(store.now() - a.since)}</span></span>` : '';
-    const more = room.overflow ? `<span class="of-chip">+${room.overflow}</span>` : '';
-    const doing = a.status === 'working' && a.doing ? `<span class="px-doing">${esc(a.doing.n)} · ${esc(clipTxt(a.doing.l, 46))}</span>` : '';
-    const say = a.say ? `<span class="px-say ${a.say.dir}">${a.say.dir === 'in' ? '← ' : '→ '}${esc(clipTxt(a.say.text, 56))}</span>` : '';
-    const name = a.name || a.title || a.project;
-    return `<div class="px-top"><span class="sw" style="background:${esc(a.color)}"></span><span class="px-proj">${esc(a.project)}</span>${chip}${more}</div>` +
-      `<div class="px-name">${esc(name)}</div>${doing}${say}`;
-  }
+  const mainLabel = (room, a) => labelHtml(labelParts(a, { main: true, overflow: room.overflow }), { now: store.now(), p: 'px' });
   function updateLabels() {
     const live = new Set();
     for (const room of layout.rooms) {
@@ -355,7 +338,7 @@ export function createPixelOffice(root, ctx, opts = {}) {
       const a = store.agents.get(id), room = layout.rooms.find(r => r.id === s.roomId);
       if (!a || !room) continue;
       live.add(id);
-      labels.set(id, `<span class="sw" style="background:${esc(a.color)}"></span>${esc(shortDesc(a))}`, `px-sub ${a.status}`, { room, slot: s.slot, main: false });
+      labels.set(id, labelHtml(labelParts(a, { main: false }), { p: 'px' }), `px-sub ${a.status}`, { room, slot: s.slot, main: false });
     }
     for (const id of labels.ids()) if (!live.has(id)) labels.drop(id);
     labelsDirty = true;
