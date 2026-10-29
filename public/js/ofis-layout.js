@@ -2,8 +2,8 @@
 // ofis.js draws what this file decides.
 //
 //   The building is laid out for MIN_ROOMS chats from the first frame: two rows of MIN_ROOMS / 2 offices with a hall between them. An office
-//   with no chat is a vacant office. A chat takes the lowest free office (its slot) and keeps it until the chat closes, so nobody else's
-//   office moves when chats come and go. Every office is a fixed cell, CELL_W wide, the width of the largest room class: a room builds its
+//   with no chat is a vacant office. A chat takes the lowest free office (its slot) and keeps it until the chat closes or falls asleep (it is
+//   on the shelf then), and gets it back on waking if it is still free, so nobody else's office moves when chats come and go. Every office is a fixed cell, CELL_W wide, the width of the largest room class: a room builds its
 //   desks inside the cell and the rest of the cell is a lounge, so a chat whose sub-agents outgrow its desks (BASE_CLS to MAX_CLS) grows in
 //   place and no wall of any other room moves.
 //   Only more chats than offices expand the building: a whole row of offices is appended after the last row (earlier rows keep their place),
@@ -15,7 +15,9 @@ export const MIN_ROOMS = 10;             // chats the building is laid out for; 
 export const MAX_ROOMS = 60;             // the largest `?rooms=` accepted
 export const MIN_ROWS = 2;               // rows of the smallest building (a back row and a front row, a hall between them)
 export const BASE_CLS = 1;               // room class every office is built with (6 desks): a chat with up to that many sub-agents never changes its room
-export const MAX_CLS = 2;                // the class a room grows to when sub-agents outgrow BASE_CLS (12 desks); more show as "+N" on the sign
+export const MAX_CLS = 2;                // the class a room grows to when sub-agents outgrow BASE_CLS (12 desks); more show as "+N" on the sign.
+                                         // It sets the size of every office: MAX_CLS = BASE_CLS makes the cells 8.4 wide instead of 12.6 (the map fills the window
+                                         // 30 percent better with 10 chats) and rooms then never grow
 export const VACANT_CLS = BASE_CLS;      // the class a vacant office is furnished with
 export const SHRINK_MS = 60e3;           // a bigger class, or an appended row, is given up after this long without need
 

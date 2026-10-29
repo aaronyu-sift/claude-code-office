@@ -48,13 +48,13 @@ test('capacity: a room is built for BASE_CLS (6 desks) and a chat with a few sub
   assert.ok(VACANT_CLS <= MAX_CLS && VACANT_CLS >= 0);
 });
 
-test('capacity: every office is a fixed cell as wide as the largest class, so a room grows inside it', () => {
+test('capacity: every office is a fixed cell as wide as the largest class, so a room grows inside it', { skip: MAX_CLS === BASE_CLS && 'MAX_CLS = BASE_CLS: rooms cannot grow' }, () => {
   assert.equal(CELL_W, roomW(MAX_CLS));
   assert.ok(roomW(BASE_CLS) < CELL_W, 'the base room leaves room for the extra desk columns');
   for (const c of buildingPlan(3, 5).cells) assert.equal(c.W, CELL_W);
 });
 
-test('capacity: a room grows at once and shrinks only after SHRINK_MS and when the figures fit', () => {
+test('capacity: a room grows at once and shrinks only after SHRINK_MS and when the figures fit', { skip: MAX_CLS === BASE_CLS && 'MAX_CLS = BASE_CLS: rooms cannot grow' }, () => {
   let st = { cls: null, low: 0 };
   st = nextClass(st, BASE_CLS, 0, 1000);
   assert.deepEqual(st, { cls: BASE_CLS, low: 0 });

@@ -425,6 +425,7 @@ export function createOfis(root, ctx) {
   const slots = createSlots({ minRooms: MIN_ROOMS_NOW, saved: (() => { try { return JSON.parse(localStorage.getItem(SLOTS_KEY)); } catch { return null; } })() });
   let slotsSaved = '';
   let fitKey = '';               // the building the camera was last fitted to: only a different building refits an automatic view
+  let fits = 0;                  // how many times a building change refitted the view (verification only)
   const chars = new Map();       // agent id → character
   const labels = new Set();
   const signs = new Map();       // session id → sign label
@@ -679,13 +680,14 @@ export function createOfis(root, ctx) {
     const key = [b.x0, b.x1, b.z0, b.z1, (world.lots || []).length, (world.fitExtra || []).length].map(v => +v.toFixed(2)).join();
     const changed = key !== fitKey;
     fitKey = key;
-    if (autoFit && changed) fit();
+    if (autoFit && changed) { fits++; fit(); }
   }
 
   // verification only (tools/qa/office3d-qa.mjs, the QA pictures): what the scene drew, how long a rebuild took, which models are in use, a camera on a point
   root.__ofis3d = {
     get info() { const i = renderer.info; return { calls: i.render.calls, tris: i.render.triangles, geos: i.memory.geometries, tex: i.memory.textures }; },
     get rebuildMs() { return +rebuildMs.toFixed(1); },
+    get fits() { return fits; },
     get models() { return { loaded: Object.keys(PK), failed: [...AS.packs.failed.keys()] }; },
     get look() { return { assets: AS.look.assets, polish: POLISH }; },
     figures() { return [...chars.values()].map(c => ({ id: c.id, main: c.main, pack: !!c.pk, shirt: c.shirt, tinted: c.tinted, mode: c.mode, x: c.root.position.x, z: c.root.position.z })); },
@@ -697,7 +699,7 @@ export function createOfis(root, ctx) {
     // every office of the building, vacant ones included, in slot order: the stable layout's state (tools/qa/office3d-qa.mjs)
     office() {
       const all = [...world.rooms.values(), ...(world.vacant || [])].sort((a, b) => a.slot - b.slot);
-      return { ...world.plan, minRooms: MIN_ROOMS_NOW, slots: all.map(r => ({ slot: r.slot, id: r.vacant ? null : r.id, vacant: r.vacant, cls: r.cls, cap: r.cap, X: r.X, Z: r.Z, W: r.W, D: r.D, door: r.door, hall: r.hall })) };
+      return { ...world.plan, minRooms: MIN_ROOMS_NOW, halls: (world.halls || []).map(h => ({ z0: h.z0, z1: h.z1, lane: h.lane, open: h.open })), slots: all.map(r => ({ slot: r.slot, id: r.vacant ? null : r.id, vacant: r.vacant, cls: r.cls, cap: r.cap, X: r.X, Z: r.Z, W: r.W, D: r.D, door: r.door, hall: r.hall })) };
     },
   };
 
@@ -1090,7 +1092,7 @@ export function createOfis(root, ctx) {
     world.lobby = null;
     const endWall = '#e8dcc5', endCap = '#5b4636', endWain = '#b98a5c';
     world.halls.forEach((h, hi) => {
-      const lobby = hi === world.halls.length - 1;
+      const lobby = hi === 0;                                // the reception stays in the first hall: a row appended later never moves it
       const z0 = h.z0, z1 = h.z1, hd = z1 - z0;
       // floor: light stone tiles
       const fw = Wb + 0.3;
