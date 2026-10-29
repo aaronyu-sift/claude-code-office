@@ -1,6 +1,7 @@
 // Projections of the pixel scene. The world is measured in voxels: x east, y north (away from the camera), z up.
 // One tile is 16 voxels. A projection maps a world point to a pixel of the virtual (zoom 1) canvas and back, says
-// which wall sides face the camera and how to order sprites, so no other module has to branch on the view.
+// which wall sides face the camera, how to order sprites and what the view needs from the layout (which sides of the building are
+// near the camera, what a tall wall hides, what must stay free in front of a seat), so no other module has to branch on the view.
 //
 // The numbers here are also what tools/sprites/atlas.ts hands to the VoxPix camera, so sprites and scene agree:
 //   iso:   yaw -45, elevation 30, 2:1 diamonds, 16 voxels = 12 px along each ground axis, 1 voxel of height = h px.
@@ -20,7 +21,12 @@ function make(def) {
   return Object.freeze({
     name: def.name,
     tile: def.tile,                            // [width, height] in px of one ground tile (the diamond's bounding box)
-    wallSides: def.wallSides,                  // sides whose walls face the camera, drawn tall
+    wallSides: def.wallSides,                  // sides whose walls face the camera, drawn tall (the others stay low)
+    nearSides: def.nearSides,                  // sides of the building towards the camera: only low things stand there
+    farSides: def.farSides,                    // sides where tall things (trees, sheds) cannot hide a room
+    layout: def.layout,                        // numbers of the layout engine that depend on the view: { rowMax, depth, rowPitch }
+    wallShadow: def.wallShadow,                // (side, room {x, y, w, d}, reach) -> ground box {x0, y0, x1, y1} a tall wall on that side hides
+    sightZone: def.sightZone,                  // (seat {x, y, w, d}) -> ground box in front of a seat that stays free of furniture
     render: def.render,                        // camera parameters for tools/sprites (VoxPix)
     toScreen(x, y, z = 0) { return [a * x + b * y, c * x + d * y - h * z]; },
     toGround(sx, sy, z = 0) {
@@ -44,6 +50,15 @@ export const ISO = make({
   tile: [24, 12],
   m: { a: 0.75, b: 0.75, c: 0.375, d: -0.375, h: ISO_H },
   wallSides: ['north', 'west'],
+  nearSides: ['south', 'east'],
+  farSides: ['north', 'west'],
+  layout: { rowMax: 560, depth: 160, rowPitch: 40 },
+  // the camera looks towards the north-west: a tall wall hides the ground behind it, `reach` voxels to the north and to the west
+  wallShadow(side, r, reach) {
+    return side === 'north' ? { x0: r.x - reach, y0: r.y + r.d, x1: r.x + r.w, y1: r.y + r.d + reach } : { x0: r.x - reach, y0: r.y, x1: r.x, y1: r.y + r.d + reach };
+  },
+  // seated agents are seen from the south-east: keep the strip to the south and to the east of the chair clear
+  sightZone(s) { return { x0: s.x - 6, y0: s.y - 22, x1: s.x + s.w + 16, y1: s.y + s.d + 2 }; },
   render: { yaw: -45, elevation: 30, ppu: ISO_PPU, oblique: null },
   // nearest corner of the footprint first (x1 - y0), then the far corner, then height
   depthKey(fp, z = 0) { return (fp.x1 - fp.y0) * 1000 + (fp.x0 - fp.y1) + z * 0.01; },
@@ -60,6 +75,14 @@ export const FRONT = make({
   tile: [16, 12],
   m: { a: 1, b: 0, c: 0, d: -0.75, h: 1 },
   wallSides: ['north'],
+  nearSides: ['south'],
+  farSides: ['north', 'west', 'east'],
+  // walls rise straight up and the rows of desks stack on screen: more depth between the rows keeps a monitor from covering the agent behind it
+  layout: { rowMax: 720, depth: 192, rowPitch: 58 },
+  // the camera looks straight north: a tall north wall hides the strip behind it; the west and east walls are seen edge-on (never tall)
+  wallShadow(side, r, reach) { return { x0: r.x, y0: r.y + r.d, x1: r.x + r.w, y1: r.y + r.d + reach }; },
+  // seated agents are seen from the south: keep the strip in front of the chair clear
+  sightZone(s) { return { x0: s.x - 4, y0: s.y - 34, x1: s.x + s.w + 4, y1: s.y + s.d + 2 }; },
   render: { yaw: 0, elevation: 30, ppu: 1, oblique: { y: 0.75, z: 1 } },
   depthKey(fp, z = 0) { return -fp.y0 * 1000 + (fp.x0 - fp.y1) * 0.001 + z * 0.01; },
   behind(a, b) { return a.y0 >= b.y1 ? -1 : b.y0 >= a.y1 ? 1 : 0; },

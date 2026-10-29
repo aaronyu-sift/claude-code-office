@@ -5,16 +5,16 @@
 // walls stand just outside the north (y + d) and west (x - 2) edges, low walls (7 high) on the south and east. Rooms keep their
 // order: room k only depends on rooms 0..k, so an agent that appears is appended and nobody before it moves.
 import { fpSize, deskId, FP, isFloor } from './ids.js';
+import { ISO } from './projection.js';
 
 export const G = Object.freeze({
   TILE: 16, GAP: 16, WALL_T: 2, WALL_H: 30, LOW_H: 7,
-  DEPTH: 160,                      // interior depth: 3 rows of desks, 40 apart, and a 48 deep entrance (door and mat)
   CHIEF_W: 48,                     // the main agent's corner (wood floor, sofa, shelf)
   CHIEF_SEAT: 10,                  // x of the main agent's chair in the room: seated figures overlap on screen when two seats are
-  COL_W: 48, ROW_P: 40,            //   about 8 voxels from the same sight line, so the pitches of the desk grid are chosen with
+  COL_W: 48,                       //   about 8 voxels from the same sight line, so the pitches of the desk grid (COL_W here, the row pitch and
+                                   //   the room depth in the Projection: 3 rows of desks and a 48 deep entrance) are chosen with
   EAST: 16,                        //   test/occlusion in tools/qa (at most 15 percent of an agent hidden)
   ROWS: 3, FRONT: 32,
-  ROW_MAX: 560,                    // widest a row of rooms may get before the next room starts a new row (behind it)
   COLS: [1, 2, 4],                 // desk columns per room class, 3 desks per column
   SHADOW: 44,                      // how far a tall wall hides the ground behind it (along the sight line), in voxels
   MARGIN: 80,                      // grass around the building (the garden island)
@@ -79,27 +79,30 @@ const PROPS = {
   lab: ['prop_tablet', 'prop_stickies', 'prop_pens', 'prop_papers', 'prop_lamp', 'prop_mug_a'],
   studio: ['prop_frame', 'prop_cactus', 'prop_figurine', 'prop_plant', 'prop_headphones', 'prop_stickies'],
 };
+const NOOK_DEPTH = 160;
 const SUB_SPOTS = [[22, 8, 6, 5], [1, 4, 8, 6]], CHIEF_SPOTS = [[2, 4, 8, 6], [30, 1, 10, 6]];
 export const DESK_TOP = 12, TABLE_TOP = 10;
 
-// Rooms of the agents, in the given order. agents: [{ id, cls, project, color }]
-export function layoutOffice(agents) {
+// Rooms of the agents, in the given order. agents: [{ id, cls, project, color }]. `proj` is the Projection the scene is drawn with: it
+// says which walls may be tall, what a tall wall hides, what stays free in front of a seat, which sides of the building are near the camera
+// and how wide a row of rooms may get. Nothing else in here depends on the view.
+export function layoutOffice(agents, proj = ISO) {
   const rooms = [];
   let cx = 0, cy = 0, rowCount = 0;
   for (const a of agents) {
     const cls = a.cls | 0;
-    const w = roomWidth(cls), d = G.DEPTH;
-    if (rowCount && cx + w > G.ROW_MAX) { cx = 0; cy += G.DEPTH + G.GAP; rowCount = 0; }
+    const w = roomWidth(cls), d = proj.layout.depth;
+    if (rowCount && cx + w > proj.layout.rowMax) { cx = 0; cy += d + G.GAP; rowCount = 0; }
     rooms.push({ id: a.id, cls, project: a.project, color: a.color, x: cx, y: cy, w, d, cap: roomCap(cls), seed: hashStr(String(a.id)), theme: THEMES[hashStr(String(a.project)) % THEMES.length] });
     cx += w + G.GAP; rowCount++;
   }
-  for (const r of rooms) buildRoom(r, rooms);
+  for (const r of rooms) buildRoom(r, rooms, proj);
 
   // building and island bounds
   let bx1 = 0, by1 = 0;
   for (const r of rooms) { bx1 = Math.max(bx1, r.x + r.w); by1 = Math.max(by1, r.y + r.d); }
-  const building = rooms.length ? { x0: 0, y0: 0, x1: bx1, y1: by1 } : { x0: 0, y0: 0, x1: 96, y1: G.DEPTH };
-  const outdoor = buildOutdoor(rooms, building);
+  const building = rooms.length ? { x0: 0, y0: 0, x1: bx1, y1: by1 } : { x0: 0, y0: 0, x1: 96, y1: proj.layout.depth };
+  const outdoor = buildOutdoor(rooms, building, proj);
   const bounds = { ...outdoor.island, zTop: 40 };
   return { rooms, shelf: [], building, outdoor, bounds };
 }
@@ -107,14 +110,13 @@ export function layoutOffice(agents) {
 function rectsOverlap(a, b) { return a.x0 < b.x1 && a.x1 > b.x0 && a.y0 < b.y1 && a.y1 > b.y0; }
 const roomRect = r => ({ x0: r.x, y0: r.y, x1: r.x + r.w, y1: r.y + r.d });
 
-function buildRoom(r, rooms) {
+function buildRoom(r, rooms, proj) {
   const { x: ox, y: oy, w: W, d: D, theme } = r;
   const others = rooms.filter(o => o !== r).map(roomRect);
   const hid = G.SHADOW;
-  // a tall wall would hide the room behind it, so it is only tall when nothing stands in its shadow
-  const northShadow = { x0: ox - hid, x1: ox + W, y0: oy + D, y1: oy + D + hid };
-  const westShadow = { x0: ox - hid, x1: ox, y0: oy, y1: oy + D + hid };
-  r.walls = { north: others.some(o => rectsOverlap(o, northShadow)) ? 'low' : 'tall', west: others.some(o => rectsOverlap(o, westShadow)) ? 'low' : 'tall' };
+  // a tall wall would hide the room behind it, so it is only tall on a side the camera sees and when nothing stands in its shadow
+  const wallKind = side => (proj.wallSides.includes(side) && !others.some(o => rectsOverlap(o, proj.wallShadow(side, r, hid))) ? 'tall' : 'low');
+  r.walls = { north: wallKind('north'), west: wallKind('west') };
 
   const items = r.items = [];
   const floor = r.floor = [];
@@ -155,7 +157,7 @@ function buildRoom(r, rooms) {
   let n = 1;
   for (let c = 0; c < G.COLS[r.cls]; c++) {
     for (const row of [2, 1, 0]) {
-      const dx = ox + G.CHIEF_W + G.COL_W * c + ((G.COL_W - 28) >> 1), dy = oy + D - 32 - G.ROW_P * (2 - row);
+      const dx = ox + G.CHIEF_W + G.COL_W * c + ((G.COL_W - 28) >> 1), dy = oy + D - 32 - proj.layout.rowPitch * (2 - row);
       slots.push({ index: n++, kind: 'sub', desk: { x: dx, y: dy, w: 28, d: 14 }, seat: { x: dx + 9, y: dy - 14, w: 10, d: 10 } });
     }
   }
@@ -169,7 +171,7 @@ function buildRoom(r, rooms) {
   const blocked = [{ x0: ox + 30, y0: oy, x1: ox + 66, y1: oy + 46 }];
   for (const s of slots) {
     blocked.push({ x0: s.desk.x, y0: s.desk.y, x1: s.desk.x + s.desk.w, y1: s.desk.y + s.desk.d });
-    blocked.push({ x0: s.seat.x - 6, y0: s.seat.y - 22, x1: s.seat.x + s.seat.w + 16, y1: s.seat.y + s.seat.d + 2 });
+    blocked.push(proj.sightZone(s.seat));
   }
   const put = (id, cx, cy, facing = 0, extra = {}) => {
     const it = itemAt(id, ox + cx, oy + cy, facing, { layer: isFloor(id) ? 'floor' : 'stand', ...extra });
@@ -181,7 +183,7 @@ function buildRoom(r, rooms) {
     return true;
   };
   put('cooler', W - 12, D - 10, 0);
-  for (const [id, cx, cy, f] of NOOK[theme](W)) put(id, cx, cy, f);
+  for (const [id, cx, cy, f] of NOOK[theme](W)) put(id, cx, Math.round(cy * D / NOOK_DEPTH), f);      // the nook lists were drawn for the isometric depth
   put('lamp', W - 8, 20, 0);
   r.items = items.filter(i => i.layer === 'stand').concat(items.filter(i => i.layer === 'floor'));
 
@@ -206,10 +208,10 @@ function buildRoom(r, rooms) {
   r.deskItems = slots.map(s => ({ chief: s.kind === 'chief', id: deskId(s.kind === 'chief', 'off'), x: s.desk.x, y: s.desk.y }));
 }
 
-// Grass island: a stone street around the building, then a garden. In front (south) and to the east only low things stand, because they
-// are nearer to the camera and could hide a room; trees, sheds and wells stand on the far sides (north, west). Everything is placed with
+// Grass island: a stone street around the building, then a garden. On the sides of the building near the camera (south and east in the
+// isometric view, south in the front view) only low things stand, because they could hide a room; trees, sheds and wells stand on the far sides. Everything is placed with
 // an overlap check, in a fixed order, from hashes of tile coordinates.
-function buildOutdoor(rooms, b) {
+function buildOutdoor(rooms, b, proj) {
   const M = G.MARGIN, T = G.TILE;
   const island = { x0: b.x0 - M, y0: b.y0 - M, x1: b.x1 + M, y1: b.y1 + M };
   const rects = rooms.map(roomRect);
@@ -266,8 +268,9 @@ function buildOutdoor(rooms, b) {
   for (let tx = island.x0 / T + 1; tx < island.x1 / T - 1; tx++) for (let ty = island.y0 / T + 1; ty < island.y1 / T - 1; ty++) {
     if (dist(tx, ty) < 2) continue;
     const n = hash2(tx, ty, 29), cx = tx * T + T / 2, cy = ty * T + T / 2;
-    const far = cy > b.y1 || cx < b.x0 - T;                          // behind or left of the building: trees allowed
-    const near = cy < b.y0 || cx > b.x1;                              // in front of or right of it: low things only
+    const side = { north: cy > b.y1, west: cx < b.x0 - T, south: cy < b.y0, east: cx > b.x1 };
+    const far = proj.farSides.some(k => side[k]);                     // behind the building as the camera sees it: trees allowed
+    const near = proj.nearSides.some(k => side[k]);                   // in front of it: low things only
     if (n > 0.86 && far && !near) place(TREES[(k++ + Math.floor(hash2(tx, ty, 3) * 6)) % TREES.length], cx, cy, 0, 1);
     else if (n > 0.76 && n <= 0.84) place(['bush_a', 'bush_b', 'bush_c', 'bush_d'][Math.floor(hash2(tx, ty, 5) * 4)], cx, cy, 0, 1);
     else if (n > 0.70 && n <= 0.74) place(['rock', 'rock_b', 'rock_c', 'rock_d'][Math.floor(hash2(tx, ty, 6) * 4)], cx, cy, 0, 1);

@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { layoutOffice, G, roomWidth, roomCap } from '../public/js/pixel/layout.js';
+import { ISO, FRONT } from '../public/js/pixel/projection.js';
 import { FP, fpSize } from '../public/js/pixel/ids.js';
 
 const agents = (n, classes = [0]) => Array.from({ length: n }, (_, i) => ({ id: 'sess-' + String(i).padStart(3, '0'), cls: classes[i % classes.length], project: 'p' + (i % 5), color: '#5B9BD5' }));
@@ -8,15 +9,16 @@ const overlap = (a, b) => a.x0 < b.x1 && a.x1 > b.x0 && a.y0 < b.y1 && a.y1 > b.
 const box = o => ({ x0: o.x, y0: o.y, x1: o.x + o.w, y1: o.y + o.d });
 const roomBox = r => ({ x0: r.x - G.WALL_T, y0: r.y - G.WALL_T, x1: r.x + r.w + G.WALL_T, y1: r.y + r.d + G.WALL_T });
 
-for (const n of [1, 4, 10, 20]) {
+for (const proj of [ISO, FRONT]) for (const n of [1, 4, 10, 20]) {
   const list = agents(n, n === 10 ? [0, 1, 2] : [0]);
+  const layoutOffice_ = a => layoutOffice(a, proj);
 
-  test(`layout is deterministic for ${n} agents`, () => {
-    assert.equal(JSON.stringify(layoutOffice(list)), JSON.stringify(layoutOffice(list.map(a => ({ ...a })))));
+  test(`${proj.name}: layout is deterministic for ${n} agents`, () => {
+    assert.equal(JSON.stringify(layoutOffice_(list)), JSON.stringify(layoutOffice_(list.map(a => ({ ...a })))));
   });
 
-  test(`no overlapping rooms, desks, seats or furniture for ${n} agents`, () => {
-    const L = layoutOffice(list);
+  test(`${proj.name}: no overlapping rooms, desks, seats or furniture for ${n} agents`, () => {
+    const L = layoutOffice_(list);
     assert.equal(L.rooms.length, n);
     for (let i = 0; i < L.rooms.length; i++) for (let j = i + 1; j < L.rooms.length; j++) {
       assert.ok(!overlap(roomBox(L.rooms[i]), roomBox(L.rooms[j])), `rooms ${i} and ${j} overlap`);
@@ -39,8 +41,8 @@ for (const n of [1, 4, 10, 20]) {
     }
   });
 
-  test(`desk slots of ${n} agents are distinct and match the room class`, () => {
-    for (const r of layoutOffice(list).rooms) {
+  test(`${proj.name}: desk slots of ${n} agents are distinct and match the room class`, () => {
+    for (const r of layoutOffice_(list).rooms) {
       assert.equal(r.slots.length, 1 + roomCap(r.cls));
       assert.equal(new Set(r.slots.map(s => s.index)).size, r.slots.length);
       assert.equal(r.slots[0].kind, 'chief');
@@ -48,13 +50,14 @@ for (const n of [1, 4, 10, 20]) {
     }
   });
 
-  test(`outdoors of ${n} agents: nothing stands on a room and trees only on the far sides`, () => {
-    const L = layoutOffice(list);
+  test(`${proj.name}: outdoors of ${n} agents: nothing stands on a room and trees only on the far sides`, () => {
+    const L = layoutOffice_(list);
     const rbs = L.rooms.map(roomBox);
     const outs = L.outdoor.items.map(box);
     outs.forEach((b, i) => { for (const r of rbs) assert.ok(!overlap(b, r), `outdoor item ${L.outdoor.items[i].id} stands on a room`); });
     for (let i = 0; i < outs.length; i++) for (let j = i + 1; j < outs.length; j++) assert.ok(!overlap(outs[i], outs[j]), 'outdoor items overlap');
-    for (const it of L.outdoor.items) if (/^(tree|pine)/.test(it.id)) assert.ok(it.y + it.d / 2 > L.building.y1 || it.x + it.w / 2 < L.building.x0, `${it.id} at ${it.x},${it.y} could hide a room`);
+    const side = (it, k) => ({ north: it.y + it.d / 2 > L.building.y1, west: it.x + it.w / 2 < L.building.x0, south: it.y + it.d / 2 < L.building.y0, east: it.x + it.w / 2 > L.building.x1 })[k];
+    for (const it of L.outdoor.items) if (/^(tree|pine)/.test(it.id)) assert.ok(!proj.nearSides.some(k => side(it, k)), `${it.id} at ${it.x},${it.y} stands on a side near the camera and could hide a room`);
     for (const t of L.outdoor.tiles) for (const r of rbs) assert.ok(!overlap({ x0: t.x + 1, y0: t.y + 1, x1: t.x + 15, y1: t.y + 15 }, { x0: r.x0 + 2, y0: r.y0 + 2, x1: r.x1 - 2, y1: r.y1 - 2 }), 'ground tile inside a room');
     const b = L.bounds;
     for (const it of [...L.outdoor.items, ...L.rooms.flatMap(r => r.items)]) assert.ok(it.x >= b.x0 && it.y >= b.y0 && it.x + it.w <= b.x1 && it.y + it.d <= b.y1, `${it.id} outside the island`);
@@ -84,14 +87,15 @@ test('removing an agent from the middle keeps the order and the rooms before it 
   for (let i = 0; i < 4; i++) assert.deepEqual([after[i].x, after[i].y], [before[i].x, before[i].y]);
 });
 
-test('rows break at ROW_MAX and later rows stand behind earlier ones', () => {
-  const L = layoutOffice(agents(20, [0]));
+for (const proj of [ISO, FRONT]) test(`${proj.name}: rows break at the projection's row width and later rows stand behind earlier ones`, () => {
+  const L = layoutOffice(agents(20, [0]), proj);
   const rows = new Map();
   for (const r of L.rooms) rows.set(r.y, [...(rows.get(r.y) || []), r]);
   assert.ok(rows.size >= 2);
-  for (const [, list] of rows) assert.ok(Math.max(...list.map(r => r.x + r.w)) <= G.ROW_MAX);
+  for (const [, list] of rows) assert.ok(Math.max(...list.map(r => r.x + r.w)) <= proj.layout.rowMax);
   assert.deepEqual([...rows.keys()], [...rows.keys()].sort((p, q) => p - q));
 });
+test('the front view lets rows run wider than the isometric one', () => assert.ok(FRONT.layout.rowMax > ISO.layout.rowMax));
 
 test('tall walls only where nothing stands in their shadow', () => {
   const one = layoutOffice(agents(1)).rooms[0];
@@ -104,6 +108,29 @@ test('tall walls only where nothing stands in their shadow', () => {
   assert.equal(first.walls.north, 'low');                     // another row stands behind it
   assert.equal(inner.walls.west, 'low');
   assert.ok(many[many.length - 1].walls.north === 'tall');    // the back row keeps its tall wall
+});
+
+test('front: only the north wall may be tall, and only where nothing stands behind it; west walls are never tall', () => {
+  const one = layoutOffice(agents(1), FRONT).rooms[0];
+  assert.deepEqual(one.walls, { north: 'tall', west: 'low' });
+  const many = layoutOffice(agents(20), FRONT).rooms;
+  assert.ok(many.every(r => r.walls.west === 'low'), 'a west wall is edge-on in the front view');
+  assert.equal(many[0].walls.north, 'low');                          // another row stands behind it
+  assert.equal(many[many.length - 1].walls.north, 'tall');           // the back row keeps its tall wall
+  // a room to the west does not make a north wall low: nothing is hidden sideways
+  const two = layoutOffice(agents(2), FRONT).rooms;
+  assert.deepEqual(two.map(r => r.walls.north), ['tall', 'tall']);
+  // the wall pieces follow: tall pieces on the north side only
+  assert.ok(many.at(-1).items.filter(i => i.wall === 'west').every(i => i.id === 'wall_low'));
+  assert.ok(many.at(-1).items.filter(i => i.wall === 'north').every(i => i.id !== 'wall_low'));
+});
+
+test('the projection decides: the same agents give different walls, row widths and keep-free zones in the two views', () => {
+  const a = agents(10, [0, 1, 2]), iso = layoutOffice(a, ISO), front = layoutOffice(a, FRONT);
+  assert.notDeepEqual(iso.rooms.map(r => r.walls), front.rooms.map(r => r.walls));
+  assert.notDeepEqual(iso.rooms.map(r => [r.x, r.y]), front.rooms.map(r => [r.x, r.y]));
+  assert.notDeepEqual(ISO.sightZone({ x: 10, y: 10, w: 10, d: 10 }), FRONT.sightZone({ x: 10, y: 10, w: 10, d: 10 }));
+  assert.deepEqual(layoutOffice(a), iso, 'the default projection is isometric');
 });
 
 test('layout interface: empty office, shelf stays empty, no hard cap, no river, cars or roads', () => {

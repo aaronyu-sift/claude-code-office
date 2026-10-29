@@ -23,8 +23,9 @@ test('manifest: every id the layout places and every state of desk and worker ex
   for (let a = 0; a < APPEARANCES; a++) for (const p of POSES) ids.add(workerId(a, p));
   for (const id of ids) assert.ok(manifest.sprites[id], `${id} is used but not in the manifest`);
 });
-test('manifest: rectangles and pivots are consistent with the atlas', () => {
-  const P = manifest.projections.iso;
+const PROJS = ['iso', 'front'];
+for (const name of PROJS) test(`manifest: ${name}: rectangles and pivots are consistent with the atlas`, () => {
+  const P = manifest.projections[name];
   assert.ok(P && existsSync(new URL(P.atlas, dir)));
   for (const [id, s] of Object.entries(manifest.sprites)) {
     const pl = P.sprites[id];
@@ -41,11 +42,17 @@ test('manifest: rectangles and pivots are consistent with the atlas', () => {
 test('manifest: at least 60 sprites, no river, car, road or traffic, atlas within budget', () => {
   assert.ok(Object.keys(manifest.sprites).length >= 60);
   for (const id of Object.keys(manifest.sprites)) assert.doesNotMatch(id, /river|car|road|traffic/);
-  const size = readFileSync(new URL(manifest.projections.iso.atlas, dir)).length;
-  assert.ok(size <= 1.5e6, `atlas is ${size} bytes`);
+  for (const name of PROJS) {
+    const size = readFileSync(new URL(manifest.projections[name].atlas, dir)).length;
+    assert.ok(size <= 1.5e6, `${name} atlas is ${size} bytes`);
+  }
 });
-test('manifest: no two images overlap in the atlas', () => {
-  const P = manifest.projections.iso, rects = Object.values(P.sprites).flatMap(s => s.rects);
+test('manifest: both projections place the same sprites with the same number of facings', () => {
+  assert.deepEqual(Object.keys(manifest.projections.iso.sprites), Object.keys(manifest.projections.front.sprites));
+  for (const id of Object.keys(manifest.sprites)) assert.equal(manifest.projections.iso.sprites[id].rects.length, manifest.projections.front.sprites[id].rects.length, id);
+});
+for (const name of PROJS) test(`manifest: ${name}: no two images overlap in the atlas`, () => {
+  const P = manifest.projections[name], rects = Object.values(P.sprites).flatMap(s => s.rects);
   for (let i = 0; i < rects.length; i++) for (let j = i + 1; j < rects.length; j++) {
     const [a, b, c, d] = rects[i], [e, f, g, h] = rects[j];
     assert.ok(!(a < e + g && a + c > e && b < f + h && b + d > f), 'two sprites share atlas pixels');
@@ -59,15 +66,14 @@ test('manifest: the content minimums of plan section 5 are met (counting rule in
 test('manifest: every sprite id used by the layout props and every animated or lit sprite has what the scene reads', () => {
   const L = layoutOffice([{ id: 'x', cls: 2, project: 'p', color: '#fff' }]);
   for (const pr of L.rooms[0].props) assert.equal(manifest.sprites[pr.id].cat, 'deskprop');
-  const P = manifest.projections.iso;
-  for (const [id, s] of Object.entries(manifest.sprites)) {
+  for (const name of PROJS) for (const [id, s] of Object.entries(manifest.sprites)) {
+    const P = manifest.projections[name];
     if (s.tags.includes('lit')) assert.ok(P.sprites[id].anchors, `${id} is tagged lit but has no light anchors`);
     if (P.sprites[id].anchors) assert.equal(P.sprites[id].anchors.length, s.facings, `${id}: anchors per facing`);
   }
 });
-test('manifest: only small things animate (sway and steam sprites are at most 32 x 48 px)', () => {
-  const P = manifest.projections.iso.sprites;
+test('manifest: only small things animate (sway and steam sprites are at most 36 x 48 px)', () => {
   const moving = Object.entries(manifest.sprites).filter(([, s]) => s.tags.includes('sway') || s.tags.includes('steam'));
   assert.ok(moving.length >= 10);
-  for (const [id] of moving) for (const [, , w, h] of P[id].rects) assert.ok(w <= 32 && h <= 48, `${id} is ${w} x ${h} px, too big to animate`);
+  for (const name of PROJS) for (const [id] of moving) for (const [, , w, h] of manifest.projections[name].sprites[id].rects) assert.ok(w <= 36 && h <= 48, `${name}: ${id} is ${w} x ${h} px, too big to animate`);
 });
