@@ -574,7 +574,7 @@ main { flex: 1; min-height: 0; position: relative; }
   box-shadow: var(--shadow);
 }
 .of-ctl button:hover { color: var(--text); background: var(--panel-2); }
-.view-ofis[data-scene="pixel"] { display: flex; }
+.view-ofis[data-scene="pixel"]:not([hidden]) { display: flex; }          /* not for a hidden view: `.view[hidden]` has the same weight and this rule comes later */
 .of-area { position: relative; flex: 1 1 auto; min-width: 0; height: 100%; overflow: hidden; }
 .of-shelf { flex: 0 0 264px; width: 264px; display: flex; flex-direction: column; min-height: 0; background: var(--panel); border-left: 1px solid var(--line-2); user-select: text; -webkit-user-select: text; }
 .of-shelf[hidden] { display: none; }

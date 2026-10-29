@@ -6,14 +6,14 @@ import { workerId, APPEARANCES } from './ids.js';
 import { hashStr } from './layout.js';
 import { poseOf } from './shelf.js';
 
-const KEY = 'ajan-ofisi.shelf';          // 'open' or 'closed': the visitor's last choice (without one, the lane starts folded on a narrow window)
+const KEY = 'ajan-ofisi.shelf';          // 'open' or 'closed': the visitor's last choice (without one, the lane starts folded in a window narrower than NARROW)
 const REFRESH_MS = 20e3;
 const NARROW = 760;
 
 export function createShelfView({ root, area, msg, fmtShort, now, open, storage = null }) {
   const el = (tag, props = {}, ...kids) => { const n = Object.assign(document.createElement(tag), props); n.append(...kids); return n; };
   const pref = () => { try { return storage && storage.getItem(KEY); } catch { return null; } };
-  let collapsed = pref() ? pref() === 'closed' : root.getBoundingClientRect().width < NARROW;
+  let collapsed = pref() ? pref() === 'closed' : window.innerWidth < NARROW;         // the window, as the media query below: the view itself can be hidden (width 0) while it is built
   let atlas = null, atlasSeq = 0, entries = [], visible = false, timer = 0;
   const rows = new Map();                                    // id -> { li, fig, name, meta, when, sw, figKey }
 

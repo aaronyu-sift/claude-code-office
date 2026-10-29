@@ -206,8 +206,15 @@ if (want('ux')) {
     S.fx.finishSub(sub.id);
     let done = null, t0 = Date.now();
     while (Date.now() - t0 < 25000 && !done) {
-      const f = await P(`(() => { const c = p.agentCss(${JSON.stringify(sub.id)}); if (!c) return null; p.redraw(); return Object.assign({}, c, { fx: p.effects }); })()`);
+      const f = await P(`(() => { const c = p.agentCss(${JSON.stringify(sub.id)}); if (!c) return null; p.redraw(); return Object.assign({}, c, { fx: p.effects, size: p.size, zoom: p.zoom, pan: p.pan }); })()`);
       if (f && f.status === 'done') done = f; else await sleep(300);
+    }
+    // `p.redraw()` only asks the scheduler for a frame (at most 10 a second), so the effects of the first sample that shows the state are the ones of the
+    // frame before it: ask again and read on a later sample until the balloon is drawn (the figure stays at its seat for 4 s)
+    for (let k = 0; done && k < 12 && !(done.fx.doneBalloons >= 1); k++) {
+      await sleep(150);
+      const g = await P(`(() => { const c = p.agentCss(${JSON.stringify(sub.id)}); if (!c) return null; p.redraw(); return Object.assign({}, c, { fx: p.effects, size: p.size, zoom: p.zoom, pan: p.pan }); })()`);
+      if (g && g.status === 'done') done = g;
     }
     let left = false, tDone = Date.now();
     while (done && Date.now() - tDone < 12000 && !left) { left = !(await P(`p.figures().includes(${JSON.stringify(sub.id)})`)); if (!left) await sleep(300); }
@@ -215,7 +222,7 @@ if (want('ux')) {
       fx.markers === mf.length && fx.beams === waitN && fx.waitBalloons === waitN && fx.zzBalloons === n('dormant') && chips === waitN && !!hud &&
       !!done && /relax$/.test(done.sprite) && done.fx.doneBalloons >= 1 && left,
       `${mf.length} main figures: ${n('working')} working (typing poses), ${waitN} waiting for you (raised-hand pose, ${chips} "your turn" chips, summary "${hud}"), ${n('dormant')} asleep in rooms (an asleep chat is on the shelf, check 15); drawn: ${fx.markers} markers, ${fx.beams} light beams, ${fx.waitBalloons} wait balloons, ${fx.zzBalloons} Zz balloons; wrong poses ${wrongPose.length}; ` +
-      `done subagent: ${done ? `pose ${pose(done)}, check balloons drawn ${done.fx.doneBalloons}, left its seat after ${((Date.now() - tDone) / 1000).toFixed(1)} s: ${left}` : 'never reached the done state'}`);
+      `done subagent: ${done ? `pose ${pose(done)}, check balloons drawn ${done.fx.doneBalloons} (its seat at ${Math.round(done.x)},${Math.round(done.y)} in a ${done.size.join(' x ')} view, zoom ${done.zoom}, pan ${done.pan.join(',')}), left its seat after ${((Date.now() - tDone) / 1000).toFixed(1)} s: ${left}` : 'never reached the done state'}`);
 
     // hover tip: over an uncovered agent the tip shows its project and name and the figure gets a ring; away from it the tip goes
     const pf = await P(`p.figures().filter(id => p.agentCss(id).main).map(id => Object.assign({ id }, p.agentCss(id)))`);
@@ -638,6 +645,58 @@ if (want('scan')) {
       after.scan.totals.read === CAP + 1 && after.closed.length === CAP && after.closed[0].id === bumped.id,
       `${fx.closed.length} closed transcripts on disk (${sizes.filter(x => x > 256 * 1024).length} of the newest ${CAP} larger than the 256 KB tail, up to ${(Math.max(...sizes) / 1024).toFixed(0)} KB), budget ${BUDGET} ms per pass: the list is capped at ${settled.closed.length} and is the ${CAP} newest by file time (${finalIds.join() === wantN.join()}; the default cap is 50); it filled from the top over ${cold.passes} passes (partial lists seen ${sawPartial}, every one a prefix of the final list ${prefixOk}); cold: ${cold.read} transcripts read (never more than the cap, not 300), ${(cold.bytes / 1024).toFixed(0)} KB = the tail rule ${cold.bytes === tailSum}, ${cold.ms.toFixed(0)} ms in the scanner, longest pass ${cold.maxMs.toFixed(1)} ms; warm (${warm.scan.totals.passes - cold.passes} more passes): reads ${warm.scan.totals.read - cold.read} files and ${warm.scan.totals.bytes - cold.bytes} bytes, last pass ${warm.scan.ms.toFixed(1)} ms with ${warm.scan.statted} files stat'ed; one transcript appended to: read again once (reads ${after.scan.totals.read}), now first in the list ${after.closed[0].id === bumped.id}`);
   } finally { srv.stop(); fx.cleanup(); }
+}
+
+// ---- the four tabs: only the chosen view is displayed. The Office is the only view that is built from a scene with its own layout; when it
+// stayed displayed under the other tabs (its display rule was heavier than the hidden attribute) the Dashboard was a blue sky and the Cost
+// tab had it behind its text. Each tab is opened with a real click; what lies on top of the view, and what is displayed of the other views, is read back
+if (want('views')) {
+  const S = await scenario(10, { tag: 'views', query: '?time=12:00', fixture: { closed: 12 } });
+  try {
+    const ev = e => S.page.evaluate(e);
+    const probe = view => ev(`(() => {
+      const views = [...document.querySelectorAll('main .view')], active = document.querySelector('#view-${view}'), r = active.getBoundingClientRect();
+      const shown = views.filter(v => getComputedStyle(v).display !== 'none').map(v => v.id.replace('view-', ''));
+      const other = {};
+      for (const v of views) if (v !== active) other[v.id.replace('view-', '')] = [...v.querySelectorAll('*')].filter(e => e.getClientRects().length > 0).length + (v.getClientRects().length > 0 ? 1 : 0);
+      const over = [];
+      for (let i = 0; i < 16; i++) for (let j = 0; j < 10; j++) {
+        const e = document.elementFromPoint(r.left + (i + .5) * r.width / 16, r.top + (j + .5) * r.height / 10), v = e && e.closest('.view');
+        if (v && v !== active) over.push(v.id.replace('view-', '') + ':' + e.className.toString().slice(0, 18));
+      }
+      const sel = [...document.querySelectorAll('.top .seg button[data-view]')].filter(b => b.getAttribute('aria-selected') === 'true').map(b => b.dataset.view);
+      return JSON.stringify({ shown, other, over, sel, h: Math.round(r.height), text: active.innerText.trim().length, hidden: active.hidden });
+    })()`).then(JSON.parse);
+    const out = {};
+    for (const view of ['pano', 'akis', 'maliyet', 'ofis', 'pano']) {
+      const b = await ev(`(() => { const r = document.querySelector('.top .seg button[data-view="${view}"]').getBoundingClientRect(); return { x: r.left + r.width / 2, y: r.top + r.height / 2 }; })()`);
+      await S.page.mouse.click(b.x, b.y);
+      await sleep(900);
+      out[view] = await probe(view);
+    }
+    const names = Object.keys(out), bad = names.filter(v => {
+      const o = out[v], leaks = Object.entries(o.other).filter(([, n]) => n > 0).map(([k]) => k);
+      return o.shown.join() !== v || leaks.length || o.over.length || o.sel.join() !== v || o.hidden || o.h < 400 || o.text < (v === 'ofis' ? 40 : 100);
+    });
+    const back = await ev(px('p ? { figures: p.figures().length, shelf: p.shelf().rows.length } : null'));
+    // the shelf's first state follows the window, not the size of a view that is hidden while it is built: a page that opens on the Dashboard and
+    // goes to the Office later shows the shelf in a wide window, and folded in a narrow one
+    const url = `http://127.0.0.1:${S.srv.port}/?time=12:00&proj=${proj}&season=${season}`;
+    const firstShelf = async (w, hash) => {
+      await S.page.setViewport(w, 900, 1);
+      await ev(`localStorage.removeItem('ajan-ofisi.shelf')`);
+      await S.page.goto(url + hash, 1500);
+      await ev(`document.querySelector('.top .seg button[data-view="ofis"]').click()`);
+      await waitReady(S.page, 9);
+      await sleep(600);
+      return ev(px('(() => { const s = p.shelf(); return { mode: s.mode, hidden: s.hidden, tabHidden: s.tabHidden, tab: s.tab, rows: s.rows.length }; })()'));
+    };
+    const wideFirst = await firstShelf(1500, '#pano'), narrowFirst = await firstShelf(700, '#pano');
+    await S.page.setViewport(1500, 900, 1);
+    const shelfOk = wideFirst.mode === 'open' && !wideFirst.hidden && wideFirst.tabHidden && wideFirst.rows >= 13 && narrowFirst.mode === 'collapsed' && narrowFirst.hidden && !narrowFirst.tabHidden && /^Shelf · \d+$/.test(narrowFirst.tab);
+    check('18-views', bad.length === 0 && !!back && back.figures >= 9 && back.shelf >= 13 && shelfOk && S.page.errors.length === 0,
+      `tabs opened by a click: ${['pano', 'akis', 'maliyet', 'ofis'].map(v => `${v}: displayed [${out[v].shown}], selected [${out[v].sel}], boxes still laid out in the other views ${Object.values(out[v].other).reduce((a, n) => a + n, 0)}, elements of another view on top of this one at 160 sample points ${out[v].over.length}${out[v].over.length ? ' (' + out[v].over.slice(0, 2) + ')' : ''}, ${out[v].h} px high, ${out[v].text} characters of text`).join('; ')}; back on the Dashboard last; the Office came back with ${back && back.figures} figures and ${back && back.shelf} shelf rows; the page opened on the Dashboard and moved to the Office: the shelf is ${wideFirst.mode} in a 1500 px window (${wideFirst.rows} rows) and ${narrowFirst.mode} in a 700 px window (tab "${narrowFirst.tab}"); console errors ${S.page.errors.length}`);
+  } finally { await S.done(); }
 }
 
 // ---- 12. seasons: every outdoor id resolves, the pictures differ, the automatic season follows the date and the hemisphere
