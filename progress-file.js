@@ -43,7 +43,7 @@ function stamp(v) {
 function item(raw) {
   if (!raw || typeof raw !== 'object' || Array.isArray(raw) || !STATUSES.has(raw.status)) return null;
   return {
-    id: text(raw.id, 24), title: text(raw.title, 140), status: raw.status,
+    id: text(raw.id, 24), title: text(raw.title, 200), status: raw.status,
     prio: PRIOS.has(raw.prio) ? raw.prio : 'none',
     complexity: typeof raw.complexity === 'string' && COMPLEXITY.test(raw.complexity) ? raw.complexity : '',
     doingSince: stamp(raw.doingSince), doneAt: stamp(raw.doneAt),

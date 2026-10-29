@@ -726,7 +726,7 @@ function send(res, type, data) {
 let minuteMark = 0;
 function tick() {
   try {
-    if (demo) demo.step(now());
+    if (demo) { demo.step(now()); progress.load(JSON.stringify(demo.progress(now()))); }
     else { const justClosed = refreshSessions(); locateAndRead(); discoverSubs(); refreshClosed(justClosed); }
     if (CHAT) CHAT.step(agents, pushEvent, now());
     if (progress) progress.step();

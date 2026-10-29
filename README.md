@@ -270,6 +270,10 @@ A board agent is matched to a session through `agent_keys`; without a row, to th
 
 Independent of the bridge, the avatar tag of a working session shows its newest tool call with the description, for example `Bash · run the tests`, while it runs and for 20 seconds after.
 
+## Task progress (optional)
+
+If a chat works through a task list, the office can show how far it is: a bar under the chat's name on its card (done, being worked on, blocked, not started), the line "7 of 12 done · 2 doing", and the item in progress with how long it has been running. The office does not keep the list; it reads a small JSON snapshot that your task tracker writes after every change, by default `office-progress.json` in the Claude config directory (`~/.claude/office-progress.json`). Point it somewhere else with `--progress-file`, `OFFICE_PROGRESS_FILE` or `"progressFile"` in the config file. The snapshot is keyed by Claude Code session id, so each chat gets its own bar and a chat without an entry shows none. A missing or broken file means no bars, never an error. The format, the limits and how the page uses it are in [docs/progress.md](docs/progress.md); the demo (`npm run demo`) has sample bars.
+
 ## Embed it into your own site
 
 The server is also a plain request handler, so you can mount it into an existing Express/Connect app:

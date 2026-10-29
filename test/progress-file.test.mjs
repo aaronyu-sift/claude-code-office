@@ -59,7 +59,7 @@ test('progress file: hostile strings lose control characters, bidi marks and len
   const p = m.get('s');
   const unsafe = new RegExp('[\\u0000-\\u001f\\u007f-\\u009f\\u200b-\\u200f\\u2028-\\u202e\\u2066-\\u2069\\ufeff]');
   for (const s of [p.topic, ...p.items.flatMap(i => [i.id, i.title, i.complexity])]) assert.doesNotMatch(s, unsafe, 'control or bidi character left');
-  assert.ok(p.topic.length <= 120 && p.items[0].title.length <= 140 && p.items[0].id.length <= 24);
+  assert.ok(p.topic.length <= 120 && p.items[0].title.length <= 200 && p.items[0].id.length <= 24);
   assert.ok(p.items[0].title.endsWith('…'), 'a cut title says so');
   assert.match(p.topic, /^<img src=x onerror=alert\(1\)> reversed line Tab <img src=x/, 'whitespace collapsed, the text kept as it is');
   assert.equal(p.items[1].title, '');
