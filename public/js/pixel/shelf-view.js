@@ -3,7 +3,8 @@
 // "closed 12m ago". It scrolls on its own, a click opens the details panel (`open(id, rowElement)`), and it can be folded away (a tab at the edge of the
 // scene brings it back); it comes in from the right edge and goes out again by the motion rules (docs/motion.md). Only the newest few chats get a row (the setting `shelf`, capEntries in shelf.js); a footer in the card says how many are left out
 // and adds ten more rows to the view for this visit. Rows are kept by id, so a refresh keeps the scroll position and the focus; the times are refreshed
-// every 20 s while the view is on screen, and nothing runs otherwise.
+// every 20 s while the view is on screen, and nothing runs otherwise. The figure of a row is drawn from the pixel atlas, or by the renderer a scene passes as `figure`
+// ({ key(entry) -> string, draw(canvas, entry) }: the row draws again only when the key changes).
 import { workerId, APPEARANCES } from './ids.js';
 import { hashStr } from './layout.js';
 import { poseOf, capEntries, DEFAULT_CAP } from './shelf.js';
@@ -14,7 +15,7 @@ const REFRESH_MS = 20e3;
 const NARROW = 760;
 const MORE = 10;                         // the footer button adds this many rows
 
-export function createShelfView({ root, area, msg, fmtShort, now, open, storage = null }) {
+export function createShelfView({ root, area, msg, fmtShort, now, open, storage = null, figure = null }) {
   const el = (tag, props = {}, ...kids) => { const n = Object.assign(document.createElement(tag), props); n.append(...kids); return n; };
   const pref = () => { try { return storage && storage.getItem(KEY); } catch { return null; } };
   let collapsed = pref() ? pref() === 'closed' : window.innerWidth < NARROW;         // the window, as the media query below: the view itself can be hidden (width 0) while it is built
@@ -57,6 +58,7 @@ export function createShelfView({ root, area, msg, fmtShort, now, open, storage 
   }
 
   function drawFigure(row, e) {
+    if (figure) { const key = figure.key(e); if (row.figKey !== key) { figure.draw(row.fig, e); row.figKey = key; } return; }
     if (!atlas) return;
     const id = workerId(hashStr(e.id) % APPEARANCES, poseOf(e)), key = id + '#' + atlasSeq;
     if (row.figKey === key) return;

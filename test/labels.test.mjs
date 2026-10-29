@@ -49,3 +49,17 @@ test('declutter: labels give way to each other before they give way to figures',
   const out = placeLabels(items, 200, 150, 6, 3, [{ x: 0, y: 0, w: 200, h: 150 }]);
   assert.ok(!hit(rect(out.get('a'), items[0]), rect(out.get('b'), items[1])) || out.get('b').ok === false);
 });
+
+test('declutter: `taken` rects are kept clear of and are not part of the result', () => {
+  const taken = [{ x: 400, y: 300, w: 200, h: 100 }];
+  const items = [{ id: 'a', ax: 500, ay: 330, w: 120, h: 40, pri: 100, force: false }];            // the preferred spot (440, 286) overlaps the taken rect
+  const out = placeLabels(items, 1500, 790, 6, 3, [], taken);
+  assert.equal(out.size, 1);
+  const p = out.get('a');
+  assert.ok(p.ok, 'a free spot is found');
+  assert.ok(!hit({ x0: p.x, y0: p.y, x1: p.x + 120, y1: p.y + 40 }, { x0: 400, y0: 300, x1: 600, y1: 400 }));
+  // without it the label stays at the preferred spot
+  const free = placeLabels(items, 1500, 790, 6, 3, []).get('a');
+  assert.equal(free.x, 440);
+  assert.equal(free.y, 330 - 40 - 6);
+});

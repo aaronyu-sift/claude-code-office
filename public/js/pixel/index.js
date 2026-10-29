@@ -1,7 +1,7 @@
 // The pixel office view: same interface as the old three.js view (createOfis): { show, hide, update }.
 // It owns the DOM (canvas, labels, summary, zoom buttons), turns the store into rooms and seated agents, and wires input to the scene.
 import { t as msg } from '../i18n.js';
-import { esc, fmtShort } from '../util.js';
+import { esc } from '../util.js';
 import { projectionByName } from './projection.js';
 import { loadAtlas } from './atlas.js';
 import { layoutOffice, roomCap, hashStr } from './layout.js';
@@ -13,25 +13,15 @@ import { merge, load as loadSettings, save as saveSettings, clean as cleanSettin
 import { seasonOfDate, dateKey, parseDateKey, lightMonth } from './season.js';
 import { resolveWeather, planFor, createField, drawRainbow, rainbowFor, PARTICLE_CAP } from './weather.js';
 import { createLabelLayer, placeLabels } from './labels.js';
-import { shelfEntries, isShelved } from './shelf.js';
-import { createShelfView } from './shelf-view.js';
+import { isShelved } from './shelf.js';
 import { createBoardLayer } from './board.js';
-import { createAgentCard } from './card.js';
+import { createOfficeUi, MIN_TARGET } from '../office-ui.js';
+import { labelParts, labelHtml } from '../office-labels.js';
 import { ZOOMS, fitZoom, minZoom, stepZoom, centerPan, clampPan, zoomAbout } from './input.js';
 
 const FIT_ICON = '<svg class="ic" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M2.5 6V2.5H6M10 2.5h3.5V6M13.5 10v3.5H10M6 13.5H2.5V10"/></svg>';
 const DONE_MS = 4500;                 // a finished subagent stays at its desk this long
 const PROJ_KEY = 'ajan-ofisi.proj';       // the chosen view (iso or front) is kept in localStorage; ?proj= wins over it and is not stored
-const MIN_TARGET = 24;                // smallest click target around an agent, in CSS px
-const clipTxt = (s, n) => { s = String(s || ''); return s.length > n ? s.slice(0, n - 1) + '…' : s; };
-
-function shortDesc(s) {
-  const d = String(s.desc || s.atype || msg('agent.sub')).trim().replace(/\s+/g, ' ');
-  if (d.length <= 18) return d;
-  let out = '';
-  for (const w of d.split(' ')) { const nx = out ? out + ' ' + w : w; if (nx.length > 18) break; out = nx; }
-  return (out || d.slice(0, 16) + '…').replace(/[\s:;,.\-–—]+$/, '');
-}
 
 function storedProj() { try { return localStorage.getItem(PROJ_KEY) || 'iso'; } catch { return 'iso'; } }
 
@@ -226,35 +216,23 @@ export function createPixelOffice(root, ctx, opts = {}) {
   applyTime(nowClock(), true);
   updateSeason(true);
 
-  // ---------------------------------------------------------- the shelf
-  // Chats without a room: asleep ones (they leave their room) and closed ones (the server's list). shelf.js decides who and in which order,
-  // shelf-view.js draws the card beside the scene; a click opens the same card as a click on a figure, next to the row.
-  const shelf = createShelfView({ root, area, msg, fmtShort, now: () => store.now(), open: (id, row) => { ctx.tip.hide(); card.open(id, row); }, storage });
-  const syncShelf = () => shelf.update(shelfEntries({ agents: [...store.agents.values()], closed: store.closed || [] }));
-  shelf.setMax(settings.shelf);                                      // only the newest few have a row (setting `shelf`, ?shelf=N)
-
-  // ---------------------------------------------------------- the card
-  // A click on an agent, on a room's floor (its main agent) or on a row of the shelf opens a card next to it (card.js): no drawer, no dimming. The
-  // card is placed in the coordinates of `root`; the agent's place comes from the scene (it follows pan and zoom), a shelf row's from the page.
-  const rel = r => { const b = root.getBoundingClientRect(); return { x: r.left - b.left, y: r.top - b.top, w: r.width, h: r.height }; };
-  function anchorOf(id, row) {
-    const shelfRow = el => ({ ...rel(el.getBoundingClientRect()), kind: 'shelf', prefer: 'left' });
-    if (row && row.isConnected) return shelfRow(row);
-    const f = scene && layout ? scene.figureInfo(id) : null;
-    if (f) {
-      const { zoom, panX, panY, dpr } = view, a = rel(area.getBoundingClientRect());
-      const w = Math.max(f.w * zoom / dpr, MIN_TARGET), h = Math.max(f.h * zoom / dpr, MIN_TARGET);
-      return { x: a.x + (f.cx * zoom + panX) / dpr - w / 2, y: a.y + (f.cy * zoom + panY) / dpr - h / 2, w, h, kind: 'scene', prefer: 'right' };
-    }
-    const own = root.querySelector(`.sh-list li[data-id="${CSS.escape(id)}"] button`);
-    return own ? shelfRow(own) : null;
-  }
-  const boundsOf = kind => {
-    const b = root.getBoundingClientRect(), a = rel(area.getBoundingClientRect()), c = covered();
-    return kind === 'shelf' ? { x0: 0, y0: a.y + c.top, x1: b.width, y1: b.height } : { x0: a.x, y0: a.y + c.top, x1: a.x + a.w - c.right, y1: a.y + a.h };
-  };
-  const card = createAgentCard({ root, ctx, storage, anchorOf, boundsOf, onSelect: id => { if (scene) { scene.setSelected(id); redraw(false); } } });
-  const openAgent = id => { ctx.tip.hide(); card.open(id); };
+  // ---------------------------------------------------------- the shelf and the card
+  // The floating interface is shared with the three.js scene (office-ui.js): the shelf card of the chats without a room (the asleep ones leave their room, the closed ones come
+  // from the server's list; only the newest few have a row, setting `shelf`) and the card that a click on an agent, on a room's floor or on a shelf row opens next to it. This
+  // scene supplies where an agent is on the screen (it follows pan and zoom) and how its selection is marked.
+  const ui = createOfficeUi({
+    root, area, ctx, storage, shelfMax: settings.shelf,
+    figureBox(id) {
+      const f = scene && layout ? scene.figureInfo(id) : null;
+      if (!f) return null;
+      const { zoom, panX, panY, dpr } = view;
+      return { cx: (f.cx * zoom + panX) / dpr, cy: (f.cy * zoom + panY) / dpr, w: f.w * zoom / dpr, h: f.h * zoom / dpr };
+    },
+    setSelected: id => { if (scene) { scene.setSelected(id); redraw(false); } },
+    onShelfFirst: () => { if (visible && autoFit) fit(); },
+  });
+  const { shelf, card, covered } = ui;
+  const openAgent = ui.openAgent;
 
   // ---------------------------------------------------------- store -> rooms and seats
   function mains() {
@@ -356,16 +334,7 @@ export function createPixelOffice(root, ctx, opts = {}) {
   root.dataset.project = settings.project;
 
   // ---------------------------------------------------------- labels
-  function mainLabel(room, a) {
-    const wait = a.status === 'waiting' || a.status === 'ask';
-    const chip = wait ? `<span class="of-chip w">${esc(msg(a.status === 'ask' ? 'of.chipAsk' : 'of.chipWait'))} · <span data-since="${a.since}" data-fmt="short">${fmtShort(store.now() - a.since)}</span></span>` : '';
-    const more = room.overflow ? `<span class="of-chip">+${room.overflow}</span>` : '';
-    const doing = a.status === 'working' && a.doing ? `<span class="px-doing">${esc(a.doing.n)} · ${esc(clipTxt(a.doing.l, 46))}</span>` : '';
-    const say = a.say ? `<span class="px-say ${a.say.dir}">${a.say.dir === 'in' ? '← ' : '→ '}${esc(clipTxt(a.say.text, 56))}</span>` : '';
-    const name = a.name || a.title || a.project;
-    return `<div class="px-top"><span class="sw" style="background:${esc(a.color)}"></span><span class="px-proj">${esc(a.project)}</span>${chip}${more}</div>` +
-      `<div class="px-name">${esc(name)}</div>${doing}${say}`;
-  }
+  const mainLabel = (room, a) => labelHtml(labelParts(a, { main: true, overflow: room.overflow }), { now: store.now(), p: 'px' });
   function updateLabels() {
     const live = new Set();
     for (const room of layout.rooms) {
@@ -378,7 +347,7 @@ export function createPixelOffice(root, ctx, opts = {}) {
       const a = store.agents.get(id), room = layout.rooms.find(r => r.id === s.roomId);
       if (!a || !room) continue;
       live.add(id);
-      labels.set(id, `<span class="sw" style="background:${esc(a.color)}"></span>${esc(shortDesc(a))}`, `px-sub ${a.status}`, { room, slot: s.slot, main: false });
+      labels.set(id, labelHtml(labelParts(a, { main: false }), { p: 'px' }), `px-sub ${a.status}`, { room, slot: s.slot, main: false });
     }
     for (const id of labels.ids()) if (!live.has(id)) labels.drop(id);
     boards.sync(layout.rooms.filter(r => store.agents.has(r.id)).map(r => { const a = store.agents.get(r.id); return { id: r.id, name: a.name, title: a.title, project: a.project, color: a.color, status: a.status, overflow: r.overflow }; }));
@@ -454,18 +423,7 @@ export function createPixelOffice(root, ctx, opts = {}) {
       b.setAttribute('aria-disabled', String(off));
     }
   }
-  // What floats over the scene (CSS px, from the top and from the right of the area): the page's bar and the shelf card. The scene spans the whole
-  // area behind them; "fit" frames the offices in what is left, and the agent card is placed there too.
   const LABEL_ROOM = 56;                                              // CSS px kept free above the offices for the labels of the top row of agents
-  // where an element rests, not where an animation has it right now: its box without transforms (the shelf card arrives with a small travel and scale, and the
-  // first fit runs the moment it appears)
-  const restLeft = el => { const p = el.offsetParent; return p ? p.getBoundingClientRect().left + p.clientLeft + el.offsetLeft : el.getBoundingClientRect().left; };
-  function covered() {
-    const a = area.getBoundingClientRect(), top = parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--top-h'));
-    const shelfEl = root.querySelector('.of-shelf');
-    const right = shelfEl && !shelfEl.hidden && root.dataset.shelf === 'open' ? Math.max(0, a.right - restLeft(shelfEl) + 8) : 0;
-    return { top: Number.isFinite(top) ? Math.max(0, Math.min(top - a.top + 4, a.height * 0.4)) : 0, right: right > a.width * 0.45 ? 0 : right };
-  }
   function fit(draw = true) {
     if (!scene || !scene.layout) return;
     const b = scene.fitBox, c = covered(), top = (c.top + (c.top ? LABEL_ROOM : 0)) * view.dpr, right = c.right * view.dpr;          // the labels stand above the agents, so the offices start a little lower than the bar's edge
@@ -498,12 +456,6 @@ export function createPixelOffice(root, ctx, opts = {}) {
     redraw();
   }
   new ResizeObserver(() => { if (visible) resize(); }).observe(area);
-  let shelfMode = root.dataset.shelf || 'none';
-  new MutationObserver(() => {                                         // the shelf card shows up for the first time: frame the offices in the free part; folding or unfolding it never moves the map
-    const m = root.dataset.shelf || 'none', first = shelfMode === 'none' && m === 'open';
-    shelfMode = m;
-    if (first && visible && autoFit) fit();
-  }).observe(root, { attributes: true, attributeFilter: ['data-shelf'] });
 
   // ---------------------------------------------------------- picking, hover, click
   const toVirtual = (cx, cy) => [(cx * view.dpr - view.panX) / view.zoom, (cy * view.dpr - view.panY) / view.zoom];
@@ -634,8 +586,7 @@ export function createPixelOffice(root, ctx, opts = {}) {
   function sync() {
     if (frozen) return;
     try {
-      if (store.ready) syncShelf();
-      card.refresh();
+      ui.sync();
       if (!scene) { renderSum(); return; }
       if (!store.ready) { renderSum(); return; }
       syncRooms();
@@ -799,7 +750,7 @@ export function createPixelOffice(root, ctx, opts = {}) {
   return {
     show() {
       visible = true;
-      shelf.setVisible(true);
+      ui.setVisible(true);
       if (clockStale) { clockStale = false; applyTime(nowClock()); }
       resize();
       sync();
@@ -807,11 +758,9 @@ export function createPixelOffice(root, ctx, opts = {}) {
     },
     hide() {
       visible = false;
-      shelf.setVisible(false);
+      ui.setVisible(false);
       clearTimeout(clickTimer);
       clearTimeout(expiry);
-      ctx.tip.hide();
-      card.close();
     },
     update() { if (visible) sync(); },
     get projection() { return proj.name; },

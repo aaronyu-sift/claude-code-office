@@ -6,8 +6,11 @@ import { RoundedBoxGeometry } from 'three/addons/geometries/RoundedBoxGeometry.j
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { catColor, hash, esc, icon, fmtShort } from './util.js';
 import { t as msg } from './i18n.js';
+import { labelParts, labelHtml } from './office-labels.js';
 import { createEnv } from './ofis-env.js';
 import { LOOP, wave } from './motion.js';
+import { createOfisUi } from './ofis-ui.js';
+import { layoutLabels } from './ofis-label-layout.js';
 import * as AS from './ofis-assets.js';
 import * as PL from './ofis-polish.js';
 import { makePalette, PALETTES, chooseOutfit, poseBones } from './ofis-rig.js';
@@ -31,6 +34,7 @@ const PAL = Object.fromEntries(Object.entries(PALETTES).map(([k, v]) => [k, make
 const WALL_H = 2.2, LOW_H = 0.3;
 const SIGN_H = 1.24, SIGN_Y = 1.5;       // room sign on the wall (center height)
 const SIGN_HTML_BELOW = 19;               // below this zoom, an HTML fallback sign replaces the wall text
+const SUB_LABEL_REACH = 70;               // px a sub-agent's label may be from its agent: farther away it would read as another agent's
 const SIGN_PX = 288;                      // sign texture height in pixels (for crisp text)
 const SIGN_FONT = '"Segoe UI Variable Text", "Segoe UI", system-ui, sans-serif';
 const SIGN_FONT_D = '"Segoe UI Variable Display", "Segoe UI", system-ui, sans-serif';
@@ -88,19 +92,6 @@ function angTo(a, b, k) {
 }
 const lerp = (a, b, k) => a + (b - a) * k;
 const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
-
-function shortDesc(s) {
-  const d = String(s.desc || s.atype || msg('agent.sub')).trim().replace(/\s+/g, ' ');
-  if (d.length <= 14) return d;
-  let out = '';
-  for (const w of d.split(' ')) {
-    const nx = out ? out + ' ' + w : w;
-    if (nx.length > 14) break;
-    out = nx;
-  }
-  if (!out) out = d.slice(0, 12) + '…';
-  return out.replace(/[\s:;,.\-–—]+$/, '');
-}
 
 // ------------------------------------------------------------ shared geometries
 
@@ -275,14 +266,18 @@ function drawScreen(g, w, h) {
 // without them the scene follows the local clock and the address
 export function createOfis(root, ctx, opts = {}) {
   const { store } = ctx;
+  // the scene (`area`: pointer, wheel and size belong to it) and the column beside it (`.of-side`: the shelf card, ofis-ui.js, with the zoom buttons right under it), as in
+  // the pixel scene; the scene spans the whole view and the card, the buttons and the page's bar float over it
   root.innerHTML =
+    '<div class="of-area">' +
     '<div class="of-stage"></div><div class="of-layer"></div>' +
     '<div class="of-hud"><div class="of-sum"></div></div>' +
-    '<div class="of-ctl">' +
+    '<div class="of-empty" hidden></div></div>' +
+    '<div class="of-side"><div class="of-ctl">' +
     `<button type="button" data-z="in" title="${esc(msg('of.zoomIn'))}">+</button>` +
     `<button type="button" data-z="out" title="${esc(msg('of.zoomOut'))}">−</button>` +
-    `<button type="button" data-z="fit" title="${esc(msg('of.fit'))}">${FIT_ICON}</button></div>` +
-    '<div class="of-empty" hidden></div>';
+    `<button type="button" data-z="fit" title="${esc(msg('of.fit'))}">${FIT_ICON}</button></div></div>`;
+  const area = root.querySelector('.of-area');
   const stage = root.querySelector('.of-stage');
   const layer = root.querySelector('.of-layer');
   const sumEl = root.querySelector('.of-sum');
@@ -409,12 +404,19 @@ export function createOfis(root, ctx, opts = {}) {
     camera.up.set(0, 1, 0);
     camera.lookAt(focus);
     camera.updateMatrixWorld();
+    ui.syncZoom(zoom, zMin, zMax);
   }
 
   const hoverRing = new THREE.Mesh(GEO.hover, MAT.hover);
   hoverRing.visible = false;
   hoverRing.renderOrder = 3;
   scene.add(hoverRing);
+  // the agent whose card is open keeps the ring that the hover gives, as in the pixel scene (ofis-ui.js says which agent)
+  const selRing = new THREE.Mesh(GEO.hover, MAT.hover);
+  selRing.visible = false;
+  selRing.renderOrder = 3;
+  scene.add(selRing);
+  let selectedId = null;
 
   // surroundings (street, river, woods, mountains): laid out around world.bounds in applyBounds, animated in step
   const env = createEnv({ scene, camera, lights: { hemi, sun }, lightDir: LIGHT, softwareGL: SOFTWARE_GL, fitBox: () => projBounds(), atmosphere: opts.atmosphere });
@@ -435,6 +437,7 @@ export function createOfis(root, ctx, opts = {}) {
   let builds = 0;                // how many times the building was built (verification only)
   const chars = new Map();       // agent id → character
   const labels = new Set();
+  let labelSeq = 0;
   const signs = new Map();       // session id → sign label
   const themeOf = new Map();     // project → theme index; open projects get distinct colors when possible
   let extras = null;             // optional local decoration module { mod, w }
@@ -449,6 +452,12 @@ export function createOfis(root, ctx, opts = {}) {
   const toolFns = [];            // api.onToolChange listeners, per build like extraFrame
   const gRay = new THREE.Raycaster(), gNdc = new THREE.Vector2(), gPlane = new THREE.Plane(), gUp = new THREE.Vector3(0, 1, 0);
   const gV1 = new THREE.Vector3(), gV2 = new THREE.Vector3(), gV3 = new THREE.Vector3(), gBox = new THREE.Box3();
+  // the floating interface shared with the pixel scene (ofis-ui.js): the card beside a clicked agent, the shelf card and the zoom buttons
+  const ui = createOfisUi({
+    root, area, ctx, camera, size: () => [vw, vh], charOf: id => chars.get(id),
+    setSelected: id => { selectedId = id; },
+    onShelfFirst: () => { if (visible && autoFit) fit(); },
+  });
 
   function assignThemes(list) {
     const live = [];
@@ -475,7 +484,7 @@ export function createOfis(root, ctx, opts = {}) {
     el.style.zIndex = String(pri);
     el.style.visibility = 'hidden';
     layer.appendChild(el);
-    const L = { el, pri, mode, gap, minZoom, pos: new THREE.Vector3(), want: true, shown: false, html: '', dirty: true, w: 0, h: 0, force: false };
+    const L = { el, pri, mode, gap, minZoom, pos: new THREE.Vector3(), want: true, shown: false, html: '', dirty: true, w: 0, h: 0, force: false, uid: 'l' + (++labelSeq), agent: false, rank: 0 };
     labels.add(L);
     return L;
   }
@@ -491,12 +500,17 @@ export function createOfis(root, ctx, opts = {}) {
     L.el.style.visibility = on ? 'visible' : 'hidden';
   }
 
+  // The labels of the agents (`agent`) may leave their spot for a free one near their agent; every other label keeps its spot and is dropped when it touches a label of higher
+  // priority; nothing is drawn under the card or the shelf (ofis-label-layout.js).
   const PV = new THREE.Vector3();
   function placeLabels() {
     const s = clamp(zoom / 38, 0.74, 1);
-    const list = [];
+    const fixed = [], tags = [], byId = new Map();
     for (const L of labels) {
       if (!L.want || L.off || zoom < L.minZoom || (L.maxZoom && zoom >= L.maxZoom)) { showLabel(L, false); continue; }
+      // the label under a main agent says the project and the chip at every zoom (office-labels.js): the HTML sign for the far zoom would say it twice
+      if (L.sign === undefined) L.sign = L.el.classList.contains('of-signl');
+      if (L.sign) { const m = chars.get(L.el.dataset.id); if (m && m.tag.want && !m.tag.off) { showLabel(L, false); continue; } }
       if (L.dirty) { L.w = L.el.offsetWidth; L.h = L.el.offsetHeight; L.dirty = false; }
       PV.copy(L.pos).project(camera);
       const sx = (PV.x + 1) / 2 * vw, sy = (1 - PV.y) / 2 * vh;
@@ -505,21 +519,17 @@ export function createOfis(root, ctx, opts = {}) {
       const x = sx - w / 2;
       const y = L.mode === 'up' ? sy - h - L.gap * k : L.mode === 'mid' ? sy - h / 2 : sy + L.gap * k;
       if (x > vw + 4 || x + w < -4 || y > vh + 4 || y + h < -4) { showLabel(L, false); continue; }
-      L.x = x; L.y = y; L.sw = w; L.sh = h; L.k = k;
-      list.push(L);
+      L.k = k;
+      byId.set(L.uid, L);
+      (L.agent ? tags : fixed).push({ id: L.uid, x, y, w, h, pri: L.pri, rank: L.rank, force: L.force, maxGap: L.force ? Infinity : SUB_LABEL_REACH });
     }
-    list.sort((a, b) => b.pri - a.pri || b.y - a.y);
-    const placed = [];
-    for (const L of list) {
-      let ok = true;
-      if (!L.force) {
-        for (const P of placed) {
-          if (L.x < P.x + P.sw + 3 && L.x + L.sw + 3 > P.x && L.y < P.y + P.sh + 2 && L.y + L.sh + 2 > P.y) { ok = false; break; }
-        }
-      }
-      if (!ok) { showLabel(L, false); continue; }
-      placed.push(L);
-      L.el.style.transform = `translate(${L.x.toFixed(1)}px,${L.y.toFixed(1)}px) scale(${L.k.toFixed(3)})`;
+    const figs = ui.figureRects(chars.keys());
+    for (const T of tags) { const L = byId.get(T.id); T.near = figs.get(L.charId); }
+    const shown = layoutLabels({ fixed, tags, blocked: ui.blocked(), figures: [...figs.values()], vw, vh });
+    for (const [id, L] of byId) {
+      const p = shown.get(id);
+      if (!p) { showLabel(L, false); continue; }
+      L.el.style.transform = `translate(${p.x.toFixed(1)}px,${p.y.toFixed(1)}px) scale(${L.k.toFixed(3)})`;
       showLabel(L, true);
     }
   }
@@ -1512,6 +1522,9 @@ export function createOfis(root, ctx, opts = {}) {
    *     staff poses every frame before onFrame callbacks run, so temporary offsets written in onFrame are safe.
    * api.pickFigure(clientX, clientY) → the person under that screen point (same shape as an api.figures() entry, plus
    *     id for an agent), or null. Tall walls in front hide the people behind them.
+   * api.agentScreen(id) → { cx, cy, w, h } | null: where the agent with that id is on the screen, in CSS px from the top left of
+   *     the office view (the box api.pickFigure tests, projected; cx, cy is its centre), or null when it is not in the scene.
+   *     The card that opens beside a clicked agent (ofis-ui.js) is anchored to it and follows it through pan, zoom and walking.
    * api.seatOf(figure) → { x, z, aisleX, room } for a seated agent: its seat and the walking line in front of the desk
    *     (world coordinates), or null (not an agent, or walking in or out).
    * api.layout() → { width, depth, entryX, halls: [{ z0, z1, lane }], rooms: [{ id, x0, x1, z0, z1, door, doorX, hall }] }:
@@ -1705,6 +1718,7 @@ export function createOfis(root, ctx, opts = {}) {
         const f = best.f;
         return { root: f.root, hip: f.hip, upper: f.upper, head: f.head, armL: f.armL, armR: f.armR, legL: f.legL, legR: f.legR, staff: best.staff, id: best.id };
       },
+      agentScreen: id => ui.agentBox(id),
       seatOf(fig) {
         for (const c of chars.values()) {
           if (!fig || c.root !== fig.root) continue;
@@ -2082,8 +2096,10 @@ export function createOfis(root, ctx, opts = {}) {
       heading: -Math.PI / 2, th: -Math.PI / 2, sit: 1, walkPh: 0, ph: (h % 1000) / 159, doneAt: 0,
       tag: null, bal: null,
     };
-    c.tag = mkLabel('of-tagl', main ? 70 : 40, 'down', 3, main ? 8 : 17);
+    c.tag = mkLabel('of-tagl', main ? 70 : 40, 'down', 3, main ? 0 : 12);
     c.bal = mkLabel('of-ball', main ? 60 : 30, 'up', 6, main ? 0 : 22);
+    c.tag.agent = true;
+    c.tag.charId = id;
     c.tag.el.dataset.id = id;
     c.bal.el.dataset.id = id;
     return c;
@@ -2244,8 +2260,6 @@ export function createOfis(root, ctx, opts = {}) {
     return `<div class="of-bal${sm}" style="--c:${catColor(cat)}">${icon(cat)}</div>`;
   }
 
-  const clipTxt = (s, n) => { s = String(s || ''); return s.length > n ? s.slice(0, n - 1) + '…' : s; };
-
   function refreshLabels() {
     const t = store.now();
     for (const room of world.rooms.values()) {
@@ -2269,12 +2283,12 @@ export function createOfis(root, ctx, opts = {}) {
       const a = store.agents.get(c.id);
       if (!a) continue;
       const wait = c.main && (a.status === 'waiting' || a.status === 'ask');
-      const txt = c.main ? a.name || a.project : shortDesc(a);
-      const doing = c.main && a.status === 'working' && a.doing
-        ? `<span class="of-doing">${esc(a.doing.n)} · ${esc(clipTxt(a.doing.l, 46))}</span>` : '';
-      const say = c.main && a.say
-        ? `<span class="of-say ${a.say.dir}">${a.say.dir === 'in' ? '← ' : '→ '}${esc(clipTxt(a.say.text, 56))}</span>` : '';
-      setLabel(c.tag, `<div class="of-tag ${c.main ? 'chef' : ''} ${a.status}${doing || say ? ' more' : ''}">${esc(txt)}${doing}${say}</div>`);
+      // the same text as the pixel scene's label (office-labels.js), with the "what it does" line for sub-agents too
+      const room = c.main ? world.rooms.get(c.id) : null;
+      const parts = labelParts(a, { main: c.main, overflow: room ? room.overflow || 0 : 0, activity: true });
+      setLabel(c.tag, `<div class="px-l ${c.main ? 'px-main' : 'px-sub'} ${a.status}">${labelHtml(parts, { now: t, p: 'px' })}</div>`);
+      c.tag.force = c.main;
+      c.tag.rank = c.main ? (wait ? 120 : 100) : 10;      // as in the pixel scene: the chats that wait for you first, then the other main agents, then the sub-agents
       const bh = balloonHtml(a, c);
       setLabel(c.bal, bh, undefined, wait ? 100 : c.main ? 60 : a.status === 'done' ? 50 : 30);
       c.bal.want = !!bh;
@@ -2448,6 +2462,9 @@ export function createOfis(root, ctx, opts = {}) {
       if (c) { hoverRing.visible = true; hoverRing.position.set(c.root.position.x, 0.035, c.root.position.z); }
       else hoverRing.visible = false;
     } else hoverRing.visible = false;
+    const sel = selectedId && chars.get(selectedId);
+    if (sel) { selRing.visible = true; selRing.position.set(sel.root.position.x, 0.035, sel.root.position.z); }
+    else selRing.visible = false;
   }
 
   // ---------------------------------------------------------- camera: fit, pan, zoom
@@ -2490,8 +2507,8 @@ export function createOfis(root, ctx, opts = {}) {
   function fit() {
     const p = projBounds();
     if (!p) return;
-    const narrow = vw < 640;
-    const padT = narrow ? 52 : 18, padB = narrow ? 12 : 16, padL = narrow ? 8 : 18, padR = narrow ? 8 : 24;
+    const narrow = vw < 640, cov = ui.covered();                     // the bar and the shelf card float over the view: the offices are framed in what they leave free
+    const padT = Math.max(narrow ? 52 : 18, cov.top + 8), padB = narrow ? 12 : 16, padL = narrow ? 8 : 18, padR = Math.max(narrow ? 8 : 24, cov.right);
     const zf = Math.min((vw - padL - padR) / (p.a1 - p.a0), (vh - padT - padB) / (p.b1 - p.b0));
     zoom = clamp(zf, 3, 70);
     zMin = Math.min(zoom * 0.7, 8);
@@ -2579,8 +2596,8 @@ export function createOfis(root, ctx, opts = {}) {
 
   const ptrs = new Map();
   let drag = null, pinch = null, clickTimer = 0;
-  root.addEventListener('pointerdown', e => {
-    if (e.target.closest('.of-ctl')) return;
+  area.addEventListener('pointerdown', e => {
+    if (e.target.closest('.of-ctl, .of-shelf-tab')) return;
     if (e.pointerType === 'mouse' && e.button !== 0) return;
     ptrs.set(e.pointerId, { x: e.clientX, y: e.clientY });
     if (ptrs.size === 1) {
@@ -2594,9 +2611,9 @@ export function createOfis(root, ctx, opts = {}) {
         drag.moved = true;
       }
     }
-    try { root.setPointerCapture(e.pointerId); } catch { /* unavailable */ }
+    try { area.setPointerCapture(e.pointerId); } catch { /* unavailable */ }
   });
-  root.addEventListener('pointermove', e => {
+  area.addEventListener('pointermove', e => {
     if (ptrs.has(e.pointerId)) ptrs.set(e.pointerId, { x: e.clientX, y: e.clientY });
     if (pinch && ptrs.size >= 2) {
       const [p1, p2] = [...ptrs.values()];
@@ -2633,9 +2650,9 @@ export function createOfis(root, ctx, opts = {}) {
       if (!d.moved && e.type === 'pointerup') click(e, d.target);
     }
   };
-  root.addEventListener('pointerup', endPtr);
-  root.addEventListener('pointercancel', endPtr);
-  root.addEventListener('pointerleave', e => { emitPointer('leave', e); if (!drag) clearHover(); });
+  area.addEventListener('pointerup', endPtr);
+  area.addEventListener('pointercancel', endPtr);
+  area.addEventListener('pointerleave', e => { emitPointer('leave', e); if (!drag) clearHover(); });
 
   function clearHover() { hover = null; ctx.tip.hide(); stage.classList.remove('hover'); }
   // local module pointer hooks (api.onPointer): true from any hook means the event was taken over
@@ -2648,25 +2665,26 @@ export function createOfis(root, ctx, opts = {}) {
   function click(e, target) {
     if (emitPointer('click', e)) return;
     const lab = target && target.closest ? target.closest('.of-l[data-id]') : null;
-    if (lab && root.contains(lab)) { ctx.tip.hide(); ctx.openDrawer(lab.dataset.id); return; }
+    if (lab && root.contains(lab)) { ui.openAgent(lab.dataset.id); return; }
     const r = root.getBoundingClientRect();
     const h = pickAt(e.clientX - r.left, e.clientY - r.top);
-    if (!h || h.t === 'extra') return;
-    if (h.t === 'agent') { ctx.tip.hide(); ctx.openDrawer(h.id); return; }
+    if (!h) { ui.card.close(); return; }                         // empty scene: the card closes
+    if (h.t === 'extra') return;
+    if (h.t === 'agent') { ui.openAgent(h.id); return; }
     if (h.t === 'room') {
       // a single click on empty floor opens the main agent; wait briefly so a double-click can reset the view
       clearTimeout(clickTimer);
-      clickTimer = setTimeout(() => { ctx.tip.hide(); ctx.openDrawer(h.id); }, 240);
+      clickTimer = setTimeout(() => ui.openAgent(h.id), 240);
     }
   }
-  root.addEventListener('dblclick', e => {
-    if (e.target.closest('.of-ctl')) return;
+  area.addEventListener('dblclick', e => {
+    if (e.target.closest('.of-ctl, .of-shelf-tab')) return;
     if (emitPointer('dblclick', e)) return;
     clearTimeout(clickTimer);
     autoFit = true;
     fit();
   });
-  root.addEventListener('wheel', e => {
+  area.addEventListener('wheel', e => {
     e.preventDefault();
     const r = root.getBoundingClientRect();
     const f = Math.exp(-e.deltaY * (e.deltaMode === 1 ? 0.05 : 0.0016));
@@ -2692,6 +2710,7 @@ export function createOfis(root, ctx, opts = {}) {
 
   function sync() {
     try {
+      ui.sync();
       if (!store.ready) { renderSum(); return; }
       const instant = instantNext;
       syncRooms(instant);
@@ -2740,6 +2759,7 @@ export function createOfis(root, ctx, opts = {}) {
       try {
         renderer.render(scene, camera);
         placeLabels();
+        ui.card.place();
       } finally {
         if (shX || shY) { camera.position.addScaledVector(R, -shX / zoom).addScaledVector(U, -shY / zoom); camera.updateMatrixWorld(); }
       }
@@ -2769,6 +2789,7 @@ export function createOfis(root, ctx, opts = {}) {
     get zoom() { return zoom; }, get size() { return [vw, vh]; }, get autoFit() { return autoFit; },
     get rooms() { return [...world.rooms.values()].map(r => ({ id: r.id, W: +r.W.toFixed(2), X: +r.X.toFixed(2), Z: r.Z, cls: r.cls, slot: r.slot })); },
     get chars() { return chars.size; },
+    get selection() { return selRing.visible ? { id: selectedId, at: this.project(selRing.position.x, 0.035, selRing.position.z) } : null; },       // the agent whose card is open and where its ring is on the screen
     project(x, y, z) { PV.set(x, y, z).project(camera); return [(PV.x + 1) / 2 * vw, (1 - PV.y) / 2 * vh]; },
     charScreen(id) { const c = chars.get(id); if (!c) return null; const p = c.root.position; return this.project(p.x, 0.8, p.z); },
     get frameMs() { return +frameMs.toFixed(2); },
@@ -2783,6 +2804,7 @@ export function createOfis(root, ctx, opts = {}) {
   return {
     show() {
       visible = true;
+      ui.setVisible(true);
       instantNext = true;
       resized = true;
       sync();
@@ -2792,9 +2814,9 @@ export function createOfis(root, ctx, opts = {}) {
     },
     hide() {
       visible = false;
+      ui.setVisible(false);
       cancelAnimationFrame(raf);
       clearTimeout(clickTimer);
-      ctx.tip.hide();
     },
     update() {
       if (visible) sync();

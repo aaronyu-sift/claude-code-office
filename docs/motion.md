@@ -6,7 +6,7 @@ clock. Inside one kind every instance uses the same motion, so the whole page fe
 
 The numbers live in two places that must agree: `public/js/motion.js` (for scripts and the canvas) and the `--m-*`, `--ease-*`, `--spring-*` and `--loop-*` variables at the
 top of `public/app.css`. The spring variables are generated from `motion.js` (`node tools/motion/gen-springs.mjs --write`); `test/motion.test.mjs` fails when they drift and the
-QA check `21-motion` measures the real animations in Chrome.
+QA check `21-motion` measures the real animations in Chrome (`3d-motion` in `tools/qa/office3d-ui-qa.mjs` does the same for the card, the details card and the shelf of the 3D scene).
 
 ## The kinds
 
@@ -84,6 +84,7 @@ millisecond value is the time the spring needs to settle to within 0.3 percent.
 ## Where the current animations sit
 
 - Surface, small control, feedback, data change: done (cards, menus, tooltip, switch knob, hover transitions).
+- The 3D scene (`?scene=3d`) has the card, the details card and the shelf card through the same helpers (`enter`, `leave`, `setShown`, the same tokens), so they move as above; its camera is still direct (see the next item).
 - Indicator: done. The working dot uses the slow tempo and the thinking dots and the waiting balloon the quick one (CSS); in the pixel scene the light beam is slow and the waiting
   figure's bob is quick; in the 3D scene the beam is slow and the lamp's blink is quick.
 - Ambient scenery in the pixel scene (monitor glow, steam, snow, petals, fireflies, sway) already follows the clock with a phase of its own per instance, as the rule asks.
