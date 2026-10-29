@@ -740,8 +740,10 @@ export function createOfis(root, ctx) {
     get rebuildMs() { return +rebuildMs.toFixed(1); },
     get models() { return { loaded: Object.keys(PK), failed: [...AS.packs.failed.keys()] }; },
     get look() { return { assets: AS.look.assets, polish: POLISH }; },
-    figures() { return [...chars.values()].map(c => ({ id: c.id, main: c.main, pack: !!c.pk, mode: c.mode, x: c.root.position.x, z: c.root.position.z })); },
+    figures() { return [...chars.values()].map(c => ({ id: c.id, main: c.main, pack: !!c.pk, shirt: c.shirt, tinted: c.tinted, mode: c.mode, x: c.root.position.x, z: c.root.position.z })); },
     draw() { renderer.render(scene, camera); return this.info; },
+    figureVisible(id, on) { const c = chars.get(id); if (c) c.root.visible = !!on; },
+    rebuildNow() { world.sig = ''; sync(); return this.rebuildMs; },
     view(x, y, z, zm) { autoFit = false; camA = PV.set(x, y, z).dot(R); camB = PV.dot(U); lim = { a0: -1e9, a1: 1e9, b0: -1e9, b1: 1e9 }; zoom = clamp(zm, 1, 400); applyCam(); return [camA, camB, zoom]; },
     room(id) { const r = world.rooms.get(id); return r ? { X: r.X, Z: r.Z, W: r.W, D: r.D } : null; },
   };
@@ -1929,7 +1931,7 @@ export function createOfis(root, ctx) {
   // A pack person (Kenney Mini Characters, ofis-assets.js): its bones play the old joints. The stand-in joints below are plain objects that
   // animChar moves exactly as before; applyPack copies them to the bones every frame (poseBones in ofis-rig.js turns the pack's T pose into
   // hanging arms).
-  const PK_K = 1.8, PK_PIV = 0.176, PK_SEAT = 0.47;   // model scale, hip height in model units, seat height in the scene
+  const PK_K = 1.6, PK_PIV = 0.176, PK_SEAT = 0.47;   // model scale, hip height in model units, seat height in the scene
   const PK_TOP = 0.484;                                // head top above the hip in model units
   const packKeys = Object.keys(PK).filter(k => /^p\d+$/.test(k));
   function buildPackFigure(h, shirt) {
@@ -1945,7 +1947,7 @@ export function createOfis(root, ctx) {
       headHost.scale.setScalar(1.25 / PK_K); headHost.position.set(0, 0.11, 0.0);
       ch.bones.head.add(headHost);
       const J = () => new THREE.Object3D();
-      return { root, hip: J(), upper: J(), head: J(), armL: J(), armR: J(), legL: J(), legR: J(), headHost, bones: ch.bones };
+      return { root, hip: J(), upper: J(), head: J(), armL: J(), armR: J(), legL: J(), legR: J(), headHost, bones: ch.bones, tinted: ch.tinted };
     } catch (e) {
       AS.warnPiece(key, 'could not be set up (' + ((e && e.message) || e) + ')');
       return null;
@@ -2009,7 +2011,7 @@ export function createOfis(root, ctx) {
     root.add(hit);
     scene.add(root);
     const c = {
-      id, main, root, hip, upper, head, armL, armR, legL, legR, hit, pk: f.bones || null,
+      id, main, root, hip, upper, head, armL, armR, legL, legR, hit, pk: f.bones || null, shirt, tinted: f.tinted ?? null,
       roomId: null, slot: -1, mode: 'seated', path: null, pi: 0, after: null,
       heading: -Math.PI / 2, th: -Math.PI / 2, sit: 1, walkPh: 0, ph: (h % 1000) / 159, doneAt: 0,
       tag: null, bal: null,

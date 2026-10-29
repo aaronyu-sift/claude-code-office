@@ -1,13 +1,24 @@
 // What the 3D scene's QA tools share (office3d-qa.mjs, office3d-shot.mjs): the server against a fake ~/.claude, headless Chrome with software
 // WebGL in a throw-away profile (cdp.mjs) and the Office view open on ?scene=3d with N sessions. `root.__ofis3d` and `root.__ofis` are the
 // read-only state the scene exposes (public/js/ofis.js).
+import { spawn } from 'node:child_process';
+import { createServer } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { launchChrome, sleep } from './cdp.mjs';
 import { makeFixture } from './fixture.mjs';
-import { startServer, apiAgents, VIEW } from './harness.mjs';
+import { startServer, apiAgents, VIEW, ROOT } from './harness.mjs';
 
-export { sleep, VIEW };
+export { sleep, VIEW, ROOT };
+
+const freePort = () => new Promise(res => { const s = createServer(); s.listen(0, '127.0.0.1', () => { const p = s.address().port; s.close(() => res(p)); }); });
+// the server of another copy of the repo (the mutation tests serve a copy with one line broken)
+async function startServerAt(root, dir) {
+  const port = await freePort();
+  const proc = spawn('node', [join(root, 'server.js'), '--claude-dir', dir, '--data-dir', join(dir, 'data'), '--port', String(port)], { stdio: 'ignore', env: { ...process.env, CCO_CHAT_DB: '', CCO_DEMO: '' } });
+  for (let i = 0; i < 60; i++) { try { if ((await fetch(`http://127.0.0.1:${port}/api/config`)).ok) break; } catch { /* starting */ } await sleep(150); }
+  return { port, stop() { try { proc.kill('SIGKILL'); } catch { /* gone */ } } };
+}
 // an expression evaluated with `o` = the 3D view's QA state and `v` = its element
 export const o3 = expr => `(()=>{const v=document.querySelector('#view-ofis'), o=v.__ofis3d, s=v.__ofis; return ${expr}})()`;
 
@@ -34,14 +45,17 @@ export async function waitReady3d(page, minFigures, ms = 30000) {
   return { ok: false, last };
 }
 
-// opts: { tag, query ('assets=procedural&polish=off'), fixture, width, height, dpr, intercept (async (page, srv) => void, runs before the page opens) }
+// opts: { tag, query ('assets=procedural&polish=off'), fixture, width, height, dpr, root (serve another copy of the repo), intercept (async (page, srv) => void,
+//         runs before the page opens) }; page.warnings collects the console warnings
 export async function scenario3d(n, opts = {}) {
   const dir = join(tmpdir(), `cco-qa3d-${process.pid}-${n}${opts.tag || ''}`);
   const fx = await makeFixture({ dir, n, ...(opts.fixture || {}) });
-  const srv = await startServer(dir, opts.serverEnv);
+  const srv = opts.root ? await startServerAt(opts.root, dir) : await startServer(dir, opts.serverEnv);
   const page = await launchChrome({ width: opts.width || VIEW.w, height: opts.height || VIEW.h, dpr: opts.dpr || 1, lang: 'en-US' });
   const done = async () => { await page.close(); srv.stop(); fx.cleanup(); };
   try {
+    page.warnings = [];
+    page.on(d => { if (d.method === 'Runtime.consoleAPICalled' && d.params.type === 'warning') page.warnings.push(d.params.args.map(a => a.value ?? a.description ?? '').join(' ')); });
     if (opts.intercept) await opts.intercept(page, srv);
     const agents = await apiAgents(srv.port);
     const q = new URLSearchParams(opts.query || '');

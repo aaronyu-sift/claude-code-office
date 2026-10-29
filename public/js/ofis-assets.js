@@ -191,12 +191,13 @@ function prepOutfit(key, src) {
   return p;
 }
 
-/** A fresh posable copy of an outfit: { root (Group), bones { root, torso, head, armL, armR, legL, legR } }; `shirt` (a hex colour) goes on the outfit's top */
+/** A fresh posable copy of an outfit: { root (Group), bones { root, torso, head, armL, armR, legL, legR }, tinted (vertices in the agent's colour) }; `shirt` (a hex colour) goes on the outfit's top */
 export function personInstance(key, shirt) {
   const src = packs.models[key];
   const prep = prepOutfit(key, src);
   const obj = skClone(src.scene), bones = {};
   const tint = shirt ? new THREE.Color(shirt) : null;
+  let tinted = 0;
   if (!personMat) personMat = new THREE.MeshLambertMaterial({ vertexColors: true, side: THREE.DoubleSide });
   obj.traverse(o => {
     if (o.isBone) bones[o.name] = o;
@@ -204,6 +205,7 @@ export function personInstance(key, shirt) {
     const p = prep.find(x => x.name === o.name), n = p.k.length, col = new Float32Array(n * 3);
     for (let i = 0; i < n; i++) {
       const t = tint && p.k[i] >= 0;
+      if (t) tinted++;
       col[i * 3] = t ? tint.r * p.k[i] : p.base[i * 3]; col[i * 3 + 1] = t ? tint.g * p.k[i] : p.base[i * 3 + 1]; col[i * 3 + 2] = t ? tint.b * p.k[i] : p.base[i * 3 + 2];
     }
     // own geometry object (sharing the pack's attribute buffers) so that each person carries its own colours
@@ -216,5 +218,5 @@ export function personInstance(key, shirt) {
     o.material = personMat;
     o.castShadow = true; o.frustumCulled = false;
   });
-  return { root: obj, bones: { root: bones.root, torso: bones.torso, head: bones.head, armL: bones['arm-left'], armR: bones['arm-right'], legL: bones['leg-left'], legR: bones['leg-right'] } };
+  return { tinted, root: obj, bones: { root: bones.root, torso: bones.torso, head: bones.head, armL: bones['arm-left'], armR: bones['arm-right'], legL: bones['leg-left'], legR: bones['leg-right'] } };
 }
