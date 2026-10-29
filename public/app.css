@@ -787,3 +787,6 @@ main { flex: 1; min-height: 0; position: relative; }
   .sitebar__links { height: 44px; align-items: center; margin: 0 -16px; padding: 0 16px 0 4px; }
 }
 @media (max-width: 520px) { .has-sitebar .top .brand { display: none; } }
+
+/* Scene settings and the atmosphere of the 3D scene (office-settings.js, ofis-weather.js; docs/motion.md, kinds cycle and ambient scenery) */
+.set-row[hidden] { display: none; }                                   /* a row the scene does not support (settings-panel.js): `.set-row` is flex, which would beat the hidden attribute */

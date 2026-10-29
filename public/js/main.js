@@ -4,6 +4,7 @@ import { createPano } from './pano.js';
 import { createPixelOffice } from './pixel/index.js';
 import { createOpenMenu } from './pixel/open-menu.js';
 import { fromQuery } from './pixel/settings.js';
+import { createOfficeSettings, officeQuery, urlAfterChange, OFFICE3D_ROWS } from './office-settings.js';
 import { createSettingsPanel } from './settings-panel.js';
 import { createAkis } from './akis.js';
 import { createMaliyet } from './maliyet.js';
@@ -162,20 +163,27 @@ function safeView(name, create) {
 // The Office view is the pixel scene. The original three.js scene stays available as ?scene=3d; it is loaded only then, so the
 // default view never fetches three.js.
 let pixelOffice = null;
+let sceneSettings = null;                       // the scene that the settings popover edits: the pixel scene, or the 3D scene's own settings (office-settings.js)
 function createOffice(root) {
   const q = new URLSearchParams(location.search), proj = q.get('proj');
   // ?proj=iso|front picks the view (without it the stored choice, then isometric); ?time=HH:MM, ?season=, ?weather= and ?hemisphere= override the
   // stored scene settings for this visit
-  if (q.get('scene') !== '3d') return (pixelOffice = createPixelOffice(root, ctx, { overrides: fromQuery(location.search), proj: proj === 'iso' || proj === 'front' ? proj : null }));
+  if (q.get('scene') !== '3d') return (sceneSettings = pixelOffice = createPixelOffice(root, ctx, { overrides: fromQuery(location.search), proj: proj === 'iso' || proj === 'front' ? proj : null }));
   root.dataset.scene = '3d';
+  // the 3D scene has no camera toggle: the popover shows the rows it supports; the choices are remembered under the same keys as the pixel scene's
+  const settings = createOfficeSettings({ overrides: officeQuery(location.search) });
   let real = null, visible = false;
-  import('./ofis.js').then(m => { real = m.createOfis(root, ctx); if (visible) real.show(); })
+  import('./ofis.js').then(m => { real = m.createOfis(root, ctx, { settings }); if (visible) real.show(); })
     .catch(e => { console.error('[ofis]', e); root.innerHTML = `<div class="empty">${esc(msg('view.failed'))}<br><span class="faint mono">${esc(e && e.message || e)}</span></div>`; });
-  return {
+  return (sceneSettings = {
     show() { visible = true; if (real) real.show(); },
     hide() { visible = false; if (real) real.hide(); },
     update(...a) { if (real) real.update(...a); },
-  };
+    settingRows: OFFICE3D_ROWS,
+    get settings() { return settings.get(); },
+    get settingsFrom() { return settings.from(); },
+    setSetting: (key, value) => settings.set(key, value),
+  });
 }
 const views = {
   pano: safeView('pano', root => createPano(root, ctx)),
@@ -185,18 +193,18 @@ const views = {
 };
 let current = null;
 
-// The projection toggle in the header belongs to the pixel Office view; it is hidden on every other view and with ?scene=3d.
-// The camera buttons exist twice, in the header and in the settings popover (both are `.proj-seg`); the popover (time, season, hemisphere,
-// weather) belongs to the pixel Office view as well.
+// The projection toggle in the header belongs to the pixel Office view; it is hidden on every other view and with ?scene=3d. The camera buttons exist twice, in
+// the header and in the settings popover (both are `.proj-seg`). The popover (time, season, hemisphere, weather, shelf) belongs to the Office view of either scene;
+// the scene says which of its rows it supports (settings-panel.js).
 const projSeg = document.getElementById('proj-seg'), setWrap = document.getElementById('set-wrap');
 const keepUrl = (key, value) => {                                   // an explicit URL parameter follows a change made with the controls
-  const q = new URLSearchParams(location.search);
-  if (q.has(key)) { q.set(key, value); history.replaceState(null, '', '?' + q + location.hash); }
+  const search = urlAfterChange(location.search, key, value);
+  if (search != null) history.replaceState(null, '', search + location.hash);
 };
-const panel = createSettingsPanel({ wrap: setWrap, getOffice: () => pixelOffice, afterChange: keepUrl });
+const panel = createSettingsPanel({ wrap: setWrap, getOffice: () => sceneSettings, afterChange: keepUrl });
 function syncProjSeg() {
-  const on = current === 'ofis' && !!pixelOffice;
-  projSeg.hidden = !on;
+  const on = current === 'ofis' && !!sceneSettings;
+  projSeg.hidden = !(on && pixelOffice);
   setWrap.hidden = !on;
   if (!on) panel.close();
   for (const b of document.querySelectorAll('.proj-seg button')) b.setAttribute('aria-pressed', String(!!pixelOffice && b.dataset.proj === pixelOffice.projection));
