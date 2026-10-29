@@ -113,15 +113,6 @@ for (const n of SIZES) {
     const occ = await S.page.evaluate(px(`p.figures().map(id => [id, p.occlusion(id)])`));
     const worst = occ.reduce((b, x) => (x[1] > b[1] ? x : b), ['-', 0]);
     check(`04-occlusion-n${n}`, occ.every(x => x[1] <= 0.15), `${occ.length} agents, worst ${(worst[1] * 100).toFixed(1)} percent covered (${worst[0].slice(0, 12)}), mean ${(occ.reduce((s, x) => s + x[1], 0) / occ.length * 100).toFixed(1)} percent, limit 15`);
-
-    if (shotsDir) {
-      mkdirSync(shotsDir, { recursive: true });
-      await S.page.setViewport(VIEW.w, VIEW.h, 2);
-      await S.page.mouse.move(2, 2);                        // no hover tip or ring in the picture
-      await sleep(1200);
-      await S.page.screenshot(join(shotsDir, `m1-${proj}-n${n}.png`));
-      await S.page.setViewport(VIEW.w, VIEW.h, 1);
-    }
   } finally {
     if (n !== 20) { await S.done(); delete perN[n]; }
   }

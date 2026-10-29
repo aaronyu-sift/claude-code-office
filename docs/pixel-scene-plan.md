@@ -153,11 +153,11 @@ appears in the conversation, so every goal ends by printing the verification out
 - [x] Screenshots for N = 4, 10, 20 published to the Drive viewer folder with working localhost links.
 
 ### Goal 2: richness, life, performance (M2), isometric
-- [ ] Content lists of section 5 reached; gallery page `?gallery=1` showing every sprite with its id.
-- [ ] Room theming per project colour, outdoor garden island with path, pond, trees, fences; no river, no cars.
-- [ ] Ambient animation (section 4) within the performance budget.
-- [ ] Time of day (required): `time.js`, `lighting.js`, sky gradient, lit windows, lamps and monitors at night, `?time=HH:MM`; readable at every hour.
-- [ ] Occlusion budget and readability checks pass (section 7); label slots with 5-line names pass.
+- [x] Content lists of section 5 reached; gallery page `?gallery=1` showing every sprite with its id.
+- [x] Room theming per project colour, outdoor garden island with path, pond, trees, fences; no river, no cars.
+- [x] Ambient animation (section 4) within the performance budget.
+- [x] Time of day (required): `time.js`, `lighting.js`, sky gradient, lit windows, lamps and monitors at night, `?time=HH:MM`; readable at every hour.
+- [x] Occlusion budget and readability checks pass (section 7); label slots with 5-line names pass.
 
 ### Goal 3: front three-quarter, toggle, polish (M3)
 - [ ] `build-atlas.mjs --proj front`; same layout engine; wall rules for the front view; toggle in the header, `?proj=front`, persisted.
@@ -237,3 +237,20 @@ Everything that differs from this plan, by goal. Each entry says what was planne
 - **Light beam.** The beam of a waiting agent is drawn behind the figure, in the depth-sorted pass, not on top: on top it washed out the sprite.
 - **Not in Goal 1.** README, `THIRD_PARTY.md`, the projection toggle and the front atlas are Goal 3; the FRONT projection is defined and unit-tested only.
 - **Known minor art issue.** The clock wall sprite looks partly drawn in facing 0.
+
+### Goal 2
+
+- **Sprite count and the counting rule.** Planned: the content lists of section 5. Built: 161 sprites (floor 12, wall 16, furniture 28, deskprop 15, people 42, plant 12, tree 6, bush 4, hedge 2, flowerbed 4, tuft 2, rock 4, outdoor 14), 221 images in a 1024 x 199 px atlas of 50,152 bytes. The list and the manifest categories did not match, so the counting rule table was added to section 5 and `test/manifest.test.mjs` plus `npm run sprites:table` enforce it (seasonal variants excluded, a desk counts once per screen state, the monitor states are baked into the desks). The bake of a model with more than 64 colour ramps failed in VoxPix, so `Vox.json()` packs only the ramps a model uses.
+- **People.** Every appearance now has typing A, typing B, thinking, waiting, sleeping, relaxed (done) and standing poses. `think` is drawn when the server reports the model is generating a thought (`act.code === 'thinking'`); `stand` is baked at 4 facings but unused until the walker (later goal).
+- **Light is two things, not one re-tint of the cached static layer.** Planned (section 4): `lighting.js` re-tints the cached static layer at most once a minute. Built: the rooms are tinted by one translucent `source-atop` fill over the room canvas in each drawn frame (a single fill, cheap, and it also tints the figures so the colour grade is consistent), and what is cached is re-tinted at most once a minute: a copy of the garden ground with the garden tint and the shaded copies of garden sprites. The rooms get the weaker tint and the garden the stronger one, as the plan says. Re-tinting is skipped when the light did not change (full day and full night). Check 11 measures a re-tint plus the first frame after it.
+- **Transparent main canvas.** Section 4 says `alpha: false`. The sky is its own small canvas behind the main canvas (drawn at a quarter of the view and scaled up without smoothing), so the main canvas is `alpha: true` and is cleared with `clearRect` each frame.
+- **Sunrise and sunset** come from a table by month (mid-latitude, northern hemisphere, local clock, no daylight saving), not from the user's position. `?time=HH:MM` pins the time of day and uses today's month; it starts no timer. The Goal 4 settings popover will add the time slider and the hemisphere.
+- **Garden.** The pond is 48 x 40 voxels with lily pads; the island keeps the Goal 1 margin of 80 voxels, so the garden is a strip around the building, widest on the north (trees, shed, fences) and east (pond, picnic table), with low things only in front and to the east so that nothing hides a room.
+- **Glows** (window, lamp, monitor, led) are additive discs placed at anchors that the atlas build projects into every facing (`anchors` in the manifest), so the scene does not know model coordinates. Steam rises from anchors of the coffee machine.
+- **Layout is still isometric-only.** `layoutOffice` has hard-coded isometric wall and shadow rules; Goal 3 passes the projection in (plan Goal 3 prompt already says so).
+- **Generated `footprints.js`.** `ids.js` imported footprints by hand; with 161 sprites they are generated by the atlas build into `public/js/pixel/footprints.js` and `--check` verifies the file.
+- **Labels.** The label box is 196 px wide at most (was 176) so that a 120-character name made of one very long word still fits in 5 lines, and a main agent's label hangs 16 voxels higher (anchor z 62, was 46) so it no longer covers the status marker and the "!" balloon. Check 2 now measures the lines of every main label.
+- **Check 11 method.** For every agent the mean Rec. 709 luminance of the canvas pixels under its sprite's silhouette is read from a still frame without status effects (tint, glows and what stands in front included) at 25 times: the six required times and every hour. Label contrast is unchanged by construction (labels are DOM text over the canvas) and measured as identical computed colours. The re-tint cost is JavaScript time of the re-tint plus the first frame after it, over 190 consecutive minutes of the evening at N = 20; the canvas copy itself runs on the GPU or the software rasteriser and is not in that number.
+- **QA light.** Checks 1 to 6 run at `?time=22:00` (tint, glows and stars on: the most expensive picture); the frame budget is also measured at noon and both must pass. The idle check runs at a fixed time (no minute ticker), because a real clock re-tints once a minute on purpose.
+- **QA tooling.** The shared server and Chrome helpers moved to `tools/qa/harness.mjs`; `tools/qa/shot.mjs` takes one picture for a look by eye. `--shots <dir>` now writes the M2 set (garden, room at zoom 3, 20 agents at fit, waiting agent, one scene at 06:00, 12:00, 18:30 and 22:00) instead of the M1 set. Extra checks besides section 7: `06-ambient`, `09-content-minimums`, `11-time-clock` (two emulated time zones), `gallery`.
+- **QA-only API** grew: `setTime`, `agentLuminances`, `skyAt`, `centerOnWorld`, `centerOnRoom`, `retintCost`, `retints`, `ambient`, `light`, `time`; none is used by the app.
