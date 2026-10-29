@@ -1,6 +1,6 @@
 // A fake ~/.claude with N Claude Code sessions for the QA harness: live session files (each backed by a real `sleep` process so the
 // server's liveness check passes), transcripts, and subagents. Names mix plain, wrapped, emoji and 120 character chat names.
-import { mkdirSync, writeFileSync, appendFileSync, rmSync } from 'node:fs';
+import { mkdirSync, writeFileSync, appendFileSync, rmSync, utimesSync } from 'node:fs';
 import { spawn } from 'node:child_process';
 import { join } from 'node:path';
 
@@ -32,8 +32,27 @@ function endTurn(ts, text, msgId) {
   return line({ type: 'assistant', timestamp: iso(ts), message: { id: msgId, model: 'claude-opus-5-5', usage: { input_tokens: 900, output_tokens: 140, cache_read_input_tokens: 41000 }, stop_reason: 'end_turn', content: [{ type: 'text', text }] } });
 }
 
-// opts: { dir, n, statuses (array cycled over the sessions, default mixed), subs (function index -> list of 'working'|'done') }
-export async function makeFixture({ dir, n, statuses = STATUS_CYCLE, subs } = {}) {
+// Closed sessions: transcripts with no process and no session file. Ages in minutes, in an order that is not the order of creation, so a sort is
+// really tested; every 7th one is large (padding at the start, so the end of the file, which is what the server reads, stays the same).
+const CLOSED_AGES = [95, 12, 410, 31, 2600, 55, 180, 22, 700, 1500, 65, 8, 240, 120, 15000, 45, 330, 5200, 18, 900];
+const CLOSED_NAMES = ['Postmortem draft for the cache outage', 'Rename the billing events', 'Why does the search index lag', 'Pairing notes: Valkey TTL', 'Cleanup of the old feature flags',
+  'Spike: sprite atlas packing', 'Release checklist 4.18', 'Review the onboarding copy', 'Terraform: new subnet range', 'Data export for the audit', 'Snapshot test failures on CI', 'Draft: team update'];
+function closedRecords({ id, name, cwd, at, pad }) {
+  const filler = pad ? line({ type: 'attachment', timestamp: iso(at - 3600e3), sessionId: id, cwd, filler: 'x'.repeat(2000) }).repeat(Math.ceil(pad / 2100)) : '';
+  return filler
+    + line({ type: 'user', timestamp: iso(at - 120e3), uuid: 'u' + at, cwd, sessionId: id, message: { role: 'user', content: `Please continue with: ${name}` } })   // real records carry the folder
+    + toolUse(at - 90e3, 'tc-a-' + id, 'Read', { file_path: '/qa/ws/notes.md' }, 'mc1-' + id) + toolResult(at - 88e3, 'tc-a-' + id)
+    + toolUse(at - 60e3, 'tc-b-' + id, 'Edit', { file_path: '/qa/ws/src/index.ts' }, 'mc2-' + id) + toolResult(at - 58e3, 'tc-b-' + id)
+    + toolUse(at - 40e3, 'tc-c-' + id, 'Bash', { command: 'npm test', description: 'Run unit tests' }, 'mc3-' + id) + toolResult(at - 38e3, 'tc-c-' + id)
+    + endTurn(at - 20e3, `Finished: ${name}. The notes are updated and the tests pass.`, 'mc4-' + id)
+    + line({ type: 'last-prompt', lastPrompt: `Please continue with: ${name}`, sessionId: id })
+    + line({ type: 'custom-title', customTitle: name, sessionId: id }) + line({ type: 'ai-title', aiTitle: name.slice(0, 40), sessionId: id })
+    + line({ type: 'cost-state', sessionId: id });
+}
+
+// opts: { dir, n, statuses (array cycled over the sessions, default mixed), subs (function index -> list of 'working'|'done'),
+//         closed (a number of closed sessions, or a list of { name, project, ageMin, bytes }) }
+export async function makeFixture({ dir, n, statuses = STATUS_CYCLE, subs, closed = 0 } = {}) {
   rmSync(dir, { recursive: true, force: true });
   mkdirSync(join(dir, 'sessions'), { recursive: true });
   const T = Date.now();
@@ -84,8 +103,31 @@ export async function makeFixture({ dir, n, statuses = STATUS_CYCLE, subs } = {}
     });
     agents.push(mine);
   }
+  const closedPlan = typeof closed === 'number'
+    ? Array.from({ length: closed }, (_, i) => ({ name: CLOSED_NAMES[i % CLOSED_NAMES.length] + (i >= CLOSED_NAMES.length ? ` #${i}` : ''), project: PROJECTS[(i * 3) % PROJECTS.length], ageMin: CLOSED_AGES[i % CLOSED_AGES.length] + Math.floor(i / CLOSED_AGES.length) * 7, bytes: i % 7 === 6 ? 3e6 : 0 }))
+    : closed;
+  const closedOut = closedPlan.map((c, i) => {
+    const cwd = `/qa/ws/${c.project}`, id = `qc-${String(i).padStart(3, '0')}-${(2000 + i * 6007).toString(16)}`;
+    const pdir = join(dir, 'projects', enc(cwd));
+    mkdirSync(pdir, { recursive: true });
+    const file = join(pdir, id + '.jsonl'), at = T - c.ageMin * 60e3;
+    writeFileSync(file, closedRecords({ id, name: c.name, cwd, at, pad: c.bytes }));
+    utimesSync(file, at / 1000, at / 1000);                       // the file time is the close time: Claude Code writes its last records when a chat ends
+    return { id, name: c.name, project: c.project, ageMin: c.ageMin, file, closedAt: at };
+  });
   return {
-    dir, agents, pids: children.map(c => c.pid),
+    dir, agents, pids: children.map(c => c.pid), closed: closedOut,
+    // close a live session now, as if the user had quit it: its process ends, its session file goes, its transcript gets its closing records
+    closeSession(sid) {
+      const m = agents.find(a => a.id === sid);
+      if (!m) throw new Error('no such session ' + sid);
+      const idx = agents.indexOf(m);
+      try { children[idx].kill('SIGKILL'); } catch { /* gone */ }
+      rmSync(join(dir, 'sessions', children[idx].pid + '.json'), { force: true });
+      const f = join(dir, 'projects', enc(`/qa/ws/${m.project}`), sid + '.jsonl');
+      appendFileSync(f, line({ type: 'last-prompt', lastPrompt: 'closing', sessionId: sid }) + line({ type: 'cost-state', sessionId: sid }));
+      return f;
+    },
     // end a working subagent's turn now, as if it had just finished
     finishSub(subKey) { const f = subFiles.get(subKey); if (!f) throw new Error('no such subagent ' + subKey); appendFileSync(f, endTurn(Date.now(), 'Finished.', 'fin-' + subKey)); },
     cleanup() { for (const c of children) { try { c.kill('SIGKILL'); } catch { /* gone */ } } rmSync(dir, { recursive: true, force: true }); },

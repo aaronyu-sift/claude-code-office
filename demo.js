@@ -302,5 +302,26 @@ module.exports = function createDemo({ Agent, agents, ingest, colorFor }) {
     return { total, days, hours, projects, models, files, unpriced: [] };
   }
 
-  return { step, costSummary };
+  // Fictional closed sessions for the shelf: the fields recent.js lists for a real one (closedAt is when it was closed).
+  const CAT_OF = { Read: 'read', Grep: 'read', Edit: 'edit', Write: 'edit', Bash: 'shell', WebFetch: 'web', WebSearch: 'web', Agent: 'agent' };
+  function closed(t) {
+    const rows = [
+      ['atlas-api', 'Load test the new rate limiter', 'Run the load test again with the burst profile from the mobile team', 'The limiter holds 4,000 requests per second with a p99 of 38 ms. The burst profile needs a larger bucket; I opened the change.', 14 * 60e3, { Bash: 11, Read: 8, Edit: 5 }],
+      ['nebula-web', 'Checkout A/B test results', 'Summarise the checkout test and draft the follow-up tickets', 'Variant B converts 3.1 percent better (p = 0.02). I drafted the rollout checklist and two follow-up tickets.', 52 * 60e3, { Read: 14, Edit: 9, Bash: 6 }],
+      ['orbit-mobile', 'Offline sync: conflict rules', 'Which side wins when the same note was edited on two devices?', 'The newest edit wins per field, and a deleted note wins over an edit. I wrote both rules into the sync spec with tests.', 3.4 * 3600e3, { Read: 21, Grep: 9, Edit: 12 }],
+      ['docs-hub', 'Astro migration: redirects', 'List every old docs URL that needs a redirect', 'There are 212 old URLs; 190 map one to one. The other 22 are in the redirects file with a note each.', 9 * 3600e3, { Grep: 17, Read: 10, Write: 4 }],
+      ['data-lake', 'Nightly ETL cost audit', 'Why did the backfill cost spike on Tuesday?', 'The backfill re-read a partition that was rewritten. Pinning the snapshot id brings the run back to its usual cost.', 26 * 3600e3, { Bash: 9, WebFetch: 3, Read: 7 }],
+      ['ml-lab', 'Eval harness for fine-tunes', 'Add a held-out split to the harness', 'The harness now keeps 10 percent of every task out of training and reports it next to the main score.', 5.2 * 86400e3, { Edit: 15, Bash: 10, Read: 12 }],
+    ];
+    return rows.map(([project, name, lastPrompt, lastText, ago, tools], i) => {
+      const cats = {};
+      for (const [n, c] of Object.entries(tools)) cats[CAT_OF[n] || 'other'] = (cats[CAT_OF[n] || 'other'] || 0) + c;
+      return {
+        id: `demo-closed-${i + 1}`, name, title: name, project, cwd: `~/code/${project}`, color: colorFor(project),
+        lastPrompt, lastText, summary: '', tools, cats, model: 'Opus 5.5', lastMessage: t - ago - 120e3, closedAt: t - ago, observed: false,
+      };
+    });
+  }
+
+  return { step, costSummary, closed };
 };

@@ -7,6 +7,7 @@
 
 const http = require('http');
 const { createChatBridge } = require('./chatbridge');
+const { createRecent } = require('./recent');
 const fs = require('fs');
 const path = require('path');
 const os = require('os');
@@ -29,6 +30,7 @@ let INLINE_COLORS = {};
 let CSWAP_URL = null;
 let CHAT = null;   // optional read-only bridge from the agentchat database
 let COST_OPTS = {};   // pricesFile, discount, extraLogs for the cost worker
+let RECENT_OPTS = { days: 14, max: 50, budgetMs: 150 };   // recently closed sessions (recent.js); days 0 turns them off
 let DEMO = false;
 let SITE = null;
 let demo = null;
@@ -57,6 +59,8 @@ function configure(o) {
     extraLogs: (Array.isArray(o.costExtraLogs) ? o.costExtraLogs : [])
       .filter(l => l && l.file && l.key).map(l => ({ file: path.resolve(expandHome(l.file)), key: String(l.key) })),
   };
+  const num = (v, d) => (v === undefined || v === null || v === '' || !Number.isFinite(Number(v)) ? d : Math.max(0, Number(v)));
+  RECENT_OPTS = { days: num(o.closedDays, 14), max: Math.max(1, num(o.closedMax, 50)), budgetMs: Math.max(10, num(o.closedBudgetMs, 150)) };
   DEMO = !!o.demo;
   SITE = o.site || null;
 }
@@ -69,6 +73,8 @@ const SNAP_MS = 3 * 3600e3;            // history sent to a newly connected clie
 const SUB_KEEP_MS = 3 * 3600e3;        // subagent files older than this are ignored
 const SUB_STALE_MS = 45 * 60e3;        // an unfinished subagent with no new records counts as "stale"
 const MAX_EVENTS = 900;
+const CLOSED_TAIL = 256 * 1024;         // a closed session is read from the last 256 KB of its transcript, never all of it
+const CLOSED_EVERY = 30e3;             // the closed list is looked at again this often (a session that closes is added at once)
 const SPARK_MIN = 60;
 
 // ---------------------------------------------------------------- helpers
@@ -195,7 +201,7 @@ class Agent {
   constructor(o) {
     Object.assign(this, {
       id: '', kind: 'main', parent: null, sid: '', pid: null, name: '', cwd: '', project: '', color: '#9A9A9A',
-      title: '', desc: '', atype: '', bg: false, depth: 0,
+      title: '', desc: '', atype: '', bg: false, depth: 0, quiet: false, customTitle: '', agentName: '',
       file: null, offset: 0, dec: new StringDecoder('utf8'), buf: '', skipFirst: false, lookedAt: 0,
       pending: new Map(), events: [], seq: 0,
       msgTok: new Map(), buckets: new Map(), tools: {}, cats: {},
@@ -211,10 +217,10 @@ function pushEvent(a, ev) {
   ev.a = a.id;
   a.events.push(ev);
   if (a.events.length > MAX_EVENTS) a.events.splice(0, a.events.length - MAX_EVENTS);
-  outEvents.set(ev.id, ev);
+  if (a.quiet) ev.q = true; else outEvents.set(ev.id, ev);        // a quiet agent (a closed session being read) sends nothing to the clients
   return ev;
 }
-const touch = ev => { outEvents.set(ev.id, ev); };
+const touch = ev => { if (!ev.q) outEvents.set(ev.id, ev); };
 
 function bucket(a, ts) {
   const k = Math.floor(ts / 60e3);
@@ -238,12 +244,15 @@ function turnStart(a, ts) {
 
 function ingest(a, r) {
   const ts = r.timestamp ? Date.parse(r.timestamp) : null;
+  if (!a.cwd && r.cwd) a.cwd = r.cwd;                 // a closed session has no session file: its folder is in its records
   if (ts) {
     if (!a.started || ts < a.started) a.started = ts;
     if (!a.updated || ts > a.updated) a.updated = ts;
   }
   switch (r.type) {
     case 'ai-title': if (r.aiTitle) a.title = r.aiTitle; return;
+    case 'custom-title': if (r.customTitle) a.customTitle = r.customTitle; return;     // the name of the chat (what a live session has in its session file)
+    case 'agent-name': if (r.agentName) a.agentName = r.agentName; return;
     case 'last-prompt': if (r.lastPrompt && a.kind === 'main') a.lastPrompt = clip(r.lastPrompt, 400); return;
     case 'system': return onSystem(a, r, ts);
     case 'attachment': {
@@ -440,10 +449,15 @@ function refreshSessions() {
     a.sess = s;
   }
   sessionFiles = next;
+  const closedNow = [];
   for (const a of [...agents.values()]) {
     const root = a.kind === 'main' ? a.id : a.parent;
-    if (!live.has(root)) { agents.delete(a.id); removed.add(a.id); lastSent.delete(a.id); }
+    if (!live.has(root)) {
+      if (a.kind === 'main' && a.file) closedNow.push(a.file);       // seen closing: it goes on the shelf at once
+      agents.delete(a.id); removed.add(a.id); lastSent.delete(a.id);
+    }
   }
+  return closedNow;
 }
 
 function locateAndRead() {
@@ -502,6 +516,47 @@ function prune() {
       agents.delete(a.id); removed.add(a.id); lastSent.delete(a.id);
     }
   }
+}
+
+// ---------------------------------------------------------------- recently closed sessions (recent.js)
+
+let recent = null;                 // the scanner, made by start()
+let recentAt = 0;
+let closedList = [];               // what the clients have: newest first
+let closedKey = '[]';
+
+// What the shelf and the drawer show of a session that has no process any more: read from the end of its transcript, through the same
+// ingest() as a live one (quiet: nothing is sent to the clients). Counts come from that tail only, so the page labels them as such.
+function readClosed(file) {
+  const sid = path.basename(file, '.jsonl');
+  const a = new Agent({ id: sid, kind: 'main', sid, file, quiet: true });
+  readNew(a, CLOSED_TAIL);
+  if (!a.updated && !a.lastPrompt && !a.lastText && !a.title && !a.customTitle) return null;      // not a session transcript
+  const project = baseName(a.cwd) || path.basename(path.dirname(file));
+  return {
+    name: a.customTitle || a.agentName || '', title: a.title, project, cwd: a.cwd, color: colorFor(project),
+    lastPrompt: a.lastPrompt, lastText: a.lastText, summary: a.summary, tools: a.tools, cats: a.cats,
+    model: prettyModel(a.model), lastMessage: a.updated || null,
+  };
+}
+
+function publishClosed(list) {
+  const key = JSON.stringify(list);
+  if (key === closedKey) return;                                  // unchanged: nothing is sent, so nothing is redrawn
+  closedKey = key; closedList = list;
+  for (const res of clients) send(res, 'closed', { closed: list });
+}
+
+function refreshClosed(justClosed = []) {
+  if (!recent) return;
+  const t = now();
+  for (const f of justClosed) recent.add(f, t);
+  if (!justClosed.length && t - recentAt < CLOSED_EVERY) return;
+  const live = new Set();
+  for (const a of agents.values()) if (a.kind === 'main') live.add(a.id);
+  const list = recent.scan(live);
+  recentAt = recent.stats.pending > 0 ? t - CLOSED_EVERY + 1000 : t;      // reads left over from the time budget: go on in a second
+  publishClosed(list);
 }
 
 // ---------------------------------------------------------------- summaries
@@ -647,7 +702,7 @@ function snapshot() {
   const list = [...agents.values()];
   const events = [];
   for (const a of list) for (const ev of a.events) if ((ev.e || t) >= cut) events.push(ev);
-  return { now: t, agents: list.map(a => summarize(a, t)), events };
+  return { now: t, agents: list.map(a => summarize(a, t)), events, closed: closedList };
 }
 
 function send(res, type, data) {
@@ -658,7 +713,7 @@ let minuteMark = 0;
 function tick() {
   try {
     if (demo) demo.step(now());
-    else { refreshSessions(); locateAndRead(); discoverSubs(); }
+    else { const justClosed = refreshSessions(); locateAndRead(); discoverSubs(); refreshClosed(justClosed); }
     if (CHAT) CHAT.step(agents, pushEvent, now());
   } catch (e) { console.error('tick', e); }
   const t = now();
@@ -726,6 +781,7 @@ function handler(req, res, next) {
   }
   if (url.pathname === '/api/config') return json(res, { version: VERSION, demo: DEMO, site: SITE, cswap: !!CSWAP_URL && !DEMO });
   if (url.pathname === '/api/state') return json(res, snapshot());
+  if (url.pathname === '/api/closed') return json(res, { closed: closedList, days: RECENT_OPTS.days, max: RECENT_OPTS.max, scan: recent ? recent.stats : null });
   if (url.pathname === '/api/cost') {
     const s = cost.summary || { days: {}, hours: {}, projects: {}, models: {}, total: 0, unpriced: [] };
     const { files, ...rest } = s;
@@ -755,8 +811,10 @@ function start() {
   if (DEMO) {
     demo = require('./demo.js')({ Agent, agents, ingest, colorFor });
     cost.summary = demo.costSummary(); cost.ver++; cost.scannedAt = now();
+    closedList = demo.closed(now()); closedKey = JSON.stringify(closedList);
   } else {
     startCostWorker();
+    if (RECENT_OPTS.days > 0) recent = createRecent({ projDir: PROJ_DIR, read: readClosed, ...RECENT_OPTS });
   }
   tick();
   setInterval(tick, 1000).unref();
@@ -767,6 +825,7 @@ function start() {
  * Create the office. Options (all optional; local config files are merged underneath):
  *   claudeDir, dataDir, demo, cswapUrl, projectColorsFile, projectColors,
  *   costPrices (Vertex price table file), costDiscount (0.168 = 16.8%), costExtraLogs ([{ file, key }]),
+ *   closedDays (14; 0 = no shelf of closed sessions), closedMax (50), closedBudgetMs (150: what one scan may spend reading transcripts),
  *   site: { name, home, links: [{ label, href }] }  – shown in the header when mounted into another site
  * Returns { handler(req, res, next), start(), listen(port, host, cb) }.
  */
@@ -812,6 +871,8 @@ function cli(argv) {
   --claude-dir <dir>  Claude config dir (default ~/.claude or $CLAUDE_CONFIG_DIR)
   --data-dir <dir>    Where the cost cache is kept (default ~/.claude-code-office)
   --chat-db <file>    agentchat SQLite database to show (read-only; or set CCO_CHAT_DB)
+  --closed-days <n>   How far back closed sessions are listed on the shelf (default 14; 0 = off)
+  --closed-max <n>    How many closed sessions at most (default 50)
 `);
     return;
   }
@@ -821,6 +882,8 @@ function cli(argv) {
   if (val('claude-dir')) opts.claudeDir = val('claude-dir');
   if (val('data-dir')) opts.dataDir = val('data-dir');
   if (val('chat-db')) opts.chatDb = val('chat-db');
+  if (val('closed-days')) opts.closedDays = val('closed-days');
+  if (val('closed-max')) opts.closedMax = val('closed-max');
   const port = Number(val('port') || process.env.CCO_PORT || files.port) || 7321;
   const office = createOffice(opts);
   office.listen(port, HOST, url => {
