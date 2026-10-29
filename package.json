@@ -49,6 +49,7 @@
     "test": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --test test/",
     "qa:pixel": "node tools/qa/pixel-qa.mjs",
     "qa:3d": "node tools/qa/office3d-qa.mjs",
+    "qa:progress": "node tools/qa/office-progress-qa.mjs",
     "sprites": "node tools/sprites/build-atlas.mjs --proj iso",
     "sprites:check": "node tools/sprites/build-atlas.mjs --proj iso --check",
     "sprites:table": "node tools/sprites/content-table.mjs"

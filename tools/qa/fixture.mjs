@@ -1,6 +1,6 @@
 // A fake ~/.claude with N Claude Code sessions for the QA harness: live session files (each backed by a real `sleep` process so the
 // server's liveness check passes), transcripts, and subagents. Names mix plain, wrapped, emoji and 120 character chat names.
-import { mkdirSync, writeFileSync, appendFileSync, rmSync, utimesSync } from 'node:fs';
+import { mkdirSync, writeFileSync, appendFileSync, rmSync, utimesSync, renameSync } from 'node:fs';
 import { spawn } from 'node:child_process';
 import { join } from 'node:path';
 
@@ -128,6 +128,14 @@ export async function makeFixture({ dir, n, statuses = STATUS_CYCLE, subs, close
       const f = join(dir, 'projects', enc(`/qa/ws/${m.project}`), sid + '.jsonl');
       appendFileSync(f, line({ type: 'last-prompt', lastPrompt: 'closing', sessionId: sid }) + line({ type: 'cost-state', sessionId: sid }));
       return f;
+    },
+    // the task tracker's progress snapshot (docs/progress.md), where the server looks for it by default: `chats` is { sessionId: entry }, or a string that is
+    // written as it is (a broken file). It is replaced by a rename, as a careful writer does.
+    progressFile: join(dir, 'office-progress.json'),
+    writeProgress(chats) {
+      const file = join(dir, 'office-progress.json');
+      writeFileSync(file + '.tmp', typeof chats === 'string' ? chats : JSON.stringify({ version: 1, updatedAt: iso(Date.now()), chats }));
+      renameSync(file + '.tmp', file);
     },
     // end a working subagent's turn now, as if it had just finished
     finishSub(subKey) { const f = subFiles.get(subKey); if (!f) throw new Error('no such subagent ' + subKey); appendFileSync(f, endTurn(Date.now(), 'Finished.', 'fin-' + subKey)); },
