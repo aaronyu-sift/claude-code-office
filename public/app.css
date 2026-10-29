@@ -580,11 +580,11 @@ main { flex: 1; min-height: 0; position: relative; }
 .of-side > * { pointer-events: auto; }
 .view-ofis[data-shelf="open"] .of-side { position: static; flex: 0 0 auto; width: 340px; height: 100%; padding: 14px 16px 14px 14px; align-items: stretch; }
 .of-ctl { display: flex; gap: 6px; align-self: flex-end; flex: none; }
-.of-ctl button, .sh-hide, .of-shelf-tab {
+.of-ctl button, .sh-hide, .sh-more-btn, .of-shelf-tab {
   border: 1px solid var(--sh-hair); background: var(--sh-btn, rgba(10, 14, 32, .55)); color: var(--sh-ink); cursor: pointer;
   transition: border-color .2s, background .2s;
 }
-.of-ctl button:hover, .sh-hide:hover, .of-shelf-tab:hover { border-color: var(--sh-accent); background: rgba(30, 40, 84, .7); }
+.of-ctl button:hover, .sh-hide:hover, .sh-more-btn:hover, .of-shelf-tab:hover { border-color: var(--sh-accent); background: rgba(30, 40, 84, .7); }
 .view-ofis:not([data-shelf="open"]) .of-side, .of-shelf-tab { --sh-btn: rgba(9, 12, 28, .80); }          /* over the scene, not over the dark page: more opaque, so the glyphs stay readable on the grass */
 .of-ctl button:disabled { opacity: .45; cursor: default; }
 .of-ctl button:disabled:hover { border-color: var(--sh-hair); background: var(--sh-btn, rgba(10, 14, 32, .55)); }
@@ -611,6 +611,9 @@ main { flex: 1; min-height: 0; position: relative; }
 .sh-sw { flex: none; width: 7px; height: 7px; border-radius: 50%; }
 .sh-proj { overflow-wrap: anywhere; }
 .sh-when { font: 12px/1.5 var(--sh-mono); color: var(--sh-muted); }
+.sh-more { flex: none; display: flex; flex-direction: column; align-items: flex-start; gap: 8px; margin-top: 10px; padding-top: 10px; border-top: 1px solid var(--sh-line); color: var(--sh-muted); font-size: 13px; line-height: 1.4; }
+.sh-more[hidden] { display: none; }
+.sh-more-btn { min-height: 30px; padding: 2px 14px; border-radius: 999px; font: 500 13px/1.4 var(--font); }
 .of-shelf-tab { position: absolute; top: 14px; right: 16px; z-index: 3; padding: 1px 12px; border-radius: 999px; backdrop-filter: blur(6px); -webkit-backdrop-filter: blur(6px); color: var(--sh-accent); font: 600 12px/1.6 var(--sh-mono); letter-spacing: .08em; text-transform: uppercase; }
 .of-shelf-tab[hidden] { display: none; }
 .view-ofis[data-shelf="collapsed"] .of-hud { right: 140px; }           /* room for the tab at the corner */

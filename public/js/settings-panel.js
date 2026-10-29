@@ -1,4 +1,4 @@
-// The scene settings popover in the header (pixel Office view): time of day, season, hemisphere and weather. The camera buttons inside it
+// The scene settings popover in the header (pixel Office view): time of day, season, hemisphere, weather and how many chats the shelf shows. The camera buttons inside it
 // belong to the same handler as the toggle in the header (main.js). Every change is applied to the scene at once, without a reload, and
 // remembered by the scene (settings.js); `afterChange(key, value)` lets the page keep an explicit URL parameter in step.
 import { t as msg } from './i18n.js';
@@ -10,7 +10,7 @@ const minutesOf = text => { const m = /^(\d{2}):(\d{2})$/.exec(text || ''); retu
 export function createSettingsPanel({ wrap, getOffice, afterChange = () => {} }) {
   const btn = wrap.querySelector('#set-btn'), pop = wrap.querySelector('#set-pop');
   const timeMode = wrap.querySelector('#set-time-mode'), timeRow = wrap.querySelector('.set-time'), slider = wrap.querySelector('#set-time'), out = wrap.querySelector('#set-time-out');
-  const season = wrap.querySelector('#set-season'), hemi = wrap.querySelector('#set-hemisphere'), weather = wrap.querySelector('#set-weather'), note = wrap.querySelector('#set-note');
+  const season = wrap.querySelector('#set-season'), hemi = wrap.querySelector('#set-hemisphere'), weather = wrap.querySelector('#set-weather'), shelf = wrap.querySelector('#set-shelf'), note = wrap.querySelector('#set-note');
 
   const set = (key, value) => {
     const o = getOffice();
@@ -18,6 +18,17 @@ export function createSettingsPanel({ wrap, getOffice, afterChange = () => {} })
     afterChange(key, value);
     return true;
   };
+  // the select offers 5, 10, 20 and 50; a value from the address (?shelf=7) or an older store gets an option of its own while it is the current one
+  function showShelf(n) {
+    const v = String(n);
+    for (const o of [...shelf.options]) if (o.dataset.extra && o.value !== v) o.remove();
+    if (![...shelf.options].some(o => o.value === v)) {
+      const o = new Option(v, v);
+      o.dataset.extra = '1';
+      shelf.add(o, [...shelf.options].find(x => +x.value > n) || null);
+    }
+    shelf.value = v;
+  }
   function refresh() {
     const o = getOffice();
     if (!o) return;
@@ -25,7 +36,7 @@ export function createSettingsPanel({ wrap, getOffice, afterChange = () => {} })
     for (const b of timeMode.querySelectorAll('button')) b.setAttribute('aria-pressed', String(b.dataset.v === (fixed ? 'fixed' : 'auto')));
     timeRow.hidden = !fixed;
     if (fixed) { slider.value = String(minutesOf(s.time)); out.textContent = s.time; }
-    season.value = s.season; hemi.value = s.hemisphere; weather.value = s.weather;
+    season.value = s.season; hemi.value = s.hemisphere; weather.value = s.weather; showShelf(s.shelf);
     const notes = [];
     if (s.weather !== 'off' && matchMedia('(prefers-reduced-motion: reduce)').matches) notes.push(msg('set.note.reduced'));
     const urlSet = Object.keys(s).filter(k => from[k] === 'url');
@@ -51,5 +62,6 @@ export function createSettingsPanel({ wrap, getOffice, afterChange = () => {} })
   season.addEventListener('change', () => { set('season', season.value); refresh(); });
   hemi.addEventListener('change', () => { set('hemisphere', hemi.value); refresh(); });
   weather.addEventListener('change', () => { set('weather', weather.value); refresh(); });
+  shelf.addEventListener('change', () => { set('shelf', +shelf.value); refresh(); });
   return { open, close, refresh, get isOpen() { return isOpen(); } };
 }

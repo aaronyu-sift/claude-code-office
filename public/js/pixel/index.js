@@ -70,7 +70,7 @@ export function createPixelOffice(root, ctx, opts = {}) {
   let expiry = 0, hoverId = null, seq = 0;
 
   // ---------------------------------------------------------- settings (settings.js)
-  // Stored settings, overridden by the URL (?time=, ?season=, ?weather=, ?hemisphere=: not stored). `from` says where each one came from.
+  // Stored settings, overridden by the URL (?time=, ?season=, ?weather=, ?hemisphere=, ?shelf=: not stored). `from` says where each one came from.
   const storage = (() => { try { return window.localStorage; } catch { return null; } })();
   const from = {};
   let settings;
@@ -201,6 +201,7 @@ export function createPixelOffice(root, ctx, opts = {}) {
     else if (key === 'season') updateSeason();
     else if (key === 'hemisphere') { updateSeason(); applyTime(nowClock(), true); }
     else if (key === 'weather') updateWeather();
+    else if (key === 'shelf') shelf.setMax(v);
     redraw(false);
     return true;
   }
@@ -227,6 +228,7 @@ export function createPixelOffice(root, ctx, opts = {}) {
   // shelf-view.js draws the card beside the scene; a click opens the same details panel as a click on a figure.
   const shelf = createShelfView({ root, area, msg, fmtShort, now: () => store.now(), open: id => { ctx.tip.hide(); ctx.openDrawer(id); }, storage });
   const syncShelf = () => shelf.update(shelfEntries({ agents: [...store.agents.values()], closed: store.closed || [] }));
+  shelf.setMax(settings.shelf);                                      // only the newest few have a row (setting `shelf`, ?shelf=N)
 
   // ---------------------------------------------------------- store -> rooms and seats
   function mains() {

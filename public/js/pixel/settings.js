@@ -1,17 +1,19 @@
 // Settings of the pixel Office view (what the popover in the header edits): time of day, season, weather and hemisphere. They are kept in
-// localStorage as one JSON object; a URL parameter (?time=HH:MM, ?season=, ?weather=, ?hemisphere=) overrides what is stored and is not
+// localStorage as one JSON object; a URL parameter (?time=HH:MM, ?season=, ?weather=, ?hemisphere=, ?shelf=) overrides what is stored and is not
 // stored itself. Pure functions over an injectable storage, so the rules can be tested without a browser.
 //   time:       'auto' (the browser's local clock) or 'HH:MM' (fixed)
 //   season:     'auto' (from the date and the hemisphere) or spring | summer | autumn | winter
 //   weather:    'off' (default) | 'auto' (seeded by date and season) | clear | cloudy | rain | snow | fog
 //   hemisphere: north (default) | south
+//   shelf:      how many asleep and closed chats the shelf shows at first, a whole number from 3 to 200 (default 10; the visitor can ask for more)
 // The camera view (isometric or front) has its own, older key and is handled by the view itself.
 import { parseClock, fmtClock } from './time.js';
 import { parseSeason, parseHemisphere } from './season.js';
 import { parseWeather } from './weather.js';
+import { DEFAULT_CAP, MIN_CAP, MAX_CAP } from './shelf.js';
 
 export const KEY = 'ajan-ofisi.settings';
-export const DEFAULTS = Object.freeze({ time: 'auto', season: 'auto', weather: 'off', hemisphere: 'north' });
+export const DEFAULTS = Object.freeze({ time: 'auto', season: 'auto', weather: 'off', hemisphere: 'north', shelf: DEFAULT_CAP });
 export const KEYS = Object.keys(DEFAULTS);
 
 // a valid value for a key, or null
@@ -20,6 +22,7 @@ const CLEAN = {
   season: v => (v === 'auto' ? 'auto' : parseSeason(v)),
   weather: v => parseWeather(v),
   hemisphere: v => parseHemisphere(v),
+  shelf: v => { const n = typeof v === 'number' ? v : typeof v === 'string' && /^\s*\d+\s*$/.test(v) ? +v : NaN; return Number.isInteger(n) && n >= MIN_CAP && n <= MAX_CAP ? n : null; },
 };
 export const clean = (key, value) => (CLEAN[key] ? CLEAN[key](value) : null);
 
