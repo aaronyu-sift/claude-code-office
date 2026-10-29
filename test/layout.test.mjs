@@ -124,3 +124,52 @@ test('item footprints rotate with the facing', () => {
   const sofa = layoutOffice(agents(1)).rooms[0].items.find(i => i.id === 'sofa');
   assert.deepEqual([sofa.w, sofa.d], [12, 30]);
 });
+
+// ---- Goal 2: themes, desk props, garden
+import { THEMES, hashStr, DESK_TOP } from '../public/js/pixel/layout.js';
+
+const projectOfTheme = theme => { for (let i = 0; i < 200; i++) if (THEMES[hashStr('proj-' + i) % THEMES.length] === theme) return 'proj-' + i; throw new Error('no project for ' + theme); };
+const themed = theme => layoutOffice([{ id: 'a-' + theme, cls: 2, project: projectOfTheme(theme), color: '#5B9BD5' }]).rooms[0];
+
+test('room themes: chosen by project, stable, and the four themes dress a room differently', () => {
+  const same = layoutOffice([{ id: 'x', cls: 1, project: 'atlas', color: '#fff' }, { id: 'y', cls: 1, project: 'atlas', color: '#fff' }]).rooms;
+  assert.equal(same[0].theme, same[1].theme, 'the same project always gets the same theme');
+  assert.deepEqual([...new Set(Array.from({ length: 60 }, (_, i) => layoutOffice([{ id: 'p', cls: 0, project: 'proj-' + i, color: '#fff' }]).rooms[0].theme))].sort(), [...THEMES].sort());
+  const furniture = new Map(THEMES.map(t => [t, new Set(themed(t).items.filter(i => i.layer === 'stand' && !i.wall).map(i => i.id))]));
+  for (const [t, ids] of furniture) assert.ok(ids.size >= 7, `${t} room has only ${ids.size} kinds of furniture`);
+  for (const a of THEMES) for (const b of THEMES) if (a < b) {
+    const only = [...furniture.get(a)].filter(id => !furniture.get(b).has(id));
+    assert.ok(only.length >= 3, `${a} and ${b} rooms are too alike (only ${only.length} pieces differ)`);
+  }
+  const walls = new Map(THEMES.map(t => [t, themed(t).items.filter(i => i.wall === 'north').map(i => i.id).join()]));
+  assert.equal(new Set(walls.values()).size, THEMES.length, 'the wall pieces of the four themes differ');
+});
+
+test('desk props stand on the desk top, never overlap each other and belong to a real slot', () => {
+  for (const theme of THEMES) {
+    const r = themed(theme);
+    assert.ok(r.props.length >= r.slots.length, `${theme}: fewer props than desks`);
+    const bySlot = new Map();
+    for (const p of r.props) {
+      const s = r.slots[p.slot];
+      assert.ok(s, `${theme}: prop ${p.id} on a slot that does not exist`);
+      assert.equal(p.z, DESK_TOP);
+      assert.ok(p.x >= s.desk.x && p.y >= s.desk.y && p.x + p.w <= s.desk.x + s.desk.w && p.y + p.d <= s.desk.y + s.desk.d, `${theme}: ${p.id} sticks out of desk ${p.slot}`);
+      (bySlot.get(p.slot) || bySlot.set(p.slot, []).get(p.slot)).push(box(p));
+    }
+    for (const list of bySlot.values()) for (let i = 0; i < list.length; i++) for (let j = i + 1; j < list.length; j++) assert.ok(!overlap(list[i], list[j]), `${theme}: two props overlap on a desk`);
+  }
+});
+
+test('garden island: path, pond, trees, fences, beds and a bench around any office, none of it on the building', () => {
+  for (const n of [1, 4, 10]) {
+    const L = layoutOffice(agents(n, [0, 1, 2]));
+    const count = re => L.outdoor.items.filter(i => re.test(i.id)).length;
+    assert.ok(L.outdoor.tiles.some(t => t.id === 'floor_path') && L.outdoor.tiles.some(t => /^floor_grass/.test(t.id)), `${n}: path and grass`);
+    assert.ok(count(/^pond$/) === 1, `${n}: one pond`);
+    assert.ok(new Set(L.outdoor.items.filter(i => /^(tree|pine)/.test(i.id)).map(i => i.id)).size >= 2, `${n}: at least two kinds of tree`);
+    assert.ok(count(/^fence/) >= 6, `${n}: ${count(/^fence/)} fence pieces`);
+    assert.ok(count(/^flowerbed/) >= 2 && count(/^bench$/) >= 1 && count(/^lamppost$/) >= 2, `${n}: beds, bench and lamp posts`);
+    assert.ok(count(/^(bush|hedge|rock|tuft)/) >= 8, `${n}: low plants and stones`);
+  }
+});

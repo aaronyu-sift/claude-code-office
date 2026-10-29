@@ -96,3 +96,17 @@ test('scheduler: explicit requests are coalesced into one frame', () => {
   assert.equal(w.draws.length, 1);
   assert.equal(w.sched.stats.frames, 1);
 });
+
+test('scheduler: the ambient source joins the others without adding frames and stops when nobody is awake', () => {
+  const w = world();
+  for (const k of ['typing', 'attention', 'ambient']) w.sched.setActive(k, true);
+  w.run(5000);
+  assert.ok(w.draws.length >= 40 && w.draws.length <= 51, `three sources drew ${w.draws.length} frames in 5 s`);
+  assert.deepEqual(w.sched.activeSources.sort(), ['ambient', 'attention', 'typing']);
+  for (const k of ['typing', 'attention', 'ambient']) w.sched.setActive(k, false);
+  w.run(300);
+  const n = w.draws.length, calls = w.rafCalls;
+  w.run(3000);
+  assert.equal(w.draws.length, n);
+  assert.equal(w.rafCalls, calls);
+});
