@@ -146,9 +146,11 @@ function safeView(name, create) {
 }
 // The Office view is the pixel scene. The original three.js scene stays available as ?scene=3d; it is loaded only then, so the
 // default view never fetches three.js.
+let pixelOffice = null;
 function createOffice(root) {
-  const q = new URLSearchParams(location.search);
-  if (q.get('scene') !== '3d') return createPixelOffice(root, ctx, { time: parseClock(q.get('time')) });   // ?time=HH:MM pins the time of day
+  const q = new URLSearchParams(location.search), proj = q.get('proj');
+  // ?time=HH:MM pins the time of day; ?proj=iso|front picks the view (without it the stored choice, then isometric)
+  if (q.get('scene') !== '3d') return (pixelOffice = createPixelOffice(root, ctx, { time: parseClock(q.get('time')), proj: proj === 'iso' || proj === 'front' ? proj : null }));
   root.dataset.scene = '3d';
   let real = null, visible = false;
   import('./ofis.js').then(m => { real = m.createOfis(root, ctx); if (visible) real.show(); })
@@ -167,6 +169,21 @@ const views = {
 };
 let current = null;
 
+// The projection toggle in the header belongs to the pixel Office view; it is hidden on every other view and with ?scene=3d.
+const projSeg = document.getElementById('proj-seg');
+function syncProjSeg() {
+  projSeg.hidden = !(current === 'ofis' && pixelOffice);
+  for (const b of projSeg.querySelectorAll('button')) b.setAttribute('aria-pressed', String(!!pixelOffice && b.dataset.proj === pixelOffice.projection));
+}
+projSeg.addEventListener('click', async e => {
+  const b = e.target.closest('button[data-proj]');
+  if (!b || !pixelOffice) return;
+  await pixelOffice.setProjection(b.dataset.proj);
+  const q = new URLSearchParams(location.search);
+  if (q.has('proj')) { q.set('proj', pixelOffice.projection); history.replaceState(null, '', '?' + q + location.hash); }     // an explicit ?proj= follows the toggle
+  syncProjSeg();
+});
+
 function setView(name) {
   if (!views[name]) name = 'pano';
   if (current === name) return;
@@ -174,11 +191,12 @@ function setView(name) {
   current = name;
   document.getElementById('view-' + name).hidden = false;
   views[name].show();
-  document.querySelectorAll('.top .seg button').forEach(b => b.setAttribute('aria-selected', String(b.dataset.view === name)));
+  syncProjSeg();
+  document.querySelectorAll('.top .seg button[data-view]').forEach(b => b.setAttribute('aria-selected', String(b.dataset.view === name)));
   try { localStorage.setItem('ajan-ofisi.view', name); } catch { /* storage disabled */ }
   if (location.hash !== '#' + name) history.replaceState(null, '', '#' + name);
 }
-document.querySelectorAll('.top .seg button').forEach(b => b.addEventListener('click', () => setView(b.dataset.view)));
+document.querySelectorAll('.top .seg button[data-view]').forEach(b => b.addEventListener('click', () => setView(b.dataset.view)));
 
 function changed(full, d) {
   renderKpis();
@@ -542,4 +560,4 @@ if (!views[startView]) { try { startView = localStorage.getItem('ajan-ofisi.view
 setView(startView);
 connect();
 // ?gallery=1 lists every sprite of the atlas on top of the app (loaded only then)
-if (new URLSearchParams(location.search).get('gallery') === '1') import('./pixel/gallery.js').then(m => m.showGallery()).catch(e => console.error('[gallery]', e));
+if (new URLSearchParams(location.search).get('gallery') === '1') import('./pixel/gallery.js').then(m => m.showGallery(new URLSearchParams(location.search).get('proj') === 'front' ? 'front' : 'iso')).catch(e => console.error('[gallery]', e));

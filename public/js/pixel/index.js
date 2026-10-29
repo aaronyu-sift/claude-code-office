@@ -15,6 +15,7 @@ import { fitZoom, stepZoom, centerPan, clampPan, zoomAbout } from './input.js';
 
 const FIT_ICON = '<svg class="ic" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M2.5 6V2.5H6M10 2.5h3.5V6M13.5 10v3.5H10M6 13.5H2.5V10"/></svg>';
 const DONE_MS = 4500;                 // a finished subagent stays at its desk this long
+const PROJ_KEY = 'ajan-ofisi.proj';       // the chosen view (iso or front) is kept in localStorage; ?proj= wins over it and is not stored
 const MIN_TARGET = 24;                // smallest click target around an agent, in CSS px
 const clipTxt = (s, n) => { s = String(s || ''); return s.length > n ? s.slice(0, n - 1) + '…' : s; };
 
@@ -26,10 +27,14 @@ function shortDesc(s) {
   return (out || d.slice(0, 16) + '…').replace(/[\s:;,.\-–—]+$/, '');
 }
 
+function storedProj() { try { return localStorage.getItem(PROJ_KEY) || 'iso'; } catch { return 'iso'; } }
+
+// opts: { proj ('iso' | 'front', from the URL; without it the stored choice or iso), time (minutes, from ?time=) }
 export function createPixelOffice(root, ctx, opts = {}) {
   const { store } = ctx;
-  const proj = projectionByName(opts.proj || 'iso');
+  let proj = projectionByName(opts.proj || storedProj());
   root.dataset.scene = 'pixel';
+  root.dataset.proj = proj.name;
   root.innerHTML =
     '<div class="of-stage"><canvas class="of-sky"></canvas><canvas class="of-main"></canvas></div><div class="of-layer"></div>' +
     '<div class="of-hud"><div class="of-sum"></div></div>' +
@@ -131,7 +136,7 @@ export function createPixelOffice(root, ctx, opts = {}) {
       layoutSig = sig;
       lastItems = items;
       const t0 = performance.now();
-      layout = layoutOffice(items);
+      layout = layoutOffice(items, proj);
       scene.setLayout(layout, light);
       lastBuildMs = performance.now() - t0;
       if (autoFit) fit(false);
@@ -435,11 +440,22 @@ export function createPixelOffice(root, ctx, opts = {}) {
     }
   }
 
-  loadAtlas(proj.name).then(a => {
-    atlas = a;
-    scene = createScene({ atlas, proj });
-    if (visible) { resize(); sync(); }
-  }).catch(err => { loadFailed = true; console.error('Office (pixel): atlas', err); renderSum(); });
+  // One atlas per projection, loaded on first use. A switch builds a new scene with the new projection and lays the office out again
+  // (agents, seats and labels carry over; they are keyed by id).
+  const atlases = new Map();
+  let projSeq = 0;
+  function useProjection(name) {
+    const seq = ++projSeq, pr = projectionByName(name);
+    const ready = atlases.has(pr.name) ? Promise.resolve(atlases.get(pr.name)) : loadAtlas(pr.name).then(a => { atlases.set(pr.name, a); return a; });
+    return ready.then(a => {
+      if (seq !== projSeq) return;                                  // a later switch is already on its way
+      proj = pr; atlas = a; scene = createScene({ atlas, proj });
+      root.dataset.proj = proj.name;
+      layout = null; layoutSig = ''; hoverId = null; autoFit = true;
+      if (visible) { resize(); sync(); }
+    }).catch(err => { if (!scene) loadFailed = true; console.error('Office (pixel): atlas', err); renderSum(); });
+  }
+  useProjection(proj.name);
 
   // read-only state for verification: document.querySelector('#view-ofis').__pixel
   root.__pixel = {
@@ -488,7 +504,7 @@ export function createPixelOffice(root, ctx, opts = {}) {
     // QA only: hold the scene still (no data sync, so labels and figures stay where they are) while a test clicks around
     freeze(on) { frozen = !!on; if (!on) sync(); },
     // rebuild the layout and the static layer from scratch and return the time it took (QA)
-    rebuild() { const t0 = performance.now(); layout = layoutOffice(lastItems); scene.setLayout(layout, light); return +(performance.now() - t0).toFixed(2); },
+    rebuild() { const t0 = performance.now(); layout = layoutOffice(lastItems, proj); scene.setLayout(layout, light); return +(performance.now() - t0).toFixed(2); },
     // ---- time of day (QA): the clock the scene shows, and what a change of it costs
     get time() { return { minute: stats.clockMin, clock: fmtClock(stats.clockMin), month: stats.month, phase: amb && amb.phase, fixed: fixedMin != null, ticking: fixedMin == null }; },
     get ambient() { return amb; },
@@ -550,5 +566,13 @@ export function createPixelOffice(root, ctx, opts = {}) {
       ctx.tip.hide();
     },
     update() { if (visible) sync(); },
+    get projection() { return proj.name; },
+    // switch the view; the choice is kept for the next visit unless `keep` is false
+    setProjection(name, keep = true) {
+      const pr = projectionByName(name);
+      if (keep) { try { localStorage.setItem(PROJ_KEY, pr.name); } catch { /* storage disabled */ } }
+      if (pr.name === proj.name) return Promise.resolve();
+      return useProjection(pr.name);
+    },
   };
 }

@@ -68,6 +68,9 @@ kbd { font: 10px/1 var(--mono); color: var(--faint); border: 1px solid var(--lin
 .seg button:hover { color: var(--text); }
 .seg button[aria-selected="true"], .seg button.on { background: var(--panel-3); color: var(--text); }
 .seg button[aria-selected="true"] kbd { color: var(--muted); }
+.proj-seg[hidden] { display: none; }
+.proj-seg button { padding: 5px 11px; }
+.proj-seg button[aria-pressed="true"] { background: var(--panel-3); color: var(--text); }
 .seg.small button { padding: 4px 11px; font-size: 12px; }
 
 .kpis { display: flex; gap: 6px 16px; margin-left: auto; flex-wrap: wrap; align-items: center; }

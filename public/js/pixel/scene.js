@@ -30,6 +30,7 @@ export function createScene({ atlas, proj }) {
   // what the last draw() put on screen (QA reads it through the `effects` getter)
   const fx = { beams: 0, markers: 0, waitBalloons: 0, zzBalloons: 0, doneBalloons: 0, rings: 0, bubbles: 0, steam: 0, butterflies: 0, birds: 0, swayed: 0, lights: {} };
   const img = atlas.image;
+  const headRise = Math.round(-proj.toScreen(0, 0, 37.7)[1]);     // px from a seated figure's pivot to the top of its head (40 isometric, 38 front)
   let layout = null, groundOut = null, groundIn = null, groundOutT = null, gx = 0, gy = 0, bounds = { x0: 0, y0: 0, x1: 1, y1: 1 }, fitBox = bounds;
   let entries = [], figs = [], roomById = new Map(), sortMs = 0, outdoorKey = '', pendingLight = null, ambientPts = { flowers: [], trees: [] };
   const actors = new Map();                     // `${roomId}:${slot}` -> { id, main, status, ap, name, since }
@@ -296,7 +297,7 @@ export function createScene({ atlas, proj }) {
       if (cx < vx0 - 40 || cx > vx1 + 40 || fy < vy0 || fy > vy1 + 90) continue;
       const wait = a.status === 'waiting' || a.status === 'ask';
       const bob = wait && anim ? Math.round(Math.sin(t / 230) * 2) : 0;
-      const headTop = fy - 40;
+      const headTop = fy - headRise;
       if (a.main) {
         const top = headTop - 15 + bob;
         fx.markers++;
