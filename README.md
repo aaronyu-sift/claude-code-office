@@ -44,7 +44,7 @@ Claude Code Office answers those questions live, from the data Claude Code alrea
   - Day and night follow your local clock: the tint of the light, lit windows, lamps and monitors after dark (there is no sun, moon or sky; the light alone tells the time).
   - Only small things move (steam, plants, butterflies, birds), at most 10 frames per second, nothing while the tab is hidden.
   - A shelf card at the right edge (dark glass, like the cards of the Setup Atlas page) lists the chats that have no room: asleep for hours, or closed in the last 14 days, newest first, each as a small sleeping or leaning figure with its full name and "closed 12m ago". The zoom buttons sit right under it. A chat that waits for you never goes there. Click an entry for its details.
-- **3D isometric office** (`?scene=3d`, the original scene). It is a tycoon-game style building on a little diorama island, with streets, a river, trees and mountains. Every session is a room with its project name on the wall.
+- **3D isometric office** (`?scene=3d`, see [3D office](#3d-office)). It is a tycoon-game style building on a little diorama island, with streets, a river, trees and mountains, now drawn with CC0 models from Kenney's furniture, nature and character packs. Every session is a room with its project name on the wall.
   - The lead agent sits at the big desk; subagents work at the other desks.
   - Monitors glow in the color of the current activity: thinking, shell, reading, editing, web/MCP or delegating.
   - New subagents walk in through the hall and leave when they finish. Idle rooms dim, and waiting rooms light up.
@@ -126,7 +126,7 @@ The Office view draws a pixel-art scene: voxel models written as code in [`tools
 | `?hemisphere=south` | Seasons (and the length of the days) for the southern hemisphere; north is the default. |
 | `?shelf=5` (a whole number from 3 to 200) | How many asleep and closed chats the shelf lists at first; 10 is the default. |
 | `?gallery=1` | List every sprite of the atlas with its id. Add `&proj=front` for the other atlas. |
-| `?scene=3d` | The original three.js office. |
+| `?scene=3d` | The three.js office, see [3D office](#3d-office). |
 
 **Time, seasons and weather.** The light follows the browser's local clock: a tint over the rooms and the garden, and lit windows, lamps and monitors after dark; the agents and their labels stay readable at every hour. The seasons follow the date (and the hemisphere): spring blossom, summer green, autumn leaves, winter snow with bare trees, a snowman, pumpkins, a bird bath and a pile of leaves; they are baked into the atlas as `<id>@spring`, `@autumn` and `@winter` sprites (summer is the plain sprite), nothing is recoloured while it runs. The weather is optional and **off by default**: clear, cloudy, rain, snow and fog, or `auto`, which picks a weather for the day from a seeded hash of the date and the season (the same day always gives the same weather; nothing is fetched from anywhere). It lives on one overlay canvas with at most 120 particles, drawn at most 10 times a second, never while the page is hidden, and not at all with `prefers-reduced-motion`; with it on, clear days bring petals in spring, falling leaves in autumn, a few flakes in winter and fireflies on summer nights, and a clear day after rain sometimes has a rainbow. Butterflies and birds by day are part of the garden in every setting.
 
@@ -160,6 +160,19 @@ npm run sprites:table                                # the content lists of the 
 The models are in `tools/sprites/` (`models.mjs`, `props.mjs`, `decor.mjs`; `catalog.mjs` lists every sprite; `seasons.mjs` makes the seasonal variants out of the same models with another palette, snow caps, bare branches and the four seasonal props); [`tools/sprites/README.md`](tools/sprites/README.md) has the details.
 
 **Tests.** `npm test` runs the unit tests (projections, layout in both views, depth order, labels, scheduler, time of day, seasons, weather, settings, languages, shelf, closed-chat scan, manifest). `node tools/qa/pixel-qa.mjs --proj iso` (or `--proj front`) starts the server against a fake `~/.claude`, drives headless Chrome in a throw-away profile and prints one `CHECK … PASS|FAIL` line per check (occlusion, click targets, labels, frame budget, idle, time of day, seasons, weather, settings, gallery, projection toggle, the shelf, its Atlas-card style and its cap, the details panel, the scan of closed chats) and a final `QA PASS` or `QA FAIL`. The checks run in one fixed season (`--season summer` by default, `--season auto` follows the date) so the date they run on does not matter. `--shots <dir> --set m4` also writes the screenshots of the seasons, the weather and the times of day, and `--set m5` those of the shelf and the details panel. The shelf checks use a fixture with 10 live and 12 closed chats (`?shelf=200`, so that every chat has a row; the cap has its own check with 36 closed chats) and a second, 300-transcript fixture for the scan (cap, budget, cold and warm reads). The plan, its decisions and the deviations are in [docs/pixel-scene-plan.md](docs/pixel-scene-plan.md).
+
+## 3D office
+
+`?scene=3d` opens the three.js office: a building of rooms on a diorama island. Its furniture, trees, rocks and people are glTF models from three [Kenney](https://kenney.nl) packs (CC0, listed in [THIRD_PARTY.md](THIRD_PARTY.md), about 1.1 MB in [`public/models/`](public/models/)), recoloured in code to the scene's own palette, baked into the room's single mesh, and given occlusion shading, a mottled floor, tone mapping and contact shadows by `public/js/ofis-polish.js`. Each agent's colour is on its person's top; the chief wears the headset and waves when it is your turn.
+
+| Option | Effect |
+|---|---|
+| `?scene=3d` | The 3D office instead of the pixel office. |
+| `&assets=procedural` | Draw every piece from the built-in boxes and spheres, load no model file. It is also what a piece falls back to when its file is blocked, slow (10 s) or broken: the browser console says so once for that piece and the scene goes on. |
+| `&polish=off` | No occlusion shading, mottled floor, tone mapping, contact shadows or extra detail on the built-in pieces. With `assets=procedural` this is the scene as it was before the models. |
+| `&hour=21`, `&env=0` | Preview another time of day; leave the surroundings out. |
+
+The server lets the browser keep `/models` for an hour (an ETag after that); nothing else is cached. `node tools/models/strip-glb.mjs <file.glb>` removes the animation clips and unread attributes from a character file (the shipped ones went through it). `npm run qa:3d` drives headless Chrome with software WebGL over the 3D scene: `3d-boot` (not blank, no errors, every model 200, nothing leaves localhost), `3d-fallback` (blocked, corrupt and empty model files), `3d-budget` (draw calls, triangles, size of the models and the rebuild time at 10 agents) and `3d-agents` (every agent has a person and its colour shows); `--mutations` breaks one line at a time in a copy of the repo and expects the matching check to fail.
 
 ## Languages
 
