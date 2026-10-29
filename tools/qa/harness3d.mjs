@@ -1,0 +1,60 @@
+// What the 3D scene's QA tools share (office3d-qa.mjs, office3d-shot.mjs): the server against a fake ~/.claude, headless Chrome with software
+// WebGL in a throw-away profile (cdp.mjs) and the Office view open on ?scene=3d with N sessions. `root.__ofis3d` and `root.__ofis` are the
+// read-only state the scene exposes (public/js/ofis.js).
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { launchChrome, sleep } from './cdp.mjs';
+import { makeFixture } from './fixture.mjs';
+import { startServer, apiAgents, VIEW } from './harness.mjs';
+
+export { sleep, VIEW };
+// an expression evaluated with `o` = the 3D view's QA state and `v` = its element
+export const o3 = expr => `(()=>{const v=document.querySelector('#view-ofis'), o=v.__ofis3d, s=v.__ofis; return ${expr}})()`;
+
+// The people the scene shows once it has settled: one chief per room, plus the working subagents that fit a room (3, 6 or 12 desks)
+export function expectedFigures(agents) {
+  const mains = agents.filter(a => a.kind === 'main');
+  let n = mains.length;
+  for (const m of mains) {
+    const subs = agents.filter(a => a.kind === 'sub' && a.parent === m.id && a.status === 'working').length;
+    n += Math.min(subs, subs <= 3 ? 3 : subs <= 6 ? 6 : 12);
+  }
+  return n;
+}
+
+export async function waitReady3d(page, minFigures, ms = 30000) {
+  const t0 = Date.now();
+  let last = null;
+  while (Date.now() - t0 < ms) {
+    last = await page.evaluate(o3('o && s ? ({ n: o.figures().length, rooms: s.rooms.length, err: v.dataset.hata || null }) : null')).catch(() => null);
+    if (last && last.err) return { ok: false, last };
+    if (last && last.rooms > 0 && last.n >= minFigures) { await sleep(600); return { ok: true, last }; }
+    await sleep(250);
+  }
+  return { ok: false, last };
+}
+
+// opts: { tag, query ('assets=procedural&polish=off'), fixture, width, height, dpr, intercept (async (page, srv) => void, runs before the page opens) }
+export async function scenario3d(n, opts = {}) {
+  const dir = join(tmpdir(), `cco-qa3d-${process.pid}-${n}${opts.tag || ''}`);
+  const fx = await makeFixture({ dir, n, ...(opts.fixture || {}) });
+  const srv = await startServer(dir, opts.serverEnv);
+  const page = await launchChrome({ width: opts.width || VIEW.w, height: opts.height || VIEW.h, dpr: opts.dpr || 1, lang: 'en-US' });
+  const done = async () => { await page.close(); srv.stop(); fx.cleanup(); };
+  try {
+    if (opts.intercept) await opts.intercept(page, srv);
+    const agents = await apiAgents(srv.port);
+    const q = new URLSearchParams(opts.query || '');
+    q.set('scene', '3d');
+    await page.goto(`http://127.0.0.1:${srv.port}/?${q}#ofis`, 800);
+    const expect = expectedFigures(agents);
+    const ready = await waitReady3d(page, opts.minFigures ?? expect);
+    return { fx, srv, page, agents, expect, ready, done, dir };
+  } catch (e) { await done(); throw e; }
+}
+
+// a camera on a room's chief desk (zoom: pixels per metre; the whole building at fit zoom is about 10 to 20), or on a world point
+export async function lookAtRoom(page, id, zoom = 70, at = { x: 2.2, y: 0.6, z: 3.4 }) {
+  await page.evaluate(o3(`(() => { const r = o.room(${JSON.stringify(id)}); return o.view(r.X + ${at.x}, ${at.y}, r.Z + ${at.z}, ${zoom}); })()`));
+}
+export async function lookAt(page, x, y, z, zoom) { await page.evaluate(o3(`o.view(${x}, ${y}, ${z}, ${zoom})`)); }
