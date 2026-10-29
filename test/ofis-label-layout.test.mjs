@@ -79,7 +79,21 @@ test('a frame of 60 labels is laid out in a few milliseconds at most', () => {
   assert.ok(per < 8, `${per.toFixed(2)} ms per frame`);
 });
 
-test('a forced label whose nearby spots all lie under the card is not shown: nothing is drawn under the card', () => {
-  const out = layoutLabels({ tags: [box('m', 100, 100, 110, 36, { force: true, rank: 100 })], blocked: [{ x: 0, y: 0, w: 1000, h: 650 }], vw: VW, vh: VH });
+test('a main label is never hidden: when the spots near it are all under the card it takes the nearest free one', () => {
+  // the card covers the left two thirds, the free part is a strip on the right more than a ring away from the label
+  const blocked = [{ x: 0, y: 0, w: 700, h: 700 }];
+  const T = box('m', 100, 300, 160, 60, { force: true, rank: 100 });
+  const p = layoutLabels({ tags: [T], blocked, vw: VW, vh: VH }).get('m');
+  assert.ok(p, 'shown');
+  assert.ok(p.x >= 700 && p.x + 160 <= VW - 4, `at ${p.x},${p.y}`);
+  // two such labels do not land on each other
+  const U = box('n', 120, 320, 160, 60, { force: true, rank: 100 });
+  const out = layoutLabels({ tags: [T, U], blocked, vw: VW, vh: VH });
+  assert.ok(out.has('m') && out.has('n'));
+  assert.ok(!hit(rect(T, out.get('m')), rect(U, out.get('n'))), 'the two labels overlap');
+});
+
+test('a main label is hidden only when nothing in reach is free of the card', () => {
+  const out = layoutLabels({ tags: [box('m', 100, 100, 110, 36, { force: true, rank: 100 })], blocked: [{ x: 0, y: 0, w: 1000, h: 690 }], vw: VW, vh: VH });
   assert.equal(out.has('m'), false);
 });

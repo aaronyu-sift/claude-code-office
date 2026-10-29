@@ -93,13 +93,15 @@ if (want('bar')) {
       return JSON.stringify({ vw: innerWidth, vh: innerHeight, view: r(view), area: r(q('.of-area')), stage: r(q('.of-stage')), canvas: r(q('.of-stage canvas')), buffer: [q('.of-stage canvas').width, q('.of-stage canvas').height], size: o.size,
         bar: r(top), pos: cs.position, bg: cs.backgroundColor, blur: cs.backdropFilter, border: cs.borderTopColor + ' ' + cs.borderTopWidth, radius: cs.borderTopLeftRadius, barOnTop: !!e && !!e.closest('.top'),
         topH: getComputedStyle(document.documentElement).getPropertyValue('--top-h').trim(), under, hudInArea: !!q('.of-area .of-hud'), ctlInSide: !!q('.of-side .of-ctl'), ctlInArea: !!q('.of-area .of-ctl'), attention: getComputedStyle(document.querySelector('#attention')).display,
-        figs: [...document.querySelectorAll('.of-hud')].length });
+        figs: [...document.querySelectorAll('.of-hud')].length, stageBg: getComputedStyle(q('.of-stage')).backgroundColor, viewBg: getComputedStyle(view).backgroundImage.slice(0, 15) });
     })()`).then(JSON.parse);
     for (const w of [360, 700, 1024, 1500, 2560]) {
       await S.page.setViewport(w, 900, 1);
       await sleep(1200);
       const g = await geo(), L = `${w}px`;
       eq(L + ' bar position', g.pos, 'absolute');
+      // the pixel scene's grass colour is not behind the clear WebGL canvas of the 3D scene: its own dark view background shows there
+      eq(L + ' stage and view background', [g.stageBg, g.viewBg], ['rgba(0, 0, 0, 0)', 'radial-gradient']);
       eq(L + ' bar glass', [g.bg, g.blur, g.border, g.radius], ['rgba(9, 12, 28, 0.8)', 'blur(10px)', 'rgba(196, 208, 255, 0.32) 1px', '18px']);
       if (!(g.bar.y > 0 && g.bar.x > 0 && g.bar.r < g.vw && g.bar.b < g.vh * 0.5)) bad.push(`${L}: the bar does not float inside the view (${g.bar.x.toFixed(0)},${g.bar.y.toFixed(0)} ${g.bar.w.toFixed(0)}x${g.bar.h.toFixed(0)})`);
       if (!g.barOnTop) bad.push(`${L}: something covers the bar`);
@@ -223,10 +225,18 @@ if (want('card')) {
     if (!bOpen || cB.id !== B.agent.id || aB.covers) bad.push('a click on another agent did not open its card beside it');
     const aOpen = await T.openAgent(A.agent.id);                          // with B's card open: the card moves to A
     if (!aOpen) bad.push('a click on an agent while another card is open did not move the card to it');
-    const labelOf = await T.ev(`(() => { const l = [...document.querySelectorAll('.of-l.of-tagl[data-id]')].filter(e => e.style.visibility === 'visible' && e.dataset.id === ${JSON.stringify(B.agent.id)})[0]; if (!l) return null; const r = l.getBoundingClientRect(); return { x: r.left + r.width / 2, y: r.top + r.height / 2 }; })()`);
+    // the labels are laid out around the card (none under it), so they move when it closes: read the label once the card is gone and the label has stopped moving
+    await T.closeCard();
+    const labelAt = () => T.ev(`(() => { const l = [...document.querySelectorAll('.of-l.of-tagl[data-id]')].filter(e => e.style.visibility === 'visible' && e.dataset.id === ${JSON.stringify(B.agent.id)})[0]; if (!l) return null; const r = l.getBoundingClientRect(); return { x: r.left + r.width / 2, y: r.top + r.height / 2 }; })()`);
+    let labelOf = null, prev = null;
+    for (let i = 0; i < 30; i++) {
+      await sleep(250);
+      labelOf = await labelAt();
+      if (labelOf && prev && Math.abs(labelOf.x - prev.x) < 0.5 && Math.abs(labelOf.y - prev.y) < 0.5) break;
+      prev = labelOf;
+    }
     let labelOk = true;
     if (labelOf) {
-      await T.closeCard();
       await S.page.mouse.click(labelOf.x, labelOf.y);
       const cl = await until(async () => { const d = await T.card(); return d.open ? d : null; }, 2000, 100);
       labelOk = !!cl && cl.id === B.agent.id;
@@ -343,6 +353,18 @@ if (want('shelf')) {
     await sleep(500);
     const b = await T.shelf();
     eq('rows after the footer button', [b.rows.length, ids(b), b.foot.hidden, b.count], [TOTAL, want_(TOTAL), true, `${TOTAL} chats`]);
+    // the figure of a row is the 3D scene's avatar in the project's colour: "Zz" for an asleep chat, a check mark for a closed one (so the two differ), the colour of the project in both
+    const avatar = async id => T.ev(`(() => { const c = document.querySelector('.sh-list li[data-id="${id}"] canvas.sh-fig'), g = c.getContext('2d'), w = c.width, h = c.height, d = g.getImageData(0, 0, w, h).data;
+      let r = 0, gr = 0, bl = 0, n = 0, white = 0;
+      for (let y = Math.floor(h * 0.3); y < Math.floor(h * 0.85); y++) for (let x = Math.floor(w * 0.15); x < Math.floor(w * 0.85); x++) { const i = (y * w + x) * 4; if (d[i + 3] < 200) continue; if (d[i] > 240 && d[i + 1] > 240 && d[i + 2] > 240) white++; else { r += d[i]; gr += d[i + 1]; bl += d[i + 2]; n++; } }
+      return JSON.stringify({ url: c.toDataURL().length, hash: c.toDataURL().slice(-60), rgb: n ? [r / n, gr / n, bl / n].map(Math.round) : null, white }); })()`).then(JSON.parse);
+    const sleeper = b.rows.find(r => r.kind === 'dormant'), closer = b.rows.find(r => r.kind === 'closed');
+    if (!sleeper || !closer) bad.push('the shelf has no asleep row or no closed row to compare');
+    else {
+      const [as, cl] = [await avatar(sleeper.id), await avatar(closer.id)];
+      if (as.hash === cl.hash || !as.white || !cl.white) bad.push(`the avatars of an asleep and a closed chat do not differ or have no white glyph (white pixels ${as.white} and ${cl.white})`);
+      if (!as.rgb || !cl.rgb) bad.push('an avatar is empty');
+    }
 
     // 4. a row opens the card beside it (to its left, the shelf is at the right edge), with the closed chat's details; Esc closes it
     const target = expected.filter(e => e.kind === 'closed')[2];
@@ -667,9 +689,10 @@ if (want('labels')) {
     const subsWorking = subs.filter(a => a.status === 'working' && a.doing), subsDone = subs.filter(a => a.status !== 'working');
     if (mains.length < 4 || subsWorking.length < 2 || !mains.some(a => a.status === 'waiting' || a.status === 'ask') || !mains.some(a => a.status === 'working' && a.doing)) bad.push(`the fixture lacks the cases: ${mains.length} mains, ${subsWorking.length} working sub-agents`);
     let labs = await labelsNow();
+    const chip0 = labs.find(l => l.chip && /\d+s$/.test(l.chip)) || null, waitingMain = chip0 ? { id: chip0.id } : null, t0 = Date.now();      // a chip in seconds, so that it can tick within the check
     stateChecks(all, labs, 'fit');
     layoutChecks(labs, await blockedNow(), 'fit');
-    if (await T.ev(`document.querySelectorAll('#view-ofis .of-signl, #view-ofis .of-sign').length`)) bad.push('an HTML fallback sign is still in the page');
+    if (await T.ev(`[...document.querySelectorAll('#view-ofis .of-signl')].filter(e => getComputedStyle(e).visibility === 'visible').length`)) bad.push('the HTML sign for the far zoom is shown next to the label of its main agent');
     rows.push(`at fit: ${mains.length} main agents (${mains.filter(a => a.status === 'waiting' || a.status === 'ask').length} waiting for you) and ${subs.length} sub-agents (${subsWorking.length} working with a doing line, ${subsDone.length} not) all with a shown label of the right text and state; ${labs.filter(l => l.shown).length} labels shown, ${(await blockedNow()).length} blocked areas, none overlapping`);
 
     // 2. a card open beside an agent: no label under it, and the labels that are not near it stay
@@ -686,7 +709,8 @@ if (want('labels')) {
     layoutChecks(labs, blocked, 'card open');
     const shownCard = labs.filter(l => l.shown);
     for (const l of shownCard) if (c.open && hit(l, c.rect)) bad.push(`card open: the label of ${l.id} overlaps the card`);
-    if (shownCard.length < Math.ceil(all.length / 3)) bad.push(`card open: only ${shownCard.length} of ${all.length} labels are shown`);
+    // a main agent's label is never hidden, whatever the card covers; a sub-agent's label may be (it lies under the card)
+    for (const a of mains) if (!labs.find(l => l.id === a.id && l.shown)) bad.push(`card open: the label of main ${a.id} is hidden`);
     // the hidden ones are only those that would lie under the card: they come back when it closes
     await T.closeCard();
     await T.settle();
@@ -719,6 +743,15 @@ if (want('labels')) {
       if (Math.max(dx, dy) > 80) bad.push(`sub ${a.id}: its label is ${Math.max(dx, dy).toFixed(0)} px from its agent`);
     }
     rows.push(`the farthest sub-agent label is ${farthest.toFixed(0)} px from its agent (limit 80)`);
+
+    // the your-turn chip ticks: its time is not the one it had when the label was made
+    if (!chip0) bad.push('no waiting chat with a chip in seconds to watch tick');
+    else {
+      if (Date.now() - t0 < 3000) await sleep(3000 - (Date.now() - t0));
+      const later = (await labelsNow()).find(l => l.id === waitingMain.id);
+      if (!later || later.chip === chip0.chip) bad.push(`the chip of ${waitingMain.id} still says "${chip0.chip}" ${((Date.now() - t0) / 1000).toFixed(1)} s later`);
+      else rows.push(`the your-turn chip ticks ("${chip0.chip}" then "${later.chip}")`);
+    }
 
     // 5. the state follows the agent: a working sub-agent that finishes shows its description in the finished state and no "what it does" line
     const fin = subsWorking[0];

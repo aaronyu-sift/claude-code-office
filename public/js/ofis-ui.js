@@ -7,15 +7,12 @@
 //   blocked()    -> [{ x, y, w, h }] what floats over the scene (the agent card, the shelf card, the zoom buttons) in CSS px of the scene's box: no label is drawn under it
 //   figureRects(ids) -> Map id -> rect of the agents on the screen (at least MIN_TARGET wide and high, the click target): the labels give way to them
 import * as THREE from 'three';
-import { hash } from './util.js';
 import { merge, load as loadSettings, fromQuery } from './pixel/settings.js';
 import { createOfficeUi, MIN_TARGET } from './office-ui.js';
 
 // ------------------------------------------------------------ the figure of a shelf row
-// The pixel scene draws the sleeping or leaning pixel worker from its atlas; here a row gets a small flat-shaded person in the style of the scene's own people (a round head
-// with hair, a rounded torso in the project's colour): asleep, the head rests to one side with closed eyes and a "z"; closed, the person leans back with the hands behind the head.
-const SKINS = ['#f3cfb0', '#e7b590', '#cf9670', '#b07650', '#86573a', '#f7dcc6'];
-const HAIRS = ['#2b211c', '#4c3528', '#7d5130', '#c08f4f', '#1c1d24', '#8a8f9c', '#a8432f', '#e0c890'];
+// The pixel scene draws the sleeping or leaning pixel worker from its atlas; here a row gets a round avatar in the colour of its project (the lead's decision for the 3D scene):
+// "Zz" on it for an asleep chat, a check mark for a closed one. Drawn on the row's canvas, so the shelf card's code is the same for both scenes.
 const FIG_W = 30, FIG_H = 38;
 
 const rgb = hex => [1, 3, 5].map(i => parseInt(hex.slice(i, i + 2), 16));
@@ -25,45 +22,31 @@ function mix(hex, t) {                                   // lighter for t > 0, d
 }
 const hexOf = color => (/^#[0-9a-f]{6}$/i.test(color || '') ? color : '#7d8597');
 
-function drawPerson(canvas, e) {
-  const dpr = Math.min(3, window.devicePixelRatio || 1), asleep = e.kind === 'dormant', h = hash(e.id);
-  const skin = SKINS[h % SKINS.length], hair = HAIRS[(h >>> 4) % HAIRS.length], shirt = hexOf(e.color);
+function drawAvatar(canvas, e) {
+  const dpr = Math.min(3, window.devicePixelRatio || 1), asleep = e.kind === 'dormant', col = hexOf(e.color);
   canvas.width = Math.round(FIG_W * dpr); canvas.height = Math.round(FIG_H * dpr);
   canvas.style.width = FIG_W + 'px'; canvas.style.height = FIG_H + 'px';
   const g = canvas.getContext('2d');
   g.setTransform(dpr, 0, 0, dpr, 0, 0);
   g.clearRect(0, 0, FIG_W, FIG_H);
-  g.fillStyle = 'rgba(0, 0, 0, .28)';                   // the shadow on the floor
-  g.beginPath(); g.ellipse(15, 36, 11, 2.2, 0, 0, Math.PI * 2); g.fill();
-  const body = g.createLinearGradient(0, 22, 0, 36);    // torso
-  body.addColorStop(0, mix(shirt, 0.18)); body.addColorStop(1, mix(shirt, -0.22));
-  g.fillStyle = body;
-  g.beginPath(); g.roundRect(7, 22, 16, 14, [6, 6, 3, 3]); g.fill();
-  if (!asleep) {                                        // the hands behind the head
-    g.fillStyle = mix(shirt, -0.08);
-    for (const s of [-1, 1]) { g.beginPath(); g.ellipse(15 + s * 10.5, 17, 2.4, 5.2, s * 0.5, 0, Math.PI * 2); g.fill(); }
-    g.fillStyle = skin;
-    for (const s of [-1, 1]) { g.beginPath(); g.arc(15 + s * 9, 11.6, 2.1, 0, Math.PI * 2); g.fill(); }
-  }
-  g.save();                                             // the head, tilted onto the shoulder when asleep
-  g.translate(15, 23); g.rotate(asleep ? 0.34 : 0); g.translate(-15, -23);
-  g.fillStyle = skin;
-  g.beginPath(); g.arc(15, 13, 8.6, 0, Math.PI * 2); g.fill();
-  g.fillStyle = hair;
-  g.beginPath(); g.arc(15, 13, 9.1, Math.PI * 1.04, Math.PI * 1.96); g.closePath(); g.fill();
-  g.strokeStyle = '#23252d'; g.fillStyle = '#23252d'; g.lineWidth = 1.2; g.lineCap = 'round';
-  if (asleep) for (const x of [11.6, 18.4]) { g.beginPath(); g.arc(x, 13.4, 1.6, 0.15 * Math.PI, 0.85 * Math.PI); g.stroke(); }
-  else {
-    for (const x of [11.6, 18.4]) { g.beginPath(); g.arc(x, 13, 1, 0, Math.PI * 2); g.fill(); }
-    g.beginPath(); g.arc(15, 15.6, 2.4, 0.2 * Math.PI, 0.8 * Math.PI); g.stroke();
-  }
-  g.restore();
-  if (asleep) {
-    g.fillStyle = '#9fb4ff'; g.font = '700 9px ui-monospace, Menlo, monospace'; g.textBaseline = 'alphabetic';
-    g.fillText('z', 22, 8); g.font = '700 7px ui-monospace, Menlo, monospace'; g.fillText('z', 26.5, 4.6);
+  g.fillStyle = 'rgba(0, 0, 0, .26)';                   // the shadow on the floor
+  g.beginPath(); g.ellipse(15, 35.5, 10, 2, 0, 0, Math.PI * 2); g.fill();
+  const disc = g.createRadialGradient(11, 12, 2, 15, 18, 15);
+  disc.addColorStop(0, mix(col, 0.28)); disc.addColorStop(1, mix(col, -0.28));
+  g.fillStyle = disc;
+  g.beginPath(); g.arc(15, 18, 13, 0, Math.PI * 2); g.fill();
+  g.strokeStyle = 'rgba(255, 255, 255, .38)'; g.lineWidth = 1;
+  g.beginPath(); g.arc(15, 18, 12.5, 0, Math.PI * 2); g.stroke();
+  g.fillStyle = '#ffffff'; g.strokeStyle = '#ffffff'; g.lineCap = 'round'; g.lineJoin = 'round';
+  if (asleep) {                                          // Zz
+    g.font = '800 12px ui-monospace, Menlo, monospace'; g.textAlign = 'center'; g.textBaseline = 'alphabetic';
+    g.fillText('Z', 12.5, 24); g.font = '800 8px ui-monospace, Menlo, monospace'; g.fillText('z', 20, 16);
+  } else {                                               // check mark
+    g.lineWidth = 2.6;
+    g.beginPath(); g.moveTo(9.5, 18.5); g.lineTo(13.6, 22.6); g.lineTo(21, 13.6); g.stroke();
   }
 }
-const shelfFigure = { key: e => `${e.kind}|${e.id}|${e.color}`, draw: drawPerson };
+const shelfFigure = { key: e => `${e.kind}|${e.id}|${e.color}`, draw: drawAvatar };
 
 // ------------------------------------------------------------ the interface
 // options: root (the Office view), area (the scene's box in it: pointer and wheel belong to it), ctx, camera (THREE.OrthographicCamera), size() -> [width, height] of the view in

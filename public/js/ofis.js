@@ -3,7 +3,7 @@
 // The scene is drawn with three.js. Signs, name tags and balloons live in an HTML layer so they stay crisp.
 import * as THREE from 'three';
 import { RoundedBoxGeometry } from 'three/addons/geometries/RoundedBoxGeometry.js';
-import { catColor, hash, esc, icon } from './util.js';
+import { catColor, hash, esc, icon, fmtShort } from './util.js';
 import { t as msg } from './i18n.js';
 import { labelParts, labelHtml } from './office-labels.js';
 import { createEnv } from './ofis-env.js';
@@ -26,6 +26,7 @@ const PAL = Object.fromEntries(Object.entries(PALETTES).map(([k, v]) => [k, make
 
 const WALL_H = 2.2, WALL_T = 0.16, LOW_H = 0.3;
 const SIGN_H = 1.24, SIGN_Y = 1.5;       // room sign on the wall (center height)
+const SIGN_HTML_BELOW = 19;               // below this zoom, an HTML fallback sign replaces the wall text
 const SUB_LABEL_REACH = 70;               // px a sub-agent's label may be from its agent: farther away it would read as another agent's
 const SIGN_PX = 288;                      // sign texture height in pixels (for crisp text)
 const SIGN_FONT = '"Segoe UI Variable Text", "Segoe UI", system-ui, sans-serif';
@@ -557,6 +558,9 @@ export function createOfis(root, ctx) {
     const fixed = [], tags = [], byId = new Map();
     for (const L of labels) {
       if (!L.want || L.off || zoom < L.minZoom || (L.maxZoom && zoom >= L.maxZoom)) { showLabel(L, false); continue; }
+      // the label under a main agent says the project and the chip at every zoom (office-labels.js): the HTML sign for the far zoom would say it twice
+      if (L.sign === undefined) L.sign = L.el.classList.contains('of-signl');
+      if (L.sign) { const m = chars.get(L.el.dataset.id); if (m && m.tag.want && !m.tag.off) { showLabel(L, false); continue; } }
       if (L.dirty) { L.w = L.el.offsetWidth; L.h = L.el.offsetHeight; L.dirty = false; }
       PV.copy(L.pos).project(camera);
       const sx = (PV.x + 1) / 2 * vw, sy = (1 - PV.y) / 2 * vh;
@@ -2201,11 +2205,17 @@ export function createOfis(root, ctx) {
       const a = store.agents.get(room.id);
       if (!a) continue;
       const st = a.status;
+      const wait = st === 'waiting' || st === 'ask';
       // 3D wall sign: redrawn only when its content changes
       const key = [a.project, a.title, a.name, a.color, st, room.overflow].join('|');
       if (room.signCv && room.signKey !== key) { room.signKey = key; drawSign(room, a); }
       if (room.signFace) room.signFace.color.set(st === 'dormant' ? '#9aa0ab' : '#ffffff');
-      // the HTML fallback sign for the far zoom is gone: the label under the main agent carries the project and the chip at every zoom (office-labels.js)
+      // from far away the wall text is unreadable, so a plain HTML fallback sign appears instead
+      let L = signs.get(room.id);
+      if (!L) { L = mkLabel('of-signl', 90, 'mid', 0); L.maxZoom = SIGN_HTML_BELOW; signs.set(room.id, L); }
+      if (room.signPos) L.pos.copy(room.signPos);
+      const chip = wait ? `<span class="of-chip w">${esc(msg(st === 'ask' ? 'of.chipAsk' : 'of.chipWait'))} · ${fmtShort(t - a.since)}</span>` : '';
+      setLabel(L, `<div class="of-sign ${st}"><div class="r1"><span class="sw" style="background:${esc(a.color)}"></span><b>${esc(a.project)}</b>${chip}</div></div>`, room.id, wait ? 95 : 90);
     }
     for (const c of chars.values()) {
       const a = store.agents.get(c.id);
