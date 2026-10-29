@@ -8,6 +8,7 @@
 const http = require('http');
 const { createChatBridge } = require('./chatbridge');
 const { createRecent } = require('./recent');
+const { createSessionCheck } = require('./procident');
 const fs = require('fs');
 const path = require('path');
 const os = require('os');
@@ -108,6 +109,8 @@ function colorFor(project) {
 function pidAlive(pid) {
   try { process.kill(pid, 0); return true; } catch (e) { return e.code === 'EPERM'; }
 }
+// a session file whose pid now belongs to another program (see procident.js) is a dead chat, not a live one
+const sessionAlive = createSessionCheck({ alive: pidAlive });
 
 // ---------------------------------------------------------------- tool classification
 
@@ -436,7 +439,7 @@ function refreshSessions() {
     let s;
     try { s = JSON.parse(fs.readFileSync(path.join(SESS_DIR, f), 'utf8')); } catch { s = sessionFiles.get(pid); }
     if (!s || !s.sessionId) continue;
-    if (!pidAlive(pid)) continue;
+    if (!sessionAlive(pid, s)) continue;
     next.set(pid, s);
     live.add(s.sessionId);
     let a = agents.get(s.sessionId);
