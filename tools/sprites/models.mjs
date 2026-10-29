@@ -33,6 +33,9 @@ export function makePalette() {
   p.add('glass', null, { colors: ['#7fc4e0', '#a8e0f2', '#e3f7ff'], mid: 1 }).add('cork', '#c8955a').add('brick', '#c4694a').add('roof', '#a8473a');
   p.add('flowerR', '#e8524a', { material: 'follaje' }).add('flowerO', '#f59a3a', { material: 'follaje' }).add('hedgeG', '#2b8a4c', { material: 'follaje' });
   p.add('cactusG', '#58b86a', { material: 'follaje' }).add('stoneDark', '#8b8576', { shift: 0.5 }).add('metalDark', '#5b6477');
+  // Goal 4 (appended, so the ramps above keep their numbers): snow and ice, autumn leaves, pumpkins, coal
+  p.add('snow', '#e3ebf8', { shift: 1.5 }).add('ice', null, { colors: ['#6fa8cf', '#9fd0ea', '#cdeaf7', '#f0fbff'], mid: 1 });
+  p.add('autumnR', '#c4492f').add('autumnO', '#eb8a3b').add('autumnY', '#ffd45e').add('pumpkin', '#f08a24').add('coal', '#2a2f42', { n: 2, mid: 0 });
   return p;
 }
 

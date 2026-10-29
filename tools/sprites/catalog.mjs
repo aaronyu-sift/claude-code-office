@@ -113,3 +113,40 @@ add('planter', 'outdoor', [0, 0, 14, 8], 17, 2, p => D.planter(p));
 add('well', 'outdoor', [-8, -6, 17, 12], 30, 1, p => D.well(p));
 add('shed', 'outdoor', [0, 0, 28, 24], 30, 2, p => D.shed(p), { tags: ['lit'], anchors: [{ k: 'window', at: [22, -2, 12], r: 9 }] });
 add('mailbox', 'outdoor', [-3, -3, 7, 6], 20, 2, p => D.mailbox(p));
+
+// ---- Goal 4: seasons -------------------------------------------------------------------------------------------------------------------------
+// Outdoor sprites get baked variants `<id>@spring|autumn|winter` (summer is the plain sprite; see seasons.mjs for how they are made). A
+// variant exists only where it differs from the plain sprite. The scene asks for `<id>@<season>` and falls back to the plain id.
+import { seasonPalette, snowCaps, bareTree, remap, strip, groundSpring, groundAutumn, pathWinter, birdBath, pumpkins, leafPile, snowman } from './seasons.mjs';
+add('birdbath', 'outdoor', [-7, -7, 14, 14], 14, 1, p => birdBath(p));
+add('pumpkins', 'outdoor', [-7, -7, 14, 14], 10, 1, p => pumpkins(p));
+add('leafpile', 'outdoor', [-7, -7, 14, 14], 7, 1, p => leafPile(p));
+add('snowman', 'outdoor', [-7, -7, 14, 14], 25, 1, p => snowman(p));
+
+const BASE = new Map(SPRITES.map(s => [s.id, s]));
+let n = 0;
+// post(v, palette, seed) turns the model built with the season's palette into the variant; tags: replace the plain sprite's tags (a bare tree does not sway)
+function variant(id, season, post, o = {}) {
+  const b = BASE.get(id), seed = ++n;
+  SPRITES.push({ ...b, id: `${id}@${season}`, tags: o.tags || b.tags, make: () => { const pal = seasonPalette(season), v = b.make(pal); return post ? post(v, pal, seed) : v; } });
+}
+const noSway = id => BASE.get(id).tags.filter(t => t !== 'sway');
+const caps = o => (v, pal, seed) => snowCaps(v, pal, { seed, ...o });
+
+for (const id of ['tree_a', 'tree_b', 'tree_oak', 'tree_birch', 'pine', 'tree_cypress']) {
+  variant(id, 'spring'); variant(id, 'autumn');
+  if (id === 'pine' || id === 'tree_cypress') variant(id, 'winter', caps({ prob: 0.85, lift: 0.55 }));
+  else variant(id, 'winter', (v, pal, seed) => bareTree(v, pal, seed), { tags: noSway(id) });
+}
+for (const id of ['bush_a', 'bush_b', 'bush_c', 'bush_d', 'hedge_a', 'hedge_b', 'tuft_a', 'tuft_b']) {
+  variant(id, 'spring'); variant(id, 'autumn'); variant(id, 'winter', caps({ prob: id.startsWith('tuft') ? 0.6 : 0.74, lift: 0.4 }));
+}
+for (const id of ['flowerbed', 'flowerbed_b', 'flowerbed_c', 'flowerbed_d']) {
+  variant(id, 'spring'); variant(id, 'autumn'); variant(id, 'winter', caps({ prob: 0.9, keep: ['flower'], keepProb: 0.35 }));
+}
+for (const id of ['rock', 'rock_b', 'rock_c', 'rock_d', 'bench', 'lamppost']) variant(id, 'winter', caps({ prob: 0.95, lift: 0.5 }));
+for (const id of ['floor_grass_a', 'floor_grass_b', 'floor_grass_c']) {
+  variant(id, 'spring', (v, pal, seed) => groundSpring(v, pal, seed)); variant(id, 'autumn', (v, pal, seed) => groundAutumn(v, pal, seed)); variant(id, 'winter');
+}
+variant('floor_path', 'autumn', (v, pal, seed) => groundAutumn(v, pal, seed)); variant('floor_path', 'winter', (v, pal) => pathWinter(v, pal));
+variant('pond', 'winter', (v, pal, seed) => snowCaps(strip(remap(v, pal, 'water', 'ice'), pal, ['leaf', 'flowerP', 'flowerW']), pal, { prob: 0.45, lift: 0, seed }));
