@@ -2,61 +2,26 @@
 // headless Chrome through the DevTools protocol in a throw-away profile, and prints one `CHECK <name> PASS|FAIL <detail>` line per check
 // and a final `QA PASS` or `QA FAIL`.
 //   node tools/qa/pixel-qa.mjs [--proj iso] [--shots <dir>] [--only <name>]
-import { spawn, spawnSync } from 'node:child_process';
-import { createServer } from 'node:net';
+import { spawnSync } from 'node:child_process';
 import { mkdirSync, readFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { launchChrome, sleep } from './cdp.mjs';
 import { makeFixture } from './fixture.mjs';
+import { ROOT, VIEW, startServer, px, scenario } from './harness.mjs';
+import { countRows } from '../sprites/content-minimums.mjs';
+import { tmpdir } from 'node:os';
 
-const ROOT = new URL('../../', import.meta.url).pathname;
 const args = process.argv.slice(2);
 const val = f => { const i = args.indexOf('--' + f); return i >= 0 ? args[i + 1] : undefined; };
 const proj = val('proj') || 'iso';
 const shotsDir = val('shots');
-const VIEW = { w: 1500, h: 900 };
 const results = [];
 function check(name, ok, detail) {
   results.push({ name, ok });
   console.log(`CHECK ${name} ${ok ? 'PASS' : 'FAIL'} ${detail}`);
 }
-const freePort = () => new Promise(res => { const s = createServer(); s.listen(0, '127.0.0.1', () => { const p = s.address().port; s.close(() => res(p)); }); });
-
-async function startServer(dir) {
-  const port = await freePort();
-  const proc = spawn('node', [ROOT + 'server.js', '--claude-dir', dir, '--data-dir', join(dir, 'data'), '--port', String(port)], { stdio: 'ignore', env: { ...process.env, CCO_CHAT_DB: '', CCO_DEMO: '' } });
-  for (let i = 0; i < 60; i++) { try { if ((await fetch(`http://127.0.0.1:${port}/api/config`)).ok) break; } catch { /* starting */ } await sleep(150); }
-  return { port, stop() { try { proc.kill('SIGKILL'); } catch { /* gone */ } } };
-}
-// the agents as the server reports them (what the page shows)
-const apiAgents = async port => (await (await fetch(`http://127.0.0.1:${port}/api/state`)).json()).agents;
-const px = expr => `(()=>{const p=document.querySelector('#view-ofis').__pixel; return ${expr}})()`;
-
-async function waitReady(page, expectFigures, ms = 20000) {
-  const t0 = Date.now();
-  while (Date.now() - t0 < ms) {
-    const n = await page.evaluate(px('p ? p.figures().length : -1')).catch(() => -1);
-    if (n >= expectFigures) { await sleep(500); return true; }
-    await sleep(250);
-  }
-  return false;
-}
 const overlap = (a, b) => a.x < b.x + b.w && a.x + a.w > b.x && a.y < b.y + b.h && a.y + a.h > b.y;
-
-async function scenario(n, opts = {}) {
-  const dir = join(tmpdir(), `cco-qa-${process.pid}-${n}${opts.tag || ''}`);
-  const fx = await makeFixture({ dir, n, ...(opts.fixture || {}) });
-  const srv = await startServer(dir);
-  const page = await launchChrome({ width: VIEW.w, height: VIEW.h, dpr: opts.dpr || 1, reducedMotion: !!opts.reducedMotion });
-  const done = async () => { await page.close(); srv.stop(); fx.cleanup(); };
-  try {
-    const agents = await apiAgents(srv.port);
-    await page.goto(`http://127.0.0.1:${srv.port}/#ofis`, 800);
-    const ready = await waitReady(page, agents.filter(a => a.kind === 'main').length);
-    return { fx, srv, page, agents, ready, done, dir };
-  } catch (e) { await done(); throw e; }
-}
+const NIGHT = '?time=22:00';              // the worst case for drawing: tint, glows, stars and every light on
 
 const only = val('only');
 const want = name => !only || only === name;
@@ -71,6 +36,10 @@ if (want('manifest')) {
   const man = JSON.parse(readFileSync(ROOT + 'public/pixel/manifest.json', 'utf8'));
   const bad = Object.keys(man.sprites).filter(id => /river|car|road|traffic/.test(id));
   check('09-manifest-ids', bad.length === 0 && Object.keys(man.sprites).length >= 60, `${Object.keys(man.sprites).length} sprites, matching river|car|road|traffic: ${bad.length ? bad.join(',') : 'none'}`);
+  // the content lists of plan section 5 (counting rule in the plan) and the rule that only small items animate
+  const rows = countRows(man), unmet = rows.filter(r => !r.met);
+  const P = man.projections[proj].sprites, big = Object.entries(man.sprites).filter(([id, s]) => (s.tags.includes('sway') || s.tags.includes('steam')) && P[id].rects.some(([, , w, h]) => w > 32 || h > 48));
+  check('09-content-minimums', unmet.length === 0 && big.length === 0, `${rows.length} rows of the section 5 table, met ${rows.length - unmet.length}${unmet.length ? ' (unmet: ' + unmet.map(r => `${r.row} ${r.actual}/${r.min}`).join('; ') + ')' : ''}; animated sprites (sway, steam) larger than 32 x 48 px: ${big.length ? big.map(b => b[0]).join(',') : 'none'}`);
 }
 
 // ---- 1 to 5 at N = 4, 10, 20
@@ -78,7 +47,7 @@ const SIZES = [4, 10, 20];
 const perN = {};
 for (const n of SIZES) {
   if (!['load', 'labels', 'targets', 'occlusion', 'hit'].some(want) && only) continue;
-  const S = await scenario(n);
+  const S = await scenario(n, { query: NIGHT });
   perN[n] = S;
   try {
     const mains = S.agents.filter(a => a.kind === 'main'), subs = S.agents.filter(a => a.kind === 'sub');
@@ -94,8 +63,10 @@ for (const n of SIZES) {
     const clash = [];
     for (let i = 0; i < shown.length; i++) for (let j = i + 1; j < shown.length; j++) if (overlap(shown[i], shown[j])) clash.push(`${shown[i].id.slice(0, 7)}/${shown[j].id.slice(0, 7)}`);
     const outside = shown.filter(r => r.x < 0 || r.y < 0 || r.x + r.w > VIEW.w + 0.5 || r.y + r.h > VIEW.h + 0.5);
-    check(`02-labels-n${n}`, wrong.length === 0 && mainRects.every(r => r.shown) && clash.length === 0 && outside.length === 0,
-      `${mainRects.length}/${mains.length} main labels shown with the full chat name (wrong ${wrong.length}), longest name ${Math.max(...mains.map(a => (a.name || '').length))} chars, ${shown.length} labels shown, overlapping pairs ${clash.length}${clash[0] ? ' (' + clash.slice(0, 3).join(' ') + ')' : ''}, outside the view ${outside.length}`);
+    // the longest names (120 characters) wrap into at most 5 lines inside their label, and no label box is cut or crosses another
+    const longest = Math.max(...mains.map(a => (a.name || '').length)), longRects = mainRects.filter(r => r.name && r.name.length >= 100), maxLines = Math.max(0, ...mainRects.map(r => r.lines));
+    check(`02-labels-n${n}`, wrong.length === 0 && mainRects.every(r => r.shown) && clash.length === 0 && outside.length === 0 && maxLines <= 5 && (n < 10 || (longRects.length > 0 && Math.max(...longRects.map(r => r.lines)) === 5)),
+      `${mainRects.length}/${mains.length} main labels shown with the full chat name (wrong ${wrong.length}), longest name ${longest} chars${longRects.length ? `, ${longRects.length} names of 100 chars or more fill ${longRects.map(r => r.lines).join('/')} lines` : ''}, most lines in any label ${maxLines} (limit 5), ${shown.length} labels shown, overlapping pairs ${clash.length}${clash[0] ? ' (' + clash.slice(0, 3).join(' ') + ')' : ''}, outside the view ${outside.length}`);
 
     // 3 and 5. click targets and hit-test round trip
     const ids = await S.page.evaluate(px('p.figures()'));
@@ -156,34 +127,67 @@ for (const n of SIZES) {
   }
 }
 
-// ---- 6. frame budget at N = 20 (the page of the last scenario is still open)
+// ---- 6. frame budget at N = 20 (the page of the last scenario is still open, at 22:00: the worst case), ambient animation, re-tint cost
 if (perN[20]) {
   const S = perN[20];
   try {
-    const p = S.page;
-    await p.evaluate(px('p.resetStats()'));
-    await sleep(10000);
-    const st = await p.evaluate(px('({stats: p.stats, p95: p.frameP95(), frames: p.frames, buildMs: p.buildMs, active: p.active, zoom: p.zoom})'));
-    const fps = st.stats.frames / 10;
+    const p = S.page, P = e => p.evaluate(px(e));
+    const sample = async seconds => {
+      await P('p.resetStats()');
+      await sleep(seconds * 1000);
+      const st = await P('({stats: p.stats, p95: p.frameP95(), frames: p.frames, buildMs: p.buildMs, active: p.active, fx: p.effects, clock: p.time.clock, rate: p.frameRate()})');
+      return { ...st, fps: st.rate.fps };
+    };
+    const night = await sample(10);
     // hidden: stub the visibility state and count scheduler callbacks
     await p.evaluate(`Object.defineProperty(document, 'hidden', { get: () => true, configurable: true }); document.dispatchEvent(new Event('visibilitychange'))`);
     await sleep(600);
-    await p.evaluate(px('p.resetStats()'));
+    await P('p.resetStats()');
     await sleep(2500);
-    const hid = await p.evaluate(px('p.stats'));
+    const hid = await P('p.stats');
     await p.evaluate(`delete document.hidden; document.dispatchEvent(new Event('visibilitychange'))`);
+    await P('p.setTime(720)');
+    await sleep(600);
+    const noon = await sample(6);
     const rebuilds = [];
-    for (let k = 0; k < 3; k++) rebuilds.push(await p.evaluate(px('p.rebuild()')));
-    check('06-frame-budget', fps <= 10.5 && st.p95 <= 4 && hid.callbacks === 0 && hid.frames === 0,
-      `N=20 at ${VIEW.w}x${VIEW.h}, 10 s: ${fps.toFixed(1)} frames per second (limit 10), p95 JavaScript time per dynamic frame ${st.p95} ms over ${st.frames} frames (limit 4), animation sources ${JSON.stringify(st.active)}, callbacks while hidden ${hid.callbacks}, frames while hidden ${hid.frames}; JavaScript time only (headless Chrome, software canvas)`);
+    for (let k = 0; k < 3; k++) rebuilds.push(await P('p.rebuild()'));
+    const frameOk = s => s.fps <= 10.1 && s.p95 <= 4;
+    check('06-frame-budget', frameOk(night) && frameOk(noon) && hid.callbacks === 0 && hid.frames === 0,
+      `N=20 at ${VIEW.w}x${VIEW.h}: at ${night.clock} (10 s, ${night.rate.frames} frames) ${night.fps.toFixed(2)} frames per second (limit 10), p95 JavaScript time per dynamic frame ${night.p95} ms (limit 4); at ${noon.clock} (6 s, ${noon.rate.frames} frames) ${noon.fps.toFixed(2)} frames per second, p95 ${noon.p95} ms; frame rate = frames after the first divided by the time from the first to the last; animation sources ${JSON.stringify(night.active)}, callbacks while hidden ${hid.callbacks}, frames while hidden ${hid.frames}; JavaScript time only (headless Chrome, software canvas)`);
     const warm = Math.min(...rebuilds);
-    check('06-static-rebuild', warm <= 50, `layout and static layer of 20 rooms rebuilt in ${warm} ms warm (limit 50; first build ${st.buildMs} ms cold, repeated rebuilds ${rebuilds.join(', ')} ms)`);
+    check('06-static-rebuild', warm <= 50, `layout and static layer of 20 rooms rebuilt in ${warm} ms warm (limit 50; first build ${night.buildMs} ms cold, repeated rebuilds ${rebuilds.join(', ')} ms)`);
+    // ambient animation: only small things move, through the one scheduler; nothing at all in the picture is animated beyond these counts
+    const nf = night.fx, df = noon.fx;
+    check('06-ambient', df.steam > 0 && df.swayed > 0 && df.butterflies >= 1 && df.butterflies <= 4 && df.birds >= 1 && df.birds <= 2 && nf.butterflies === 0 && nf.birds === 0 && nf.steam > 0 && Object.keys(nf.lights).length >= 3 && night.active.includes('ambient'),
+      `N=20 at noon: ${df.steam} steam plumes, ${df.swayed} plants and trees swaying, ${df.butterflies} butterflies (limit 4), ${df.birds} birds (limit 2); at night ${nf.butterflies} butterflies, ${nf.birds} birds, ${nf.steam} steam plumes, monitor flicker over ${nf.lights.monitor || 0} monitors; every moving sprite is at most 32 x 48 px (check 09); sources ${JSON.stringify(night.active)}; frame rate and hidden behaviour in check 06-frame-budget`);
+
+    // 11 (cost). Re-tint: a new time of day costs one re-tint, never more than one per minute, nothing on pan, zoom and redraws.
+    // Sweep the evening, when the light changes every minute, and take the largest JavaScript time of the re-tint plus
+    // the first frame after it (which makes the shaded copies of the garden sprites again)
+    const month = (await P('p.time')).month;
+    const costs = [], r0 = await P('p.retints');
+    for (let m = 15 * 60 + 30; m <= 18 * 60 + 40; m++) {
+      await P(`p.setTime(${m})`);
+      await sleep(70);
+      costs.push(await P('p.retintCost'));
+    }
+    const r1 = await P('p.retints');
+    const last = 18 * 60 + 40;
+    const again = await P(`p.setTime(${last}, false).retinted`);
+    const r2 = await P('p.retints');
+    for (const z of [2, 3, 2, 1]) { await P(`p.setZoom(${z})`); await sleep(60); }
+    await P('p.fit()'); await P('p.redraw()');
+    await sleep(200);
+    const r3 = await P('p.retints');
+    const tot = costs.map(c => c.totalMs), maxTot = Math.max(...tot), mean = tot.reduce((a, b) => a + b, 0) / tot.length, maxRetint = Math.max(...costs.map(c => c.retintMs)), maxFrame = Math.max(...costs.map(c => c.firstFrameMs));
+    check('11-retint-cost', maxTot <= 15 && r1 - r0 === costs.length && !again && r2 === r1 && r3 === r2,
+      `N=20 at fit, month ${month}, ${costs.length} consecutive minutes 15:30 to 18:40: ${r1 - r0} re-tints (one per minute), JavaScript time of a re-tint plus the first frame after it: largest ${maxTot.toFixed(2)} ms, mean ${mean.toFixed(2)} ms (limit 15; re-tint alone at most ${maxRetint.toFixed(2)} ms, first frame at most ${maxFrame.toFixed(2)} ms); the same minute again re-tints ${again ? 'again' : 'nothing'}; zoom, pan and redraws re-tint nothing (${r3 - r2}); JavaScript time only`);
   } finally { await S.done(); delete perN[20]; }
 }
 
 // ---- ux: status states, hover tip, zoom, pan and fit (the scene features of Goal 1)
 if (want('ux')) {
-  const S = await scenario(10, { tag: 'ux' });
+  const S = await scenario(10, { tag: 'ux', query: '?time=12:00' });
   try {
     const P = e => S.page.evaluate(px(e));
     const mains = S.agents.filter(a => a.kind === 'main');
@@ -258,13 +262,13 @@ if (want('ux')) {
 
 // ---- 7. idle: everything dormant, nothing animating, zero frames
 if (want('idle')) {
-  const S = await scenario(10, { tag: 'idle', fixture: { statuses: ['dormant'], subs: () => [] } });
+  const S = await scenario(10, { tag: 'idle', query: NIGHT, fixture: { statuses: ['dormant'], subs: () => [] } });
   try {
     await S.page.evaluate(px('p.resetStats()'));
     await sleep(4000);
     const st = await S.page.evaluate(px('({stats: p.stats, active: p.active, pending: p.pending})'));
     check('07-idle', S.ready && st.stats.frames === 0 && st.stats.callbacks === 0 && !st.pending && st.active.length === 0,
-      `10 dormant agents, 4 s: ${st.stats.frames / 4} frames per second, ${st.stats.callbacks} scheduler callbacks, animation sources ${JSON.stringify(st.active)}, loop pending ${st.pending}`);
+      `10 dormant agents at 22:00 (fixed time, so no minute ticker), 4 s: ${st.stats.frames / 4} frames per second, ${st.stats.callbacks} scheduler callbacks, animation sources ${JSON.stringify(st.active)}, loop pending ${st.pending}`);
   } finally { await S.done(); }
 }
 
@@ -286,6 +290,107 @@ if (want('scene3d')) {
     check('08-scene-3d', i.scene === '3d' && i.canvas && i.rooms === 4 && !i.error && i.three && errs3d.length === 0 && failed3d.length === 0 && !pixelRes,
       `?scene=3d: scene ${i.scene}, canvas ${i.canvas}, ${i.rooms} rooms, ${i.chars} figures, error ${i.error}, three.js loaded ${i.three}, console errors ${errs3d.length}${errs3d[0] ? ' first: ' + errs3d[0].slice(0, 160) : ''}, failed requests ${failed3d.length} (not counted: ${probe404} 404 of the old scene's optional local/ofis-extras.js probe); the default pixel scene loads three.js: ${pixelRes}`);
   } finally { await page.close(); srv.stop(); fx.cleanup(); }
+}
+
+// ---- 11. time of day: six required times plus every hour; luminance floor, lights, sky, labels, errors
+const hhmm = min => `${String(Math.floor(min / 60)).padStart(2, '0')}:${String(min % 60).padStart(2, '0')}`;
+if (want('time')) {
+  const S = await scenario(10, { tag: 'time', query: '?time=12:00' });
+  try {
+    const P = e => S.page.evaluate(px(e));
+    const start = await P('p.time');
+    const ids = await P('p.figures()');
+    const labelStyle = () => S.page.evaluate(`(() => { const n = document.querySelector('.px-l.px-main .px-name'), b = n.closest('.px-l'); return getComputedStyle(n).color + ' on ' + getComputedStyle(b).backgroundColor; })()`);
+    const lumOf = c => 0.2126 * c[0] + 0.7152 * c[1] + 0.0722 * c[2];
+    const at = async min => {
+      const e0 = S.page.errors.length;
+      await P(`p.setTime(${min})`);
+      await sleep(350);                                                      // the frame the scheduler draws for it
+      const fx = await P('p.effects'), amb = await P('p.ambient');
+      return { min, phase: amb.phase, lightsK: amb.lights, fx, lum: await P('p.agentLuminances()'), skyTop: await P('p.skyAt(0.05)'), skyLow: await P('p.skyAt(0.9)'), label: await labelStyle(), errors: S.page.errors.length - e0, figures: (await P('p.figures().length')) };
+    };
+    const noon = await at(720);
+    const REQUIRED = ['06:00', '09:00', '12:00', '18:30', '22:00', '02:00'].map(t => +t.slice(0, 2) * 60 + +t.slice(3));
+    const order = [...new Set([...REQUIRED, ...Array.from({ length: 24 }, (_, h) => h * 60)])].sort((a, b) => a - b);
+    const rows = [];
+    for (const min of order) rows.push(await at(min));
+    const ratio = r => ids.map(id => (r.lum[id] && noon.lum[id] ? r.lum[id].lum / noon.lum[id].lum : NaN));
+    const worst = rows.map(r => ({ r, min: Math.min(...ratio(r)), mean: ratio(r).reduce((a, b) => a + b, 0) / ids.length }));
+    const lowest = worst.reduce((b, w) => (w.min < b.min ? w : b), worst[0]);
+    const lowRows = worst.filter(w => !(w.min >= 0.6));
+    const dark = rows.filter(r => r.phase === 'dusk' || r.phase === 'night'), unlit = dark.filter(r => !(r.fx.lights.window > 0 && r.fx.lights.lamp > 0 && r.fx.lights.monitor > 0));
+    const day = rows.filter(r => r.phase === 'day'), lit = day.filter(r => Object.keys(r.fx.lights).length);
+    const skies = new Set(rows.filter(r => REQUIRED.includes(r.min)).map(r => r.skyTop.join(',')));
+    const nightSky = rows.find(r => r.min === 22 * 60), sameLabel = rows.every(r => r.label === noon.label), noErr = rows.every(r => r.errors === 0 && r.figures === ids.length);
+    const req = worst.filter(w => REQUIRED.includes(w.r.min)).map(w => `${hhmm(w.r.min)} ${w.r.phase}: lowest ${w.min.toFixed(2)}, mean ${w.mean.toFixed(2)}, lit ${['window', 'lamp', 'monitor'].map(k => `${k} ${w.r.fx.lights[k] || 0}`).join(' ')}`);
+    check('11-time', start.fixed && start.clock === '12:00' && lowRows.length === 0 && unlit.length === 0 && lit.length === 0 && skies.size >= 4 && lumOf(nightSky.skyTop) < 0.35 * lumOf(noon.skyTop) && sameLabel && noErr,
+      `${ids.length} agents, month ${start.month}; luminance of every agent's silhouette as a share of its noon value, at ${order.length} times (the six required and every hour): lowest of all ${lowest.min.toFixed(2)} at ${hhmm(lowest.r.min)} (floor 0.60), times below the floor ${lowRows.length}; ` +
+      `${req.join('; ')}; after dark (${dark.length} of those times) windows, lamps and monitors all lit at ${dark.length - unlit.length}; in daylight (${day.length} times) lights drawn at ${lit.length}; sky colour at the top at the six times: ${skies.size} different values (day and night each keep one colour for hours), 22:00 sky is ${(lumOf(nightSky.skyTop) / lumOf(noon.skyTop) * 100).toFixed(0)} percent as bright as noon; label colours identical at every time: ${sameLabel} (${noon.label}); errors ${S.page.errors.length}; ?time=12:00 start: fixed ${start.fixed}, ticker ${start.ticking}`);
+  } finally { await S.done(); }
+
+  // the clock is the browser's local clock: two emulated time zones show their own hour, and nothing re-tints except at a minute boundary
+  const minutesIn = tz => { const parts = Object.fromEntries(new Intl.DateTimeFormat('en-GB', { timeZone: tz, hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }).formatToParts(new Date()).map(x => [x.type, x.value])); return +parts.hour * 60 + +parts.minute; };
+  const dist = (a, b) => Math.min((a - b + 1440) % 1440, (b - a + 1440) % 1440);
+  const got = [];
+  for (const tz of ['Pacific/Auckland', 'America/Los_Angeles']) {
+    const T = await scenario(1, { tag: 'tz', timezone: tz });
+    try {
+      const t = await T.page.evaluate(px('p.time')), local = await T.page.evaluate('(() => { const d = new Date(); return d.getHours() * 60 + d.getMinutes(); })()');
+      const w0 = await T.page.evaluate(px('p.retints')); await sleep(3000); const w1 = await T.page.evaluate(px('p.retints'));
+      got.push({ tz, shown: t.minute, local, expect: minutesIn(tz), fixed: t.fixed, ticking: t.ticking, retints: w1 - w0, errors: T.page.errors.length });
+    } finally { await T.done(); }
+  }
+  check('11-time-clock', got.every(g => !g.fixed && g.ticking && dist(g.shown, g.local) <= 2 && dist(g.shown, g.expect) <= 3 && g.retints <= 1 && g.errors === 0) && dist(got[0].shown, got[1].shown) > 60,
+    `without ?time= the scene shows the browser's local clock: ${got.map(g => `${g.tz} ${hhmm(g.shown)} (page clock ${hhmm(g.local)}, expected ${hhmm(g.expect)}, ticker on ${g.ticking}, re-tints in 3 s ${g.retints})`).join('; ')}; the two zones differ by ${dist(got[0].shown, got[1].shown)} minutes`);
+}
+
+// ---- gallery: ?gallery=1 lists every sprite id
+if (want('gallery')) {
+  const S = await scenario(1, { tag: 'gal', query: '?gallery=1' });
+  try {
+    await S.page.evaluate(`new Promise(r => { const t0 = Date.now(); (function w() { if (document.querySelector('.gal[data-ready]') || Date.now() - t0 > 15000) r(); else setTimeout(w, 100); })(); })`);
+    const ids = Object.keys(JSON.parse(readFileSync(ROOT + 'public/pixel/manifest.json', 'utf8')).sprites);
+    const info = await S.page.evaluate(`(() => {
+      const g = document.querySelector('.gal'), cards = [...g.querySelectorAll('.gal-card')], el = document.querySelector('#gal-count');
+      const blank = cards.filter(c => { const cv = c.querySelector('canvas'), d = cv.getContext('2d').getImageData(0, 0, cv.width, cv.height).data; for (let i = 3; i < d.length; i += 4) if (d[i]) return false; return true; }).map(c => c.dataset.id);
+      return { ready: !!g.dataset.ready, shown: +el.dataset.count, text: el.textContent, cards: cards.length, ids: cards.map(c => c.dataset.id), blank };
+    })()`);
+    const have = new Set(info.ids), missing = ids.filter(id => !have.has(id)), extra = info.ids.filter(id => !ids.includes(id));
+    check('gallery', info.ready && info.shown === ids.length && info.cards === ids.length && !missing.length && !extra.length && !info.blank.length && S.page.errors.length === 0,
+      `?gallery=1 shows "${info.text}" (number on the page ${info.shown}, cards ${info.cards}); manifest count ${ids.length}; sprite ids missing from the page ${missing.length}, unknown on the page ${extra.length}, blank images ${info.blank.length}${info.blank[0] ? ' (' + info.blank.slice(0, 3).join(',') + ')' : ''}, console errors ${S.page.errors.length}`);
+  } finally { await S.done(); }
+}
+
+// ---- pictures for the review folder (--shots <dir>): garden, a room at zoom 3, 20 agents at fit, a waiting agent, one scene at four times
+if (shotsDir) {
+  mkdirSync(shotsDir, { recursive: true });
+  const snap = async (S, file) => { await S.page.mouse.move(2, 2); await sleep(900); await S.page.screenshot(join(shotsDir, file)); console.log('SHOT', file); };
+  const S10 = await scenario(10, { tag: 'shots', dpr: 2, query: '?time=12:00' });
+  try {
+    const P = e => S10.page.evaluate(px(e));
+    const mains = S10.agents.filter(a => a.kind === 'main'), waiting = mains.find(a => a.status === 'waiting' || a.status === 'ask');
+    for (const [t, file] of [['06:00', 'm2-0600.png'], ['12:00', 'm2-1200.png'], ['18:30', 'm2-1830.png'], ['22:00', 'm2-2200.png']]) {
+      await P(`p.setTime(${+t.slice(0, 2) * 60 + +t.slice(3)})`);
+      await sleep(400);
+      await snap(S10, file);
+    }
+    await P('p.setTime(720)');
+    await P('p.setZoom(3)');
+    await P(`p.centerOnRoom(${JSON.stringify(mains[2].id)})`);
+    await sleep(400);
+    await snap(S10, 'm2-room-zoom3.png');
+    await P('p.setZoom(4)');
+    await P('(() => { const b = p.layout.building; return p.centerOnWorld(b.x1 + 46, (b.y0 + b.y1) / 2 + 12, 6); })()');
+    await sleep(400);
+    await snap(S10, 'm2-garden.png');
+    await P('p.setTime(1110)');
+    await P('p.setZoom(4)');
+    await P(`(() => { const r = p.layout.rooms.find(q => q.id === ${JSON.stringify(waiting.id)}); return p.centerOnWorld(r.chiefPos.x, r.chiefPos.y, 16); })()`);
+    await sleep(400);
+    await snap(S10, 'm2-waiting.png');
+  } finally { await S10.done(); }
+  const S20 = await scenario(20, { tag: 'shots20', dpr: 2, query: '?time=12:00' });
+  try { await snap(S20, 'm2-n20-fit.png'); } finally { await S20.done(); }
 }
 
 const failed = results.filter(r => !r.ok);
