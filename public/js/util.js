@@ -24,6 +24,7 @@ export const STATUS = {
   dormant: status('dormant', '#646d80'),
   done: status('done', '#8a93a6'),
   stale: status('stale', '#646d80'),
+  closed: status('closed', '#646d80'),
 };
 
 const VERB_TOOLS = ['Read', 'Grep', 'Glob', 'LSP', 'Edit', 'MultiEdit', 'Write', 'NotebookEdit', 'Bash', 'PowerShell', 'Monitor', 'TaskStop',
@@ -208,6 +209,8 @@ const P = {
   arrow: '<path d="M6 3.5L10.5 8 6 12.5" fill="none"/>',
 };
 P.prompt = P.arrow;
+P.copy = '<rect x="5.5" y="5.5" width="8" height="8" rx="1.6" fill="none"/><path d="M10.5 5.5v-1.9a1.1 1.1 0 0 0-1.1-1.1H3.6a1.1 1.1 0 0 0-1.1 1.1v5.8a1.1 1.1 0 0 0 1.1 1.1h1.9" fill="none"/>';
+P.external = '<path d="M9 2.5h4.5V7M13.5 2.5L7.2 8.8M11.8 9.6v2.9a1 1 0 0 1-1 1H3.5a1 1 0 0 1-1-1V5.2a1 1 0 0 1 1-1h2.9" fill="none"/>';
 P.compact = '<path d="M3 5h10M5 8h6M7 11h2" fill="none"/>';
 
 export function icon(name, cls = '') {

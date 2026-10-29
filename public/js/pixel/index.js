@@ -14,6 +14,8 @@ import { seasonOfDate, dateKey, parseDateKey, lightMonth } from './season.js';
 import { resolveWeather, planFor, createField, drawRainbow, rainbowFor, skyFor, PARTICLE_CAP } from './weather.js';
 import { drawSky } from './lighting.js';
 import { createLabelLayer, placeLabels } from './labels.js';
+import { shelfEntries, isShelved } from './shelf.js';
+import { createShelfView } from './shelf-view.js';
 import { fitZoom, stepZoom, centerPan, clampPan, zoomAbout } from './input.js';
 
 const FIT_ICON = '<svg class="ic" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M2.5 6V2.5H6M10 2.5h3.5V6M13.5 10v3.5H10M6 13.5H2.5V10"/></svg>';
@@ -40,14 +42,17 @@ export function createPixelOffice(root, ctx, opts = {}) {
   let proj = projectionByName(opts.proj || storedProj());
   root.dataset.scene = 'pixel';
   root.dataset.proj = proj.name;
+  // the scene (`area`) and the shelf lane beside it: pointer, wheel and size belong to the area, so the lane scrolls on its own
   root.innerHTML =
+    '<div class="of-area">' +
     '<div class="of-stage"><canvas class="of-sky"></canvas><canvas class="of-main"></canvas><canvas class="of-wx"></canvas></div><div class="of-layer"></div>' +
     '<div class="of-hud"><div class="of-sum"></div></div>' +
     '<div class="of-ctl">' +
     `<button type="button" data-z="in" title="${esc(msg('of.zoomIn'))}">+</button>` +
     `<button type="button" data-z="out" title="${esc(msg('of.zoomOut'))}">−</button>` +
     `<button type="button" data-z="fit" title="${esc(msg('of.fit'))}">${FIT_ICON}</button></div>` +
-    '<div class="of-empty" hidden></div>';
+    '<div class="of-empty" hidden></div></div>';
+  const area = root.querySelector('.of-area');
   const stage = root.querySelector('.of-stage'), canvas = stage.querySelector('.of-main'), skyCanvas = stage.querySelector('.of-sky');
   const layer = root.querySelector('.of-layer'), sumEl = root.querySelector('.of-sum'), emptyEl = root.querySelector('.of-empty');
   const g = canvas.getContext('2d', { alpha: true });                   // transparent: the sky is a canvas behind it
@@ -217,9 +222,15 @@ export function createPixelOffice(root, ctx, opts = {}) {
   applyTime(nowClock(), true);
   updateSeason(true);
 
+  // ---------------------------------------------------------- the shelf
+  // Chats without a room: asleep ones (they leave their room) and closed ones (the server's list). shelf.js decides who and in which order,
+  // shelf-view.js draws the lane beside the scene; a click opens the same details panel as a click on a figure.
+  const shelf = createShelfView({ root, area, msg, fmtShort, now: () => store.now(), open: id => { ctx.tip.hide(); ctx.openDrawer(id); }, storage });
+  const syncShelf = () => shelf.update(shelfEntries({ agents: [...store.agents.values()], closed: store.closed || [] }));
+
   // ---------------------------------------------------------- store -> rooms and seats
   function mains() {
-    const list = store.mains();
+    const list = store.mains().filter(a => !isShelved(a));            // an asleep chat has no room: it is on the shelf
     for (const a of [...list].sort((p, q) => (p.started || 0) - (q.started || 0) || (p.id < q.id ? -1 : 1))) if (!order.has(a.id)) order.set(a.id, seq++);
     for (const id of order.keys()) if (!list.some(a => a.id === id)) order.delete(id);
     return list.sort((p, q) => order.get(p.id) - order.get(q.id));
@@ -404,7 +415,7 @@ export function createPixelOffice(root, ctx, opts = {}) {
     redraw();
   }
   function resize() {
-    const r = root.getBoundingClientRect();
+    const r = area.getBoundingClientRect();
     const dpr = window.devicePixelRatio || 1;
     const w = Math.max(1, Math.round(r.width * dpr)), h = Math.max(1, Math.round(r.height * dpr));
     if (w === view.w && h === view.h && dpr === view.dpr) return;
@@ -416,7 +427,7 @@ export function createPixelOffice(root, ctx, opts = {}) {
     if (autoFit) fit(false); else clampView();
     redraw();
   }
-  new ResizeObserver(() => { if (visible) resize(); }).observe(root);
+  new ResizeObserver(() => { if (visible) resize(); }).observe(area);
 
   // ---------------------------------------------------------- picking, hover, click
   const toVirtual = (cx, cy) => [(cx * view.dpr - view.panX) / view.zoom, (cy * view.dpr - view.panY) / view.zoom];
@@ -443,10 +454,10 @@ export function createPixelOffice(root, ctx, opts = {}) {
   }
   function clearHover() { ctx.tip.hide(); stage.classList.remove('hover'); if (scene && hoverId) setHover(null); }
   function hoverAt(e) {
-    const r = root.getBoundingClientRect();
+    const r = area.getBoundingClientRect();
     const lab = e.target && e.target.closest ? e.target.closest('.px-l[data-id]') : null;
     let h = null;
-    if (lab && root.contains(lab)) h = { t: 'agent', id: lab.dataset.id };
+    if (lab && area.contains(lab)) h = { t: 'agent', id: lab.dataset.id };
     else h = pickAt(e.clientX - r.left, e.clientY - r.top);
     stage.classList.toggle('hover', !!h);
     const a = h && h.t === 'agent' && store.agents.get(h.id);
@@ -456,8 +467,8 @@ export function createPixelOffice(root, ctx, opts = {}) {
 
   const ptrs = new Map();
   let drag = null, pinch = null, clickTimer = 0, wheelAcc = 0;
-  root.addEventListener('pointerdown', e => {
-    if (e.target.closest('.of-ctl')) return;
+  area.addEventListener('pointerdown', e => {
+    if (e.target.closest('.of-ctl, .of-shelf-tab')) return;
     if (e.pointerType === 'mouse' && e.button !== 0) return;
     ptrs.set(e.pointerId, { x: e.clientX, y: e.clientY });
     if (ptrs.size === 1) drag = { id: e.pointerId, sx: e.clientX, sy: e.clientY, lx: e.clientX, ly: e.clientY, moved: false, target: e.target };
@@ -466,13 +477,13 @@ export function createPixelOffice(root, ctx, opts = {}) {
       pinch = { d: Math.hypot(p1.x - p2.x, p1.y - p2.y) || 1, z: view.zoom, done: false };
       if (drag) drag.moved = true;
     }
-    try { root.setPointerCapture(e.pointerId); } catch { /* unavailable */ }
+    try { area.setPointerCapture(e.pointerId); } catch { /* unavailable */ }
   });
-  root.addEventListener('pointermove', e => {
+  area.addEventListener('pointermove', e => {
     if (ptrs.has(e.pointerId)) ptrs.set(e.pointerId, { x: e.clientX, y: e.clientY });
     if (pinch && ptrs.size >= 2) {
       const [p1, p2] = [...ptrs.values()];
-      const d = Math.hypot(p1.x - p2.x, p1.y - p2.y) || 1, r = root.getBoundingClientRect();
+      const d = Math.hypot(p1.x - p2.x, p1.y - p2.y) || 1, r = area.getBoundingClientRect();
       if (!pinch.done && (d / pinch.d > 1.3 || d / pinch.d < 0.77)) {
         pinch.done = true;
         setZoom(stepZoom(view.zoom, d > pinch.d ? 1 : -1), ((p1.x + p2.x) / 2 - r.left) * view.dpr, ((p1.y + p2.y) / 2 - r.top) * view.dpr);
@@ -502,14 +513,14 @@ export function createPixelOffice(root, ctx, opts = {}) {
       if (!d.moved && e.type === 'pointerup') click(e, d.target);
     }
   };
-  root.addEventListener('pointerup', endPtr);
-  root.addEventListener('pointercancel', endPtr);
-  root.addEventListener('pointerleave', () => { if (!drag) clearHover(); });
+  area.addEventListener('pointerup', endPtr);
+  area.addEventListener('pointercancel', endPtr);
+  area.addEventListener('pointerleave', () => { if (!drag) clearHover(); });
 
   function click(e, target) {
     const lab = target && target.closest ? target.closest('.px-l[data-id]') : null;
-    if (lab && root.contains(lab)) { ctx.tip.hide(); ctx.openDrawer(lab.dataset.id); return; }
-    const r = root.getBoundingClientRect();
+    if (lab && area.contains(lab)) { ctx.tip.hide(); ctx.openDrawer(lab.dataset.id); return; }
+    const r = area.getBoundingClientRect();
     const h = pickAt(e.clientX - r.left, e.clientY - r.top);
     if (!h) return;
     if (h.t === 'agent') { ctx.tip.hide(); ctx.openDrawer(h.id); return; }
@@ -517,20 +528,20 @@ export function createPixelOffice(root, ctx, opts = {}) {
     clearTimeout(clickTimer);
     clickTimer = setTimeout(() => { ctx.tip.hide(); ctx.openDrawer(h.id); }, 240);
   }
-  root.addEventListener('dblclick', e => {
-    if (e.target.closest('.of-ctl')) return;
+  area.addEventListener('dblclick', e => {
+    if (e.target.closest('.of-ctl, .of-shelf-tab')) return;
     clearTimeout(clickTimer);
     autoFit = true;
     fit();
   });
-  root.addEventListener('wheel', e => {
+  area.addEventListener('wheel', e => {
     e.preventDefault();
     wheelAcc += e.deltaY * (e.deltaMode === 1 ? 33 : 1);
     ctx.tip.hide();
     if (Math.abs(wheelAcc) < 60) return;
     const dir = wheelAcc < 0 ? 1 : -1;
     wheelAcc = 0;
-    const r = root.getBoundingClientRect();
+    const r = area.getBoundingClientRect();
     setZoom(stepZoom(view.zoom, dir), (e.clientX - r.left) * view.dpr, (e.clientY - r.top) * view.dpr);
   }, { passive: false });
   root.querySelector('.of-ctl').addEventListener('click', e => {
@@ -545,6 +556,7 @@ export function createPixelOffice(root, ctx, opts = {}) {
   function sync() {
     if (frozen) return;
     try {
+      if (store.ready) syncShelf();
       if (!scene) { renderSum(); return; }
       if (!store.ready) { renderSum(); return; }
       syncRooms();
@@ -567,6 +579,7 @@ export function createPixelOffice(root, ctx, opts = {}) {
     return ready.then(a => {
       if (seq !== projSeq) return;                                  // a later switch is already on its way
       proj = pr; atlas = a; scene = createScene({ atlas, proj });
+      shelf.setAtlas(a);
       scene.setSeason(season, light);
       applyAnimals();
       root.dataset.proj = proj.name;
@@ -597,7 +610,7 @@ export function createPixelOffice(root, ctx, opts = {}) {
       return { x: (f.cx * view.zoom + view.panX) / view.dpr, y: (f.cy * view.zoom + view.panY) / view.dpr, w: f.w * view.zoom / view.dpr, h: f.h * view.zoom / view.dpr, main: f.main, status: f.status, sprite: f.sprite };
     },
     labelRects() {
-      const base = root.getBoundingClientRect(), out = [];
+      const base = area.getBoundingClientRect(), out = [];
       for (const id of labels.ids()) {
         const L = labels.get(id), r = L.el.getBoundingClientRect(), nm = L.el.querySelector('.px-name');
         const lines = nm ? Math.round(nm.getBoundingClientRect().height / parseFloat(getComputedStyle(nm).lineHeight)) : 0;
@@ -623,6 +636,9 @@ export function createPixelOffice(root, ctx, opts = {}) {
     redraw() { redraw(); },
     // QA only: hold the scene still (no data sync, so labels and figures stay where they are) while a test clicks around
     freeze(on) { frozen = !!on; if (!on) sync(); },
+    // the shelf lane as it is now (QA, read-only), and fold or unfold it
+    shelf() { return shelf.read(); },
+    setShelfFolded(on) { shelf.setCollapsed(!!on); },
     // rebuild the layout and the static layer from scratch and return the time it took (QA)
     rebuild() { const t0 = performance.now(); layout = layoutOffice(lastItems, proj); scene.setLayout(layout, light); return +(performance.now() - t0).toFixed(2); },
     // ---- time of day (QA): the clock the scene shows, and what a change of it costs
@@ -696,6 +712,7 @@ export function createPixelOffice(root, ctx, opts = {}) {
   return {
     show() {
       visible = true;
+      shelf.setVisible(true);
       if (clockStale) { clockStale = false; applyTime(nowClock()); }
       resize();
       sync();
@@ -703,6 +720,7 @@ export function createPixelOffice(root, ctx, opts = {}) {
     },
     hide() {
       visible = false;
+      shelf.setVisible(false);
       clearTimeout(clickTimer);
       clearTimeout(expiry);
       ctx.tip.hide();

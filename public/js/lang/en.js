@@ -297,5 +297,23 @@ export default {
     'of.nobody': 'no one is waiting for you',
     'of.empty': 'No Claude Code sessions are open right now.',
     'of.subTip': 'subagent',
+
+    // shelf (chats asleep or closed) and the details panel
+    'status.closed': 'Closed',
+    'shelf.title': 'Asleep and closed',
+    'shelf.count': { one: '{n} chat', other: '{n} chats' },
+    'shelf.hide': 'Hide the shelf',
+    'shelf.show': 'Shelf',
+    'shelf.showTip': 'Show the shelf: chats that are asleep or closed',
+    'shelf.idle': 'idle {t}',
+    'shelf.closed': 'closed {t} ago',
+    'shelf.open': 'Open details of {name}',
+    'dw.openVscode': 'Open in VS Code',
+    'dw.openVscodeTip': 'Open this chat in VS Code',
+    'dw.copyId': 'Copy session id',
+    'dw.copied': 'Copied',
+    'dw.copyFail': 'Could not copy',
+    'dw.toolsTail': 'the end of the chat',
+    'dw.closedNote': 'Closed. This shows what the end of its transcript says.',
   },
 };

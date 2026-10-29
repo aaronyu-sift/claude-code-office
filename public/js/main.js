@@ -27,6 +27,10 @@ export const store = {
     return m.subs.map(s => this.agents.get(s)).filter(Boolean).sort((a, b) => (a.started || 0) - (b.started || 0));
   },
   events(id) { return this.evByAgent.get(id) || []; },
+  // chats with no process, newest first (the server's list of recently closed sessions); the shelf and the drawer read them
+  closed: [],
+  closedById: new Map(),
+  setClosed(list) { this.closed = Array.isArray(list) ? list : []; this.closedById = new Map(this.closed.map(c => [c.id, c])); },
 };
 
 function addEvent(ev) {
@@ -70,6 +74,7 @@ function connect() {
     store.agents.clear(); store.evByAgent.clear(); store.evById.clear();
     for (const a of d.agents) store.agents.set(a.id, a);
     d.events.sort((x, y) => x.s - y.s).forEach(addEvent);
+    store.setClosed(d.closed);
     store.ready = true;
     for (const a of store.mains()) prevStatus.set(a.id, a.status);
     changed(true);
@@ -82,6 +87,12 @@ function connect() {
     for (const ev of d.events) addEvent(ev);
     watchTransitions();
     changed(false, d);
+  });
+  // The closed sessions: sent when the list changes (a chat was closed, or opened again), never as a heartbeat.
+  es.addEventListener('closed', e => {
+    store.setClosed(JSON.parse(e.data).closed);
+    if (current === 'ofis') views.ofis.update(false, { closed: true });
+    if (drawerId) scheduleDrawer();
   });
   // Cost: equivalent at API list prices (sent on connect and after every scan).
   es.addEventListener('cost', e => {
@@ -387,7 +398,7 @@ let drawerTimer = null;
 
 let logAll = false;
 function openDrawer(id) {
-  if (!store.agents.has(id)) return;
+  if (!store.agents.has(id) && !store.closedById.has(id)) return;
   if (drawerId !== id) logAll = false;
   drawerId = id;
   drawer.dataset.id = id;
@@ -435,7 +446,7 @@ export function activityHtml(a, t) {
 
 function renderDrawer(first) {
   const a = store.agents.get(drawerId);
-  if (!a) { closeDrawer(); return; }
+  if (!a) { const c = store.closedById.get(drawerId); if (c) renderClosedDrawer(c, first); else closeDrawer(); return; }
   const t = store.now();
   const keep = first ? 0 : drawer.scrollTop;
   const parent = a.parent ? store.agents.get(a.parent) : null;
@@ -472,7 +483,6 @@ function renderDrawer(first) {
         <span class="sw" style="background:${a.color}"></span>
         <span class="dw-proj">${esc(a.kind === 'sub' ? (parent ? parent.project : a.project) : a.project)}</span>
         <span class="c-name">${esc(a.kind === 'sub' ? '↳ ' + a.atype : a.name)}</span>
-        ${a.kind === 'main' ? `<a id="dw-vscode" class="icon-btn" style="width:auto;padding:0 8px;text-decoration:none" href="vscode://anthropic.claude-code/open?session=${encodeURIComponent(a.id)}" title="Open this chat in VS Code">VS Code ↗</a>` : ''}
         ${statusPill(a, t)}
         <button class="icon-btn x-btn" id="dw-close" title="${esc(msg('dw.close'))}">${icon('close')}</button>
       </div>
@@ -483,6 +493,7 @@ function renderDrawer(first) {
         ${a.bg ? `<span>${esc(msg('dw.bg'))}</span>` : ''}
         <span class="path" title="${esc(a.cwd)}${a.pid ? '\npid ' + a.pid : ''}${a.version ? '\nClaude Code v' + esc(a.version) : ''}">${esc(a.cwd)}</span>
       </div>
+      ${dwActions(a)}
     </div>
     <div class="dw-body">
       <div class="dw-sec">${activityHtml(a, t)}</div>
@@ -505,10 +516,85 @@ function renderDrawer(first) {
     </div>`;
   drawer.scrollTop = keep;
   drawer.querySelector('#dw-close').addEventListener('click', closeDrawer);
+  wireActions();
   const more = drawer.querySelector('#dw-more');
   if (more) more.addEventListener('click', () => { logAll = !logAll; renderDrawer(false); });
   drawer.querySelectorAll('[data-sub]').forEach(r => r.addEventListener('click', () => openDrawer(r.dataset.sub)));
   drawSpark(drawer.querySelector('#dw-spark'), a.spark || [], a.color);
+}
+
+// ---- the two buttons of a chat's details: open it in VS Code (the extension's own link) and copy its session id
+let copied = { id: '', at: 0 };
+function dwActions(a) {
+  if (a.kind !== 'main') return '';
+  const done = copied.id === a.id && Date.now() - copied.at < 1600;
+  return `<div class="dw-actions">` +
+    `<a id="dw-vscode" class="act-btn primary" href="vscode://anthropic.claude-code/open?session=${encodeURIComponent(a.id)}" title="${esc(msg('dw.openVscodeTip'))}">${icon('external')}<span>${esc(msg('dw.openVscode'))}</span></a>` +
+    `<button type="button" id="dw-copy" class="act-btn" data-id="${esc(a.id)}">${icon(done ? 'check' : 'copy')}<span aria-live="polite">${esc(msg(done ? 'dw.copied' : 'dw.copyId'))}</span></button></div>`;
+}
+async function copyText(text) {
+  try { await navigator.clipboard.writeText(text); return true; } catch { /* blocked or unavailable: try the old way */ }
+  try {
+    const ta = Object.assign(document.createElement('textarea'), { value: text });
+    ta.style.cssText = 'position:fixed;opacity:0;pointer-events:none';
+    document.body.append(ta); ta.select();
+    const ok = document.execCommand('copy');
+    ta.remove();
+    return ok;
+  } catch { return false; }
+}
+function wireActions() {
+  const b = drawer.querySelector('#dw-copy');
+  if (!b) return;
+  b.addEventListener('click', async () => {
+    const id = b.dataset.id, ok = await copyText(id);
+    const span = b.querySelector('span');
+    if (!ok) { span.textContent = msg('dw.copyFail'); return; }
+    copied = { id, at: Date.now() };
+    drawer.dataset.copied = id;                                       // (read by the QA)
+    b.querySelector('svg').outerHTML = icon('check');
+    span.textContent = msg('dw.copied');
+    setTimeout(() => { if (drawerId === id) renderDrawer(false); }, 1700);
+  });
+}
+
+// ---- a chat that is closed: what the server read from the end of its transcript (no events, no context gauge, no cost: nothing live to show)
+function closedAgent(c) {
+  return { id: c.id, kind: 'main', status: 'closed', closed: true, name: c.name || c.title || c.project, title: c.title || c.name || '', project: c.project, cwd: c.cwd || '',
+    color: c.color, since: c.closedAt, model: c.model || '', lastPrompt: c.lastPrompt || '', lastText: c.lastText || '', summary: c.summary || '',
+    tools: c.tools || {}, cats: c.cats || {}, toolCats: c.toolCats || {} };
+}
+function renderClosedDrawer(c, first) {
+  const a = closedAgent(c), t = store.now(), keep = first ? 0 : drawer.scrollTop;
+  const tools = Object.entries(a.tools).sort((x, y) => y[1] - x[1]).slice(0, 7), toolMax = tools.length ? tools[0][1] : 1;
+  drawer.innerHTML = `
+    <div class="dw-head">
+      <div class="dw-row">
+        <span class="sw" style="background:${esc(a.color)}"></span>
+        <span class="dw-proj">${esc(a.project)}</span>
+        ${statusPill(a, t)}
+        <button class="icon-btn x-btn" id="dw-close" title="${esc(msg('dw.close'))}">${icon('close')}</button>
+      </div>
+      <div class="dw-title" id="dw-name">${esc(a.name)}</div>
+      ${a.title && a.title !== a.name ? `<div class="dw-sub">${esc(a.title)}</div>` : ''}
+      <div class="dw-meta">
+        ${a.model ? `<span>${esc(a.model)}</span>` : ''}
+        <span class="path" title="${esc(a.cwd)}">${esc(a.cwd)}</span>
+      </div>
+      ${dwActions(a)}
+    </div>
+    <div class="dw-body">
+      <div class="dw-sec"><div class="dw-note">${esc(msg('dw.closedNote'))}</div></div>
+      ${a.lastPrompt ? `<div class="dw-sec"><h6>${esc(msg('dw.lastPrompt'))}</h6><div class="quote" id="dw-prompt">${esc(a.lastPrompt)}</div></div>` : ''}
+      ${a.summary ? `<div class="dw-sec"><h6>${esc(msg('dw.summary'))}</h6><div class="quote">${esc(a.summary)}</div></div>` : ''}
+      ${a.lastText ? `<div class="dw-sec"><h6>${esc(msg('dw.lastReply'))}</h6><div class="quote" id="dw-reply">${esc(a.lastText)}</div></div>` : ''}
+      ${tools.length ? `<div class="dw-sec"><h6>${esc(msg('dw.tools'))} <span>${esc(msg('dw.toolsTail'))}</span></h6>
+        <div class="mixbar">${Object.entries(a.cats).sort((x, y) => y[1] - x[1]).map(([k, n]) => `<i style="flex:${n};background:${catColor(k)}" title="${esc((CATS[k] || CATS.other).name)} · ${n}"></i>`).join('')}</div>
+        <div class="tbars" id="dw-tools">${tools.map(([n, k]) => `<div class="tbar"><span class="nm">${esc(n)}</span><span class="tr"><i style="width:${(k / toolMax) * 100}%;background:${catColor(a.toolCats[n] || 'other')}"></i></span><span class="ct">${k}</span></div>`).join('')}</div></div>` : ''}
+    </div>`;
+  drawer.scrollTop = keep;
+  drawer.querySelector('#dw-close').addEventListener('click', closeDrawer);
+  wireActions();
 }
 
 export function subRow(s, t) {

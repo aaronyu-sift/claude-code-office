@@ -278,5 +278,23 @@ export default {
     'of.nobody': 'kimse seni beklemiyor',
     'of.empty': 'Şu an açık bir Claude Code oturumu yok.',
     'of.subTip': 'alt ajan',
+
+    // raf (uyuyan veya kapanan sohbetler) ve ayrıntı paneli
+    'status.closed': 'Kapalı',
+    'shelf.title': 'Uyuyan ve kapanan',
+    'shelf.count': { one: '{n} sohbet', other: '{n} sohbet' },
+    'shelf.hide': 'Rafı gizle',
+    'shelf.show': 'Raf',
+    'shelf.showTip': 'Rafı göster: uyuyan veya kapanan sohbetler',
+    'shelf.idle': '{t} boşta',
+    'shelf.closed': '{t} önce kapandı',
+    'shelf.open': '{name} ayrıntılarını aç',
+    'dw.openVscode': 'VS Code’da aç',
+    'dw.openVscodeTip': 'Bu sohbeti VS Code’da aç',
+    'dw.copyId': 'Oturum kimliğini kopyala',
+    'dw.copied': 'Kopyalandı',
+    'dw.copyFail': 'Kopyalanamadı',
+    'dw.toolsTail': 'sohbetin sonu',
+    'dw.closedNote': 'Kapalı. Yazışma kaydının sonunda görünenler gösteriliyor.',
   },
 };
