@@ -65,25 +65,21 @@ kbd { font: 10px/1 var(--mono); color: var(--faint); border: 1px solid var(--lin
 
 /* ---------------------------------------------------------------- top bar */
 
+/* The bar floats over every page as a glass card (the style of the cards of the Setup Atlas page): the Office map fills the whole page under it, and on the
+   other pages the content scrolls under it (each view starts below it, see .view). --top-h (main.js sets it from the bottom edge of the bar) is where the
+   page content and the controls of the map start. */
 .top {
   display: flex;
   align-items: center;
   gap: 10px 18px;
-  padding: 12px 20px;
-  background: var(--bg);
+  padding: 8px 14px;
   flex-wrap: wrap;
-  position: relative;
-  z-index: 5;
-}
-/* In the Office view the page is the map: the bar floats over it as a glass card (the style of the cards of the Setup Atlas page) and the your-turn strip
-   is not shown, because the scene already marks every waiting chat above its agent. --top-h (main.js sets it from the bottom edge of the bar) is where the
-   controls of the map start. */
-body[data-page="ofis"] .top {
-  position: absolute; top: 12px; left: 14px; right: 14px; padding: 8px 14px; border-radius: 18px;
+  position: absolute; top: 12px; left: 14px; right: 14px; z-index: 5; border-radius: 18px;
   background: rgba(9, 12, 28, .80); backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px);
   border: 1px solid rgba(196, 208, 255, .32); box-shadow: 0 18px 50px -18px rgba(0, 0, 0, .65);
 }
-body[data-page="ofis"] .top .seg { background: rgba(143, 176, 255, .08); }
+.top .seg { background: rgba(143, 176, 255, .08); }
+/* the your-turn strip is not shown in the Office view, because the scene already marks every waiting chat above its agent */
 body[data-page="ofis"] .attention { display: none; }
 .brand { display: flex; align-items: center; gap: 9px; font: 600 15px/1 var(--font-d); letter-spacing: .1px; color: var(--text); }
 .brand svg { width: 22px; height: 22px; color: var(--accent); }
@@ -152,9 +148,10 @@ body[data-page="ofis"] .attention { display: none; }
 /* ---------------------------------------------------------------- your-turn strip */
 
 .attention {
-  display: flex; align-items: center; flex-wrap: wrap; gap: 6px 8px; margin: 0 20px 6px; padding: 6px 7px 6px 14px;
-  background: var(--warn-soft); border-radius: 20px; width: fit-content; max-width: calc(100% - 40px);
-  scrollbar-width: none;
+  display: flex; align-items: center; flex-wrap: wrap; gap: 6px 8px; padding: 6px 7px 6px 14px;
+  position: absolute; top: calc(var(--top-h, 60px) + 6px); left: 20px; z-index: 4;
+  background: linear-gradient(var(--warn-soft), var(--warn-soft)), rgba(9, 12, 28, .82); border-radius: 20px; width: fit-content; max-width: calc(100% - 40px);
+  scrollbar-width: none; backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px);
 }
 .attention .lbl { display: inline-flex; align-items: center; gap: 8px; color: #f3d89a; font-weight: 600; white-space: nowrap; margin-right: 6px; }
 .attention .lbl .dot { background: var(--warn); box-shadow: 0 0 0 4px rgba(250, 178, 25, .16); }
@@ -172,6 +169,8 @@ body[data-page="ofis"] .attention { display: none; }
 
 main { flex: 1; min-height: 0; position: relative; }
 .view { position: absolute; inset: 0; overflow: auto; }
+/* every page but the map starts below the glass bar (and the your-turn strip when it shows); --strip-h is set by main.js */
+.view:not(.view-ofis) { padding-top: calc(var(--top-h, 60px) + var(--strip-h, 0px)); }
 .view[hidden], .attention[hidden] { display: none; }
 .view::-webkit-scrollbar, .akis-scroll::-webkit-scrollbar { width: 10px; height: 10px; }
 .view::-webkit-scrollbar-thumb, .akis-scroll::-webkit-scrollbar-thumb { background: #20252e; border-radius: 10px; border: 3px solid var(--bg); }
@@ -462,7 +461,7 @@ main { flex: 1; min-height: 0; position: relative; }
   .top { gap: 8px 12px; padding: 10px 14px; }
   .kpis { margin-left: 0; width: 100%; order: 5; gap: 6px 14px; }
   .accts { display: none; }
-  .attention { margin: 0 14px 6px; }
+  .attention { left: 14px; max-width: calc(100% - 28px); }
   .pano { padding: 8px 14px 24px; gap: 14px; }
   .cards { grid-template-columns: 1fr; }
   .hero { grid-template-columns: 1fr 1fr; gap: 10px; }

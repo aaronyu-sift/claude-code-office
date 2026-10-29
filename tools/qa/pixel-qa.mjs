@@ -1292,6 +1292,54 @@ if (want('motion')) {
   } finally { await S.done(); }
 }
 
+// ---- 22-glass-bar: the glass bar floats over every page, not only the Office. The Office map fills the page under it; Dashboard, Timeline and Cost start below it (and below the your-turn
+// strip when one shows) and their content scrolls under it; the strip floats under the bar and is not shown in the Office view.
+if (want('glass-bar')) {
+  const S = await scenario(10, { tag: 'glass', query: '?time=12:00', fixture: { statuses: ['working', 'waiting', 'working'] } });
+  try {
+    const ev = e => S.page.evaluate(e);
+    const bad = [], rows = [];
+    await S.page.setViewport(1500, 700, 1);
+    for (const [view, sel] of [['ofis', '#view-ofis'], ['pano', '#view-pano'], ['akis', '#view-akis'], ['maliyet', '#view-maliyet']]) {
+      await ev(`document.querySelector('.top [data-view="${view}"]').click()`);
+      await sleep(900);
+      const g = await ev(`(() => {
+        const bar = document.querySelector('.top'), cs = getComputedStyle(bar), b = bar.getBoundingClientRect(), v = document.querySelector('${sel}'), st = document.getElementById('attention');
+        const stripShown = !st.hidden && st.offsetParent !== null, sr = stripShown ? st.getBoundingClientRect() : null, vr = v.getBoundingClientRect(), vs = getComputedStyle(v);
+        const kids = [...v.children].filter(c => c.offsetParent !== null && c.getBoundingClientRect().height > 0);
+        return JSON.stringify({ pos: cs.position, blur: cs.backdropFilter, border: cs.borderTopColor, radius: cs.borderTopLeftRadius, bar: [b.left, b.top, b.right, b.bottom], vw: innerWidth, topH: getComputedStyle(document.documentElement).getPropertyValue('--top-h'),
+          stripH: getComputedStyle(document.documentElement).getPropertyValue('--strip-h'), stripShown, strip: sr && [sr.top, sr.bottom], view: [vr.left, vr.top, vr.right, vr.bottom], pad: vs.paddingTop, firstTop: kids.length ? Math.min(...kids.map(c => c.getBoundingClientRect().top)) : null,
+          scrolls: v.scrollHeight > v.clientHeight + 1 });
+      })()`).then(JSON.parse);
+      const L = view;
+      if (g.pos !== 'absolute') bad.push(`${L}: the bar is ${g.pos}, not floating`);
+      if (!/blur\(10px\)/.test(g.blur) || g.radius !== '18px' || !/196, 208, 255/.test(g.border)) bad.push(`${L}: the bar is not the glass card (${g.blur}, ${g.radius}, ${g.border})`);
+      if (!(g.bar[0] >= 0 && g.bar[2] <= g.vw && g.bar[1] >= 0)) bad.push(`${L}: the bar leaves the window ${JSON.stringify(g.bar)}`);
+      if (Math.abs(parseFloat(g.topH) - g.bar[3]) > 1) bad.push(`${L}: --top-h ${g.topH} is not the bar's bottom edge ${g.bar[3].toFixed(0)}`);
+      if (Math.abs(g.view[1]) > 0.5) bad.push(`${L}: the view starts at ${g.view[1]}, not at the top of the page (it must fill it under the bar)`);
+      if (view === 'ofis') {
+        if (g.stripShown) bad.push('ofis: the your-turn strip shows over the map');
+      } else {
+        if (!g.stripShown) bad.push(`${L}: the fixture has a waiting chat but the your-turn strip is not shown`);
+        else {
+          if (g.strip[0] < g.bar[3] - 0.5) bad.push(`${L}: the strip (${g.strip[0].toFixed(0)}) is under the bar (${g.bar[3].toFixed(0)})`);
+          if (g.firstTop !== null && g.firstTop < g.strip[1] - 0.5) bad.push(`${L}: the content starts at ${g.firstTop.toFixed(0)}, under the strip (${g.strip[1].toFixed(0)})`);
+        }
+        if (g.firstTop !== null && g.firstTop < g.bar[3] - 0.5) bad.push(`${L}: the content starts at ${g.firstTop.toFixed(0)}, under the bar (${g.bar[3].toFixed(0)})`);
+      }
+      rows.push(`${view}: bar ${g.bar.map(Math.round).join(',')}, ${g.stripShown ? 'strip ' + g.strip.map(Math.round).join('-') : 'no strip'}, content from ${g.firstTop === null ? '-' : Math.round(g.firstTop)}`);
+    }
+    // the content scrolls under the bar: scroll the dashboard in a short window and the first card must reach the bar's top edge
+    await S.page.setViewport(1500, 380, 1);
+    await ev(`document.querySelector('.top [data-view="pano"]').click()`);
+    await sleep(700);
+    const sc = await ev(`(() => { const v = document.querySelector('#view-pano'); v.scrollTop = 150; const bar = document.querySelector('.top').getBoundingClientRect(), t = [...v.querySelectorAll('.tile')].map(e => e.getBoundingClientRect().top); return JSON.stringify({ scrollTop: v.scrollTop, bottom: bar.bottom, minTop: Math.min(...t) }); })()`).then(JSON.parse);
+    if (!(sc.scrollTop > 100 && sc.minTop < sc.bottom)) bad.push(`the dashboard does not scroll under the bar (scrollTop ${sc.scrollTop}, first tile at ${sc.minTop}, bar bottom ${sc.bottom})`);
+    check('22-glass-bar', bad.length === 0 && S.page.errors.length === 0,
+      bad.length ? `FAILED: ${bad.join('; ')}` : `the bar floats as the glass card (blur 10px, radius 18px, absolute) on all four pages; ${rows.join('; ')}; scrolled 150 px the dashboard's tiles pass under the bar (first tile at ${Math.round(sc.minTop)}, bar bottom ${Math.round(sc.bottom)}); errors ${S.page.errors.length}`);
+  } finally { await S.done(); }
+}
+
 if (want('seasons')) {
   const man = JSON.parse(readFileSync(ROOT + 'public/pixel/manifest.json', 'utf8')), has = id => !!man.sprites[id];
   const S = await baseScenario(10, { tag: 'seasons', proj, query: '?time=12:00' });                    // no season given: the page decides

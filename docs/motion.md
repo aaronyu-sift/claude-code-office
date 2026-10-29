@@ -88,7 +88,7 @@ millisecond value is the time the spring needs to settle to within 0.3 percent.
 - Waiting for the new art style and assets (the 3D scene, plan item S17): the camera on the `follow` spring, the construction animation on the `build` spring, eased growth of a room,
   a check that walkers keep a constant speed with a short ramp and a walk cycle paced by it, and the flicker of candles and street lights (stepped random, one shared helper).
 - Open: WCAG 2.2.2 asks for a way to pause, stop or hide a loop that starts by itself and lasts more than five seconds. The reduced-motion setting is the only stop today; there is
-  no control in the page. Dashboard, Timeline and Cost keep a plain header (the glass bar is on the Office view only).
+  no control in the page.
 
 ## Sources and what is not settled
 
