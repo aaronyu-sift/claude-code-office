@@ -160,10 +160,10 @@ appears in the conversation, so every goal ends by printing the verification out
 - [x] Occlusion budget and readability checks pass (section 7); label slots with 5-line names pass.
 
 ### Goal 3: front three-quarter, toggle, polish (M3)
-- [ ] `build-atlas.mjs --proj front`; same layout engine; wall rules for the front view; toggle in the header, `?proj=front`, persisted.
-- [ ] Whole QA suite passes in both projections; both atlases at most 1.5 MB.
-- [ ] README (features, options, how to regenerate art), `THIRD_PARTY.md` (VoxPix MIT, with the pinned commit), docs updated; old 3D scene still reachable.
-- [ ] Final screenshots (both projections, 4, 10, 20 agents, a waiting agent) and a short before and after.
+- [x] `build-atlas.mjs --proj front`; same layout engine; wall rules for the front view; toggle in the header, `?proj=front`, persisted.
+- [x] Whole QA suite passes in both projections; both atlases at most 1.5 MB.
+- [x] README (features, options, how to regenerate art), `THIRD_PARTY.md` (VoxPix MIT, with the pinned commit), docs updated; old 3D scene still reachable.
+- [x] Final screenshots (both projections, 4, 10, 20 agents, a waiting agent) and a short before and after.
 
 ### Goal 4: seasons, weather, settings (M4), both projections
 - [ ] Season variants baked for both projections (section 5), chosen by date and hemisphere, `?season=` override; atlases at most 2.5 MB each.
@@ -264,6 +264,6 @@ Everything that differs from this plan, by goal. Each entry says what was planne
 - **Head height from the Projection.** The status marker, balloons and bubbles sit above the head, which is 40 px above the pivot in the isometric view and 38 in the front view; the scene derives it from `proj.toScreen`. A main agent's label anchor was raised in Goal 2.
 - **"Small items" limit.** Animated sprites are at most 36 x 48 px (was 32 x 48): the front oak is 33 px wide.
 - **Toggle.** Two buttons in the header, shown only on the pixel Office view (`#proj-seg`); the choice is stored in `localStorage` (`ajan-ofisi.proj`); `?proj=iso|front` wins over the stored choice and is not stored; clicking the toggle while the URL has `?proj=` rewrites that parameter. The view builds a new scene for the new projection without a reload; agents, seats and labels carry over. Strings are in both languages.
-- **QA in both views.** `node tools/qa/pixel-qa.mjs --proj iso|front` runs every scenario with `?proj=`; a new check `ux-projection` clicks the toggle, reloads and uses `?proj=` (always run on a fresh profile). `--shots <dir>` now writes the M3 set (this projection at 4, 10 and 20 agents and a waiting agent, and in the iso run the old 3D scene for the before and after); `--set m2` still writes the Goal 2 set. The idle check first waits for 1.5 s without a frame, because a late start-up message of the server could draw one frame (seen once in 8 full runs); the measurement itself is unchanged.
+- **QA in both views.** `node tools/qa/pixel-qa.mjs --proj iso|front` runs every scenario with `?proj=`; a new check `ux-projection` clicks the toggle, reloads and uses `?proj=` (always run on a fresh profile). `--shots <dir>` now writes the M3 set (this projection at 4, 10 and 20 agents and a waiting agent, and in the iso run the old 3D scene for the before and after); `--set m2` still writes the Goal 2 set. The idle check first waits for 1.5 s without a frame, because a late start-up message of the server could draw one frame (seen once, in the first full front run, and not again in repeated runs of the check); the measurement itself is unchanged.
 - **Before and after.** `m3/before-after.html` in the review folder puts the old 3D scene next to both pixel views; the repo's README screenshots (`docs/screenshots/`) are still the upstream 3D ones.
 - **Docs.** README gets a "Pixel office" section (options, regenerating the art, tests); `THIRD_PARTY.md` credits VoxPix (MIT, commit `c8e984313d5baa71e8d7349fa2811d3dee8e0213`) and three.js (MIT, only for `?scene=3d`).
