@@ -3,7 +3,7 @@
 // and a final `QA PASS` or `QA FAIL`.
 //   node tools/qa/pixel-qa.mjs [--proj iso|front] [--season summer|spring|autumn|winter|auto] [--shots <dir>] [--set m4|m3|m2] [--only <name>]
 import { spawnSync } from 'node:child_process';
-import { mkdirSync, readFileSync } from 'node:fs';
+import { mkdirSync, readFileSync, statSync, appendFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { launchChrome, sleep } from './cdp.mjs';
 import { makeFixture } from './fixture.mjs';
@@ -19,7 +19,7 @@ const args = process.argv.slice(2);
 const val = f => { const i = args.indexOf('--' + f); return i >= 0 ? args[i + 1] : undefined; };
 const proj = val('proj') || 'iso';
 const shotsDir = val('shots');
-const shotSet = val('set') || 'm3';          // which pictures --shots writes: m4 (seasons, weather, times of day), m3 (4, 10, 20 agents, a waiting agent) or m2 (garden, room, times)
+const shotSet = val('set') || 'm3';          // which pictures --shots writes: m5 (the shelf and the details panel), m4 (seasons, weather, times of day), m3 (4, 10, 20 agents, a waiting agent) or m2 (garden, room, times)
 const results = [];
 function check(name, ok, detail) {
   results.push({ name, ok });
@@ -58,7 +58,7 @@ for (const n of SIZES) {
   const S = await scenario(n, { query: NIGHT });
   perN[n] = S;
   try {
-    const mains = S.agents.filter(a => a.kind === 'main'), subs = S.agents.filter(a => a.kind === 'sub');
+    const mains = S.agents.filter(a => a.kind === 'main' && a.status !== 'dormant'), subs = S.agents.filter(a => a.kind === 'sub');      // an asleep chat has no room
     // 1. no console errors or failed requests
     check(`01-load-n${n}`, S.ready && S.page.errors.length === 0 && S.page.failed.length === 0,
       `${mains.length} mains + ${subs.length} subs, scene ${await S.page.evaluate(`document.querySelector('#view-ofis').dataset.scene`)}, zoom ${await S.page.evaluate(px('p.zoom'))}, errors ${S.page.errors.length}, failed requests ${S.page.failed.length}${S.page.errors[0] ? ' first: ' + S.page.errors[0] : ''}${S.page.failed[0] ? ' first failed: ' + S.page.failed[0] : ''}`);
@@ -79,7 +79,7 @@ for (const n of SIZES) {
     // 3 and 5. click targets and hit-test round trip
     const ids = await S.page.evaluate(px('p.figures()'));
     const probs = [], miss = [], hidden = [];
-    const base = await S.page.evaluate(`document.querySelector('#view-ofis').getBoundingClientRect().toJSON()`);
+    const base = await S.page.evaluate(`document.querySelector('#view-ofis .of-area').getBoundingClientRect().toJSON()`);
     const free = (x, y) => S.page.evaluate(`(()=>{const e=document.elementFromPoint(${x},${y}); return !!e && !e.closest('.px-l, .of-ctl, .of-hud, #drawer, header, #attention')})()`);
     // close the drawer and wait until it has slid out of the view, so it never covers the next agent
     const closeDrawer = async () => {
@@ -189,8 +189,8 @@ if (want('ux')) {
   const S = await scenario(10, { tag: 'ux', query: '?time=12:00' });
   try {
     const P = e => S.page.evaluate(px(e));
-    const mains = S.agents.filter(a => a.kind === 'main');
-    const base = await S.page.evaluate(`document.querySelector('#view-ofis').getBoundingClientRect().toJSON()`);
+    const mains = S.agents.filter(a => a.kind === 'main' && a.status !== 'dormant');
+    const base = await S.page.evaluate(`document.querySelector('#view-ofis .of-area').getBoundingClientRect().toJSON()`);
     // states: the pose of every main figure matches its status, and the effects drawn match the states
     await P('p.redraw()');
     const figs = await P(`p.figures().map(id => Object.assign({ id }, p.agentCss(id)))`);
@@ -211,10 +211,10 @@ if (want('ux')) {
     }
     let left = false, tDone = Date.now();
     while (done && Date.now() - tDone < 12000 && !left) { left = !(await P(`p.figures().includes(${JSON.stringify(sub.id)})`)); if (!left) await sleep(300); }
-    check('ux-states', S.ready && mf.length === mains.length && wrongPose.length === 0 && n('working') > 0 && waitN > 0 && n('dormant') > 0 &&
+    check('ux-states', S.ready && mf.length === mains.length && wrongPose.length === 0 && n('working') > 0 && waitN > 0 && n('dormant') === 0 &&
       fx.markers === mf.length && fx.beams === waitN && fx.waitBalloons === waitN && fx.zzBalloons === n('dormant') && chips === waitN && !!hud &&
       !!done && /relax$/.test(done.sprite) && done.fx.doneBalloons >= 1 && left,
-      `${mf.length} main figures: ${n('working')} working (typing poses), ${waitN} waiting for you (raised-hand pose, ${chips} "your turn" chips, summary "${hud}"), ${n('dormant')} dormant (sleeping pose); drawn: ${fx.markers} markers, ${fx.beams} light beams, ${fx.waitBalloons} wait balloons, ${fx.zzBalloons} Zz balloons; wrong poses ${wrongPose.length}; ` +
+      `${mf.length} main figures: ${n('working')} working (typing poses), ${waitN} waiting for you (raised-hand pose, ${chips} "your turn" chips, summary "${hud}"), ${n('dormant')} asleep in rooms (an asleep chat is on the shelf, check 15); drawn: ${fx.markers} markers, ${fx.beams} light beams, ${fx.waitBalloons} wait balloons, ${fx.zzBalloons} Zz balloons; wrong poses ${wrongPose.length}; ` +
       `done subagent: ${done ? `pose ${pose(done)}, check balloons drawn ${done.fx.doneBalloons}, left its seat after ${((Date.now() - tDone) / 1000).toFixed(1)} s: ${left}` : 'never reached the done state'}`);
 
     // hover tip: over an uncovered agent the tip shows its project and name and the figure gets a ring; away from it the tip goes
@@ -452,6 +452,194 @@ if (want('language')) {
     `browser in ${a0.nav}, nothing saved: list open ${a0.dialog} (modal ${a0.modal}), page shows ${a0.html}, options [${a0.options.join(', ')}], headings [${a0.titles.join(', ')}], Close button ${a0.close}; after two Esc presses still open ${a1.dialog && a1.modal}; click ${LANGUAGES[1].name}: page ${a2.html}, saved "${a2.stored}", tab "${a2.tab}", header button ${a2.btn}, list closed ${!a2.dialog}; reload: ${a3.html}, list ${a3.dialog ? 'open' : 'closed'}; header button: list open ${a4.dialog}, Close button ${a4.close}, current marked [${a4.options.join(', ')}]; Esc closes it ${!a5.dialog}; choose ${LANGUAGES[0].name}: page ${a6.html}, saved "${a6.stored}", reload in German with a saved choice: ${a7.html}, list ${a7.dialog ? 'open' : 'closed'}; browser in ${b.nav}: page ${b.html}, list ${b.dialog ? 'open' : 'closed'}, saved ${b.stored === null ? 'nothing' : '"' + b.stored + '"'}; browser in ${c.nav}: page ${c.html}, list ${c.dialog ? 'open' : 'closed'}, saved ${c.stored === null ? 'nothing' : '"' + c.stored + '"'}; console errors ${de.errors + tr.errors + en.errors}`);
 }
 
+// ---- Goal 5: the shelf and the details panel. 10 live and 12 closed sessions: the closed ones and the asleep ones are on the shelf, newest first,
+// with their full chat names and "closed N min ago"; a chat that waits for you never is; a click on a shelf entry or on a figure in a room opens the
+// details panel of that id (full name, project, status, time since, last prompt and reply, tool mix, the VS Code link, the copy button)
+if (want('shelf')) {
+  const S = await scenario(10, { tag: 'shelf', query: '?time=12:00', fixture: { closed: 12 } });
+  try {
+    const P = e => S.page.evaluate(px(e));
+    const ev = e => S.page.evaluate(e);
+    const live = S.agents.filter(a => a.kind === 'main');
+    const asleep = live.filter(a => a.status === 'dormant'), waiting = live.filter(a => a.status === 'waiting' || a.status === 'ask');
+    const expected = [...S.fx.closed.map(c => ({ id: c.id, at: c.closedAt, name: c.name, kind: 'closed', ageMin: c.ageMin })), ...asleep.map(a => ({ id: a.id, at: a.updated || a.since, name: a.name, kind: 'dormant' }))]
+      .sort((p, q) => q.at - p.at || (p.id < q.id ? -1 : 1));
+    const until = async (fn, ms = 15000) => { let r; for (const t0 = Date.now(); Date.now() - t0 < ms; await sleep(250)) { r = await fn().catch(() => null); if (r) return r; } return r; };
+    const shelf = () => P('p.shelf()');
+    await until(async () => (await shelf()).rows.length === expected.length);
+    const minutes = text => { const m = /(?:(\d+)d)?\s*(?:(\d+)h)?\s*(?:(\d+)m)?\s*(?:(\d+)s)?\s+ago$/.exec(text), u = x => +(x || 0); return m ? { min: u(m[1]) * 1440 + u(m[2]) * 60 + u(m[3]) + u(m[4]) / 60, days: !!m[1] } : null; };
+    const sh = await shelf(), figs = await P('p.figures()');
+
+    // order, names, times, figures
+    const orderOk = sh.rows.map(r => r.id).join() === expected.map(e => e.id).join();
+    const namesOk = sh.rows.length === expected.length && sh.rows.every((r, i) => r.name === expected[i].name);
+    const whenBad = sh.rows.filter((r, i) => {
+      const e = expected[i];
+      if (!e) return true;
+      if (e.kind === 'dormant') return !/^idle \d+h/.test(r.when);
+      const m = minutes(r.when);
+      return !/^closed /.test(r.when) || !m || Math.abs(m.min - e.ageMin) > (m.days ? 1440 : 2.5);
+    });
+    const figBad = sh.rows.filter(r => !r.figure || r.figure.w < 8 || r.figure.h < 20 || r.figure.ink < 100);
+    const longName = sh.rows.find(r => r.name.length >= 100);
+    // waiting chats stay in their rooms; asleep chats left theirs
+    const waitingOnShelf = waiting.filter(a => sh.rows.some(r => r.id === a.id)), waitingInRooms = waiting.filter(a => figs.includes(a.id));
+    const asleepOnShelf = asleep.filter(a => sh.rows.some(r => r.id === a.id)), asleepInRooms = asleep.filter(a => figs.includes(a.id));
+    // the lane is beside the scene: no overlap with the scene, a label or a figure's click target; it scrolls on its own
+    const A = await ev(`document.querySelector('#view-ofis .of-area').getBoundingClientRect().toJSON()`), canvasR = await ev(`document.querySelector('#view-ofis .of-main').getBoundingClientRect().toJSON()`);
+    const hit = (a, b) => a.x < b.x + b.w && a.x + a.w > b.x && a.y < b.y + b.h && a.y + a.h > b.y;
+    const labels = (await P('p.labelRects()')).filter(l => l.shown).map(l => ({ x: A.left + l.x, y: A.top + l.y, w: l.w, h: l.h }));
+    const overLabels = labels.filter(l => hit(l, sh.rect)).length;
+    const overTargets = (await P(`p.figures().map(id => p.agentCss(id))`)).filter(f => f && hit({ x: A.left + f.x - 12, y: A.top + f.y - 12, w: 24, h: 24 }, sh.rect)).length;
+    const sceneClear = A.right <= sh.rect.x + 1 && canvasR.right <= sh.rect.x + 1 && A.width + sh.rect.w <= (await ev('innerWidth')) + 1;
+    const z0 = await P('p.zoom'), pan0 = await P('p.pan');
+    await S.page.mouse.wheel(sh.rect.x + sh.rect.w / 2, sh.rect.y + sh.rect.h / 2, 260);
+    await sleep(350);
+    const scrolled = await shelf();
+    const sceneStill = (await P('p.zoom')) === z0 && (await P('p.pan')).join() === pan0.join();
+    await S.page.mouse.wheel(sh.rect.x + sh.rect.w / 2, sh.rect.y + sh.rect.h / 2, -600);
+    await sleep(250);
+
+    // fold away and back, remembered
+    const stored = () => ev(`localStorage.getItem('ajan-ofisi.shelf')`);
+    const hideR = await ev(`(() => { const b = document.querySelector('.sh-hide').getBoundingClientRect(); return { x: b.left + b.width / 2, y: b.top + b.height / 2 }; })()`);
+    await S.page.mouse.click(hideR.x, hideR.y);
+    await sleep(500);
+    const folded = await shelf(), foldedArea = await ev(`document.querySelector('#view-ofis .of-area').getBoundingClientRect().width`), foldedStore = await stored();
+    const tabR = await ev(`(() => { const b = document.querySelector('.of-shelf-tab').getBoundingClientRect(); return { x: b.left + b.width / 2, y: b.top + b.height / 2 }; })()`);
+    await S.page.mouse.click(tabR.x, tabR.y);
+    await sleep(500);
+    const unfolded = await shelf(), unfoldedStore = await stored();
+
+    // stable between refreshes: the same list from the server twice, and again after a reload
+    const api = async () => (await (await fetch(`http://127.0.0.1:${S.srv.port}/api/closed`)).json()).closed.map(c => c.id + ':' + c.closedAt).join();
+    const api1 = await api(); await sleep(1200); const api2 = await api();
+    const idsBefore = sh.rows.map(r => r.id).join();
+    await S.page.goto(`http://127.0.0.1:${S.srv.port}/?time=12:00&proj=${proj}&season=${season}#ofis`, 800);
+    await waitReady(S.page, live.length - asleep.length);
+    await until(async () => (await shelf()).rows.length === expected.length);
+    const reloaded = await shelf();
+
+    // check 15
+    check('15-shelf',
+      S.ready && orderOk && namesOk && !whenBad.length && !figBad.length && !!longName && sh.count === `${expected.length} chats` &&
+      !waitingOnShelf.length && waitingInRooms.length === waiting.length && waiting.length > 0 && asleepOnShelf.length === asleep.length && !asleepInRooms.length && asleep.length > 0 &&
+      sceneClear && overLabels === 0 && overTargets === 0 && sh.scroll.height > sh.scroll.client && sh.scroll.overflowY === 'auto' && scrolled.scroll.top > 0 && sceneStill &&
+      folded.mode === 'collapsed' && !folded.tabHidden && /^Shelf · \d+$/.test(folded.tab) && foldedStore === 'closed' && foldedArea > A.width + 200 &&
+      unfolded.mode === 'open' && unfolded.tabHidden && unfoldedStore === 'open' &&
+      api1 === api2 && reloaded.rows.map(r => r.id).join() === idsBefore,
+      `${live.length} live + ${S.fx.closed.length} closed sessions: shelf "${sh.title}", ${sh.count} (${sh.rows.filter(r => r.kind === 'closed').length} closed, ${sh.rows.filter(r => r.kind === 'dormant').length} asleep); order newest first as expected ${orderOk}; full chat names ${namesOk} (longest ${Math.max(...sh.rows.map(r => r.name.length))} chars, emoji name included); times: ${sh.rows.slice(0, 4).map(r => `"${r.when}"`).join(', ')} … within tolerance of the fixture ages (off ${whenBad.length}); figures drawn in every row (${sh.rows.length - figBad.length}/${sh.rows.length}, ${sh.rows[0].figure.w}x${sh.rows[0].figure.h} px); waiting (${waiting.length}): on the shelf ${waitingOnShelf.length}, in rooms ${waitingInRooms.length}; asleep (${asleep.length}): on the shelf ${asleepOnShelf.length}, in rooms ${asleepInRooms.length}; lane x ${sh.rect.x.toFixed(0)}..${(sh.rect.x + sh.rect.w).toFixed(0)}, scene ends at ${A.right.toFixed(0)} (canvas ${canvasR.right.toFixed(0)}), overlap with ${labels.length} shown labels ${overLabels}, with figure targets ${overTargets}; own scroll: content ${sh.scroll.height} px in ${sh.scroll.client} px (${sh.scroll.overflowY}), wheel on the lane moved it to ${scrolled.scroll.top.toFixed(0)} and left the scene's zoom and pan alone ${sceneStill}; fold: ${folded.mode} (tab "${folded.tab}", saved "${foldedStore}", scene ${foldedArea.toFixed(0)} px wide against ${A.width.toFixed(0)}), unfold: ${unfolded.mode} (saved "${unfoldedStore}"); the server's list twice identical ${api1 === api2}; the shelf after a reload identical ${reloaded.rows.map(r => r.id).join() === idsBefore}`);
+
+    // ---- the details panel, from a shelf entry and from a figure in a room
+    const dw = () => ev(`(() => {
+      const d = document.querySelector('#drawer'), q = s => d.querySelector(s), t = s => (q(s) ? q(s).textContent.trim() : null), v = q('#dw-vscode'), c = q('#dw-copy');
+      return JSON.stringify({ on: d.classList.contains('on'), id: d.dataset.id, project: t('.dw-proj'), cname: t('.c-name'), title: t('.dw-title'), pill: t('.pill'), pillClass: q('.pill') && q('.pill').className, since: t('.pill .t'),
+        quotes: [...d.querySelectorAll('.quote')].map(x => x.textContent.trim()), heads: [...d.querySelectorAll('h6')].map(x => x.firstChild.textContent.trim()),
+        tools: [...d.querySelectorAll('.tbar')].map(x => x.querySelector('.nm').textContent + ':' + x.querySelector('.ct').textContent), mix: d.querySelectorAll('.mixbar i').length,
+        vscode: v && { href: v.getAttribute('href'), text: v.textContent.trim(), tag: v.tagName }, copy: c && { text: c.textContent.trim(), tag: c.tagName, id: c.dataset.id } });
+    })()`).then(JSON.parse);
+    const closeDrawer = async () => { await ev(`document.querySelector('#dw-close') && document.querySelector('#dw-close').click()`); await until(async () => !(JSON.parse(await ev(`JSON.stringify(document.querySelector('#drawer').classList.contains('on'))`)))); await sleep(400); };
+    const rowCentre = id => ev(`(() => { const li = document.querySelector('.sh-list li[data-id="${id}"]'); li.scrollIntoView({ block: 'nearest' }); const b = li.getBoundingClientRect(); return { x: b.left + b.width / 2, y: b.top + b.height / 2 }; })()`);
+
+    const target = expected.filter(e => e.kind === 'closed')[2];                                                                  // the third newest closed chat
+    const tr = await rowCentre(target.id);
+    await S.page.mouse.click(tr.x, tr.y);
+    const fromShelf = await until(async () => { const d = await dw(); return d.on && d.id === target.id ? d : null; }) || await dw();
+    await sleep(500);
+    const shelfPanel = await dw();
+    // copy: the id lands on the clipboard and the button says so
+    await S.page.send('Emulation.setFocusEmulationEnabled', { enabled: true }).catch(() => {});                  // headless: the page counts as focused, so the clipboard can be read back
+    await S.page.send('Browser.grantPermissions', { permissions: ['clipboardReadWrite', 'clipboardSanitizedWrite'], origin: `http://127.0.0.1:${S.srv.port}` }).catch(() => {});
+    const cp = await ev(`(() => { const b = document.querySelector('#dw-copy').getBoundingClientRect(); return { x: b.left + b.width / 2, y: b.top + b.height / 2 }; })()`);
+    await S.page.mouse.click(cp.x, cp.y);
+    await sleep(500);
+    const afterCopy = await ev(`JSON.stringify({ flag: document.querySelector('#drawer').dataset.copied || null, text: document.querySelector('#dw-copy').textContent.trim() })`).then(JSON.parse);
+    const clip = await ev(`navigator.clipboard.readText().then(t => ({ ok: true, text: t }), e => ({ ok: false, err: String(e) }))`);
+    await closeDrawer();
+
+    // a figure in a room
+    await P('p.freeze(true)');
+    const A2 = await ev(`document.querySelector('#view-ofis .of-area').getBoundingClientRect().toJSON()`);
+    const roomed = live.filter(a => a.status !== 'dormant');
+    let fig = null;
+    for (const a of roomed) {
+      const f = await P(`p.agentCss(${JSON.stringify(a.id)})`);
+      if (!f || f.x < 20 || f.y < 20 || f.x > A2.width - 20 || f.y > A2.height - 20) continue;
+      const x = A2.left + f.x, y = A2.top + f.y;
+      if (!(await ev(`(()=>{const e=document.elementFromPoint(${x},${y}); return !!e && !e.closest('.px-l, .of-ctl, .of-hud, .of-shelf, #drawer, header, #attention')})()`))) continue;
+      fig = { agent: a, x, y };
+      break;
+    }
+    if (!fig) throw new Error('no figure of a room can be clicked without a label or control over it');
+    await S.page.mouse.click(fig.x, fig.y);
+    const fromRoom = await until(async () => { const d = await dw(); return d.on && d.id === fig.agent.id ? d : null; }) || await dw();
+    await sleep(500);
+    const roomPanel = await dw();
+    await closeDrawer();
+    await P('p.freeze(false)');
+
+    const prompt = `Please continue with: ${target.name}`;
+    const closedOk = shelfPanel.on && shelfPanel.id === target.id && shelfPanel.title === target.name && /^[\w-]+$/.test(shelfPanel.project || '') && /^Closed\s*\d+(s|m|h|d)/.test(shelfPanel.pill || '') && /closed/.test(shelfPanel.pillClass || '') &&
+      /^\d+(s|m|h|d)/.test(shelfPanel.since || '') && shelfPanel.quotes.includes(prompt) && shelfPanel.quotes.some(q => q.startsWith(`Finished: ${target.name}`)) &&
+      ['Read:1', 'Edit:1', 'Bash:1'].every(x => shelfPanel.tools.includes(x)) && shelfPanel.mix >= 3 && shelfPanel.heads.length >= 3 &&
+      !!shelfPanel.vscode && shelfPanel.vscode.tag === 'A' && shelfPanel.vscode.href === `vscode://anthropic.claude-code/open?session=${target.id}` && shelfPanel.vscode.text === 'Open in VS Code' &&
+      !!shelfPanel.copy && shelfPanel.copy.tag === 'BUTTON' && shelfPanel.copy.id === target.id && /^Copy session id$/.test(shelfPanel.copy.text);
+    const liveOk = roomPanel.on && roomPanel.id === fig.agent.id && roomPanel.cname === fig.agent.name && !!roomPanel.title && /^[\w-]+$/.test(roomPanel.project || '') && /\d+(s|m|h|d)/.test(roomPanel.since || '') && !!roomPanel.pill &&
+      roomPanel.quotes.length >= 1 && roomPanel.tools.length >= 1 &&
+      !!roomPanel.vscode && roomPanel.vscode.href === `vscode://anthropic.claude-code/open?session=${fig.agent.id}` && roomPanel.vscode.text === 'Open in VS Code' && !!roomPanel.copy && roomPanel.copy.id === fig.agent.id;
+    const copyOk = afterCopy.flag === target.id && afterCopy.text === 'Copied' && clip.ok && clip.text === target.id;
+    check('16-details',
+      closedOk && liveOk && copyOk && S.page.errors.length === 0,
+      `shelf entry "${target.name.slice(0, 40)}": panel opened for ${shelfPanel.id === target.id ? 'the same id' : 'ANOTHER id'}, title "${(shelfPanel.title || '').slice(0, 40)}", project ${shelfPanel.project}, status "${shelfPanel.pill}" (time since ${shelfPanel.since}), headings [${shelfPanel.heads.join(' | ')}], last prompt "${(shelfPanel.quotes[0] || '').slice(0, 44)}", last reply "${(shelfPanel.quotes[1] || '').slice(0, 44)}", tool mix ${shelfPanel.mix} segments [${shelfPanel.tools.join(', ')}], VS Code ${shelfPanel.vscode ? `<${shelfPanel.vscode.tag} href="${shelfPanel.vscode.href}"> "${shelfPanel.vscode.text}"` : 'missing'}, copy ${shelfPanel.copy ? `<${shelfPanel.copy.tag}> "${shelfPanel.copy.text}"` : 'missing'}; after the copy click the button says "${afterCopy.text}", flag ${afterCopy.flag === target.id}, clipboard ${clip.ok ? `"${clip.text}"` : 'unreadable: ' + clip.err}; figure in a room (${fig.agent.status}, "${fig.agent.name.slice(0, 30)}"): panel opened for ${roomPanel.id === fig.agent.id ? 'the same id' : 'ANOTHER id'}, chat name ${roomPanel.cname === fig.agent.name ? 'in full' : 'DIFFERENT'}, project ${roomPanel.project}, status "${roomPanel.pill}", ${roomPanel.quotes.length} quote(s), tools [${roomPanel.tools.slice(0, 3).join(', ')}], VS Code href ${roomPanel.vscode && roomPanel.vscode.href}, copy ${roomPanel.copy ? roomPanel.copy.text : 'missing'}; console errors ${S.page.errors.length}`);
+
+    // a live session that closes while the page is open goes on the shelf at once and leaves its room
+    const victim = live.find(a => a.status === 'working');
+    S.fx.closeSession(victim.id);
+    const arrived = await until(async () => { const s2 = await shelf(); return s2.rows[0] && s2.rows[0].id === victim.id ? s2 : null; }, 12000);
+    const figsAfter = await P('p.figures()');
+    const apiAfter = (await (await fetch(`http://127.0.0.1:${S.srv.port}/api/closed`)).json()).closed.find(c => c.id === victim.id);
+    check('15-shelf-close', !!arrived && /^closed \d+s ago$/.test(arrived.rows[0].when) && !figsAfter.includes(victim.id) && !!apiAfter && apiAfter.observed === true && arrived.rows[0].name === victim.name,
+      `a working session is closed while the page is open: ${arrived ? `first on the shelf after the next ticks, "${arrived.rows[0].when}", name in full ${arrived.rows[0].name === victim.name}` : 'never reached the shelf'}; its room is gone (figure drawn ${figsAfter.includes(victim.id)}); the server marks it as seen closing (${apiAfter && apiAfter.observed}); shelf now ${arrived ? arrived.count : '?'}`);
+  } finally { await S.done(); }
+}
+
+// ---- Goal 5: the scan of closed sessions has a count cap and a time budget, reads only tails, and never reads an unchanged file again
+if (want('scan')) {
+  const dir = join(tmpdir(), `cco-qa-${process.pid}-scan`);
+  const fx = await makeFixture({ dir, n: 2, closed: 300 });
+  const CAP = 12, BUDGET = 1;          // a cap of 12 of 300 and the smallest budget (1 ms): the stat of 300 files alone uses it up, so a pass reads about one transcript and the cold scan takes about a dozen passes (the server scans once a second)
+  const srv = await startServer(dir, { CCO_CLOSED_BUDGET_MS: String(BUDGET), CCO_CLOSED_EVERY_MS: '300' }, ['--closed-max', String(CAP)]);
+  try {
+    const get = async () => (await fetch(`http://127.0.0.1:${srv.port}/api/closed`)).json();
+    const finalN = [...fx.closed].sort((a, b) => b.closedAt - a.closedAt || (a.id < b.id ? -1 : 1)).slice(0, CAP);
+    const polls = [];
+    let d = await get();
+    for (const t0 = Date.now(); Date.now() - t0 < 60000; await sleep(300)) {
+      d = await get(); polls.push(d.closed.map(c => c.id));
+      if (d.closed.length === CAP && d.scan.pending === 0) break;
+    }
+    const settled = d, cold = settled.scan.totals;
+    const finalIds = settled.closed.map(c => c.id), wantN = finalN.map(c => c.id);
+    const prefixOk = polls.every(l => l.every((id, i) => id === wantN[i]));
+    const sawPartial = polls.some(l => l.length > 0 && l.length < 50);
+    const tailSum = finalN.reduce((n, c) => n + Math.min(statSync(c.file).size, 256 * 1024), 0);
+    // warm: let several more passes go by
+    await sleep(5000);
+    const warm = await get();
+    // a file that grows is read again, once, and moves to the top
+    const bumped = finalN[CAP - 3];
+    appendFileSync(bumped.file, JSON.stringify({ type: 'last-prompt', lastPrompt: 'bumped', sessionId: bumped.id }) + '\n');
+    await sleep(4500);
+    const after = await get();
+    const sizes = finalN.map(c => statSync(c.file).size);
+    check('17-scan',
+      finalIds.join() === wantN.join() && settled.closed.length === CAP && prefixOk && sawPartial && cold.read === CAP && cold.bytes === tailSum && cold.passes >= 3 && cold.maxMs <= BUDGET + 15 &&
+      warm.scan.totals.read === CAP && warm.scan.totals.bytes === cold.bytes && warm.scan.read === 0 && warm.scan.bytes === 0 && warm.scan.totals.passes > cold.passes + 2 &&
+      after.scan.totals.read === CAP + 1 && after.closed.length === CAP && after.closed[0].id === bumped.id,
+      `${fx.closed.length} closed transcripts on disk (${sizes.filter(x => x > 256 * 1024).length} of the newest ${CAP} larger than the 256 KB tail, up to ${(Math.max(...sizes) / 1024).toFixed(0)} KB), budget ${BUDGET} ms per pass: the list is capped at ${settled.closed.length} and is the ${CAP} newest by file time (${finalIds.join() === wantN.join()}; the default cap is 50); it filled from the top over ${cold.passes} passes (partial lists seen ${sawPartial}, every one a prefix of the final list ${prefixOk}); cold: ${cold.read} transcripts read (never more than the cap, not 300), ${(cold.bytes / 1024).toFixed(0)} KB = the tail rule ${cold.bytes === tailSum}, ${cold.ms.toFixed(0)} ms in the scanner, longest pass ${cold.maxMs.toFixed(1)} ms; warm (${warm.scan.totals.passes - cold.passes} more passes): reads ${warm.scan.totals.read - cold.read} files and ${warm.scan.totals.bytes - cold.bytes} bytes, last pass ${warm.scan.ms.toFixed(1)} ms with ${warm.scan.statted} files stat'ed; one transcript appended to: read again once (reads ${after.scan.totals.read}), now first in the list ${after.closed[0].id === bumped.id}`);
+  } finally { srv.stop(); fx.cleanup(); }
+}
+
 // ---- 12. seasons: every outdoor id resolves, the pictures differ, the automatic season follows the date and the hemisphere
 if (want('seasons')) {
   const man = JSON.parse(readFileSync(ROOT + 'public/pixel/manifest.json', 'utf8')), has = id => !!man.sprites[id];
@@ -659,6 +847,44 @@ if (shotsDir) {
         console.log('SHOT m3-before-3d-n10.png');
       } finally { await page.close(); srv.stop(); fx.cleanup(); }
     }
+  } else if (shotSet === 'm5') {
+    // M5: this projection with 10 live and 12 closed chats at midday: the scene with the shelf, the shelf folded away, and the details panel
+    // open on a closed chat (clicked on the shelf) and on a live one (clicked on its figure in a room)
+    const S = await scenario(10, { tag: 'shots5', dpr: 2, query: '?time=12:00', fixture: { closed: 12 } });
+    try {
+      const P = e => S.page.evaluate(px(e)), ev = e => S.page.evaluate(e);
+      const closeDrawer = async () => { await ev(`document.querySelector('#dw-close') && document.querySelector('#dw-close').click()`); await sleep(700); };
+      await sleep(1200);
+      await snap(S, `m5-${proj}-shelf.png`);
+      // a closed chat: its entry on the shelf
+      const closedId = S.fx.closed.slice().sort((a, b) => b.closedAt - a.closedAt)[2].id;
+      const r = await ev(`(() => { const b = document.querySelector('.sh-list li[data-id="${closedId}"]').getBoundingClientRect(); return { x: b.left + b.width / 2, y: b.top + b.height / 2 }; })()`);
+      await S.page.mouse.click(r.x, r.y);
+      await sleep(800);
+      await snap(S, `m5-${proj}-details-closed.png`);
+      await closeDrawer();
+      // a live chat: its figure in a room
+      await P('p.freeze(true)');
+      const A = await ev(`document.querySelector('#view-ofis .of-area').getBoundingClientRect().toJSON()`);
+      let hit = null;
+      for (const a of S.agents.filter(q => q.kind === 'main' && q.status === 'working')) {
+        const f = await P(`p.agentCss(${JSON.stringify(a.id)})`);
+        if (!f || f.x < 20 || f.y < 20 || f.x > A.width - 20 || f.y > A.height - 20) continue;
+        const x = A.left + f.x, y = A.top + f.y;
+        if (!(await ev(`(()=>{const e=document.elementFromPoint(${x},${y}); return !!e && !e.closest('.px-l, .of-ctl, .of-hud, .of-shelf, #drawer, header, #attention')})()`))) continue;
+        hit = { x, y };
+        break;
+      }
+      if (!hit) throw new Error('no clickable figure for the live details picture');
+      await S.page.mouse.click(hit.x, hit.y);
+      await sleep(800);
+      await snap(S, `m5-${proj}-details-live.png`);
+      await closeDrawer();
+      await P('p.freeze(false)');
+      await P('p.setShelfFolded(true)');
+      await sleep(600);
+      await snap(S, `m5-${proj}-shelf-folded.png`);
+    } finally { await S.done(); }
   } else if (shotSet === 'm4') {
     // M4: this projection, four agents: the four seasons clear, rain in summer, snow in winter, fog in autumn, each in the morning, the evening
     // and at night (the date is pretended so that the light is the season's: evening is a little after sunset), plus a rainbow after rain
@@ -689,7 +915,7 @@ if (shotsDir) {
     const S10 = await scenario(10, { tag: 'shots', dpr: 2, query: '?time=12:00' });
     try {
       const P = e => S10.page.evaluate(px(e));
-      const mains = S10.agents.filter(a => a.kind === 'main'), waiting = mains.find(a => a.status === 'waiting' || a.status === 'ask');
+      const mains = S10.agents.filter(a => a.kind === 'main' && a.status !== 'dormant'), waiting = mains.find(a => a.status === 'waiting' || a.status === 'ask');
       for (const [t, file] of [['06:00', 'm2-0600.png'], ['12:00', 'm2-1200.png'], ['18:30', 'm2-1830.png'], ['22:00', 'm2-2200.png']]) {
         await P(`p.setTime(${+t.slice(0, 2) * 60 + +t.slice(3)})`);
         await sleep(400);

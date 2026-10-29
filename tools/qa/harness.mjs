@@ -13,9 +13,9 @@ export { sleep };
 
 const freePort = () => new Promise(res => { const s = createServer(); s.listen(0, '127.0.0.1', () => { const p = s.address().port; s.close(() => res(p)); }); });
 
-export async function startServer(dir) {
+export async function startServer(dir, env = {}, args = []) {
   const port = await freePort();
-  const proc = spawn('node', [ROOT + 'server.js', '--claude-dir', dir, '--data-dir', join(dir, 'data'), '--port', String(port)], { stdio: 'ignore', env: { ...process.env, CCO_CHAT_DB: '', CCO_DEMO: '' } });
+  const proc = spawn('node', [ROOT + 'server.js', '--claude-dir', dir, '--data-dir', join(dir, 'data'), '--port', String(port), ...args], { stdio: 'ignore', env: { ...process.env, CCO_CHAT_DB: '', CCO_DEMO: '', ...env } });
   for (let i = 0; i < 60; i++) { try { if ((await fetch(`http://127.0.0.1:${port}/api/config`)).ok) break; } catch { /* starting */ } await sleep(150); }
   return { port, stop() { try { proc.kill('SIGKILL'); } catch { /* gone */ } } };
 }
@@ -34,11 +34,11 @@ export async function waitReady(page, expectFigures, ms = 20000) {
   return false;
 }
 
-// opts: { tag, dpr, reducedMotion, lang (the browser's language, default en-US so that no run opens the language list), fixture, query ('?time=22:00'), proj ('iso' | 'front', added to the query), season (added to the query unless 'auto' or already in it), width, height, timezone ('Asia/Tokyo': the browser's local clock) }
+// opts: { tag, dpr, serverEnv (extra environment of the server), reducedMotion, lang (the browser's language, default en-US so that no run opens the language list), fixture, query ('?time=22:00'), proj ('iso' | 'front', added to the query), season (added to the query unless 'auto' or already in it), width, height, timezone ('Asia/Tokyo': the browser's local clock) }
 export async function scenario(n, opts = {}) {
   const dir = join(tmpdir(), `cco-qa-${process.pid}-${n}${opts.tag || ''}`);
   const fx = await makeFixture({ dir, n, ...(opts.fixture || {}) });
-  const srv = await startServer(dir);
+  const srv = await startServer(dir, opts.serverEnv);
   const page = await launchChrome({ width: opts.width || VIEW.w, height: opts.height || VIEW.h, dpr: opts.dpr || 1, reducedMotion: !!opts.reducedMotion, lang: opts.lang || 'en-US' });
   const done = async () => { await page.close(); srv.stop(); fx.cleanup(); };
   try {
@@ -48,7 +48,7 @@ export async function scenario(n, opts = {}) {
     if (opts.proj) q.set('proj', opts.proj);
     if (opts.season && opts.season !== 'auto' && !q.has('season')) q.set('season', opts.season);       // the checks do not depend on the date they run on
     await page.goto(`http://127.0.0.1:${srv.port}/${q.size ? '?' + q : ''}#ofis`, 800);
-    const ready = await waitReady(page, agents.filter(a => a.kind === 'main').length);
+    const ready = await waitReady(page, agents.filter(a => a.kind === 'main' && a.status !== 'dormant').length);        // an asleep chat is on the shelf, not in a room
     return { fx, srv, page, agents, ready, done, dir };
   } catch (e) { await done(); throw e; }
 }

@@ -35,7 +35,8 @@ function endTurn(ts, text, msgId) {
 // Closed sessions: transcripts with no process and no session file. Ages in minutes, in an order that is not the order of creation, so a sort is
 // really tested; every 7th one is large (padding at the start, so the end of the file, which is what the server reads, stays the same).
 const CLOSED_AGES = [95, 12, 410, 31, 2600, 55, 180, 22, 700, 1500, 65, 8, 240, 120, 15000, 45, 330, 5200, 18, 900];
-const CLOSED_NAMES = ['Postmortem draft for the cache outage', 'Rename the billing events', 'Why does the search index lag', 'Pairing notes: Valkey TTL', 'Cleanup of the old feature flags',
+// (the fourth is a long name with an emoji: the shelf must show it in full)
+const CLOSED_NAMES = ['Postmortem draft for the cache outage', 'Rename the billing events', 'Why does the search index lag', '🔧 Pairing session on the Valkey TTL regression: the CAS retry path, the expiry bug and what we still owe the cache team', 'Cleanup of the old feature flags',
   'Spike: sprite atlas packing', 'Release checklist 4.18', 'Review the onboarding copy', 'Terraform: new subnet range', 'Data export for the audit', 'Snapshot test failures on CI', 'Draft: team update'];
 function closedRecords({ id, name, cwd, at, pad }) {
   const filler = pad ? line({ type: 'attachment', timestamp: iso(at - 3600e3), sessionId: id, cwd, filler: 'x'.repeat(2000) }).repeat(Math.ceil(pad / 2100)) : '';
@@ -104,7 +105,7 @@ export async function makeFixture({ dir, n, statuses = STATUS_CYCLE, subs, close
     agents.push(mine);
   }
   const closedPlan = typeof closed === 'number'
-    ? Array.from({ length: closed }, (_, i) => ({ name: CLOSED_NAMES[i % CLOSED_NAMES.length] + (i >= CLOSED_NAMES.length ? ` #${i}` : ''), project: PROJECTS[(i * 3) % PROJECTS.length], ageMin: CLOSED_AGES[i % CLOSED_AGES.length] + Math.floor(i / CLOSED_AGES.length) * 7, bytes: i % 7 === 6 ? 3e6 : 0 }))
+    ? Array.from({ length: closed }, (_, i) => ({ name: CLOSED_NAMES[i % CLOSED_NAMES.length] + (i >= CLOSED_NAMES.length ? ` #${i}` : ''), project: PROJECTS[(i * 3) % PROJECTS.length], ageMin: CLOSED_AGES[i % CLOSED_AGES.length] + Math.floor(i / CLOSED_AGES.length) * 7, bytes: i % 7 === 6 ? 600e3 : 0 }))
     : closed;
   const closedOut = closedPlan.map((c, i) => {
     const cwd = `/qa/ws/${c.project}`, id = `qc-${String(i).padStart(3, '0')}-${(2000 + i * 6007).toString(16)}`;
