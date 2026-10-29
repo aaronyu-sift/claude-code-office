@@ -143,6 +143,13 @@ test('palettes: every named material exists in a model the palette is used for, 
   }
 });
 
+test('palettes: no material of a pack model keeps the pack colour by accident (a bush once came out turquoise, a tree had a white quad)', () => {
+  for (const key of Object.keys(PROPS).filter(k => PALETTE_OF[k])) {
+    const names = [].concat(PALETTE_OF[key]).flatMap(p => Object.keys(PALETTES[p].byName));
+    for (const m of (glb(PROPS[key]).json.materials || []).map(m => m.name)) assert.ok(names.includes(m), `model ${key} has material "${m}" that its palette does not colour`);
+  }
+});
+
 test('rig: the old joint angles drive the pack bones (arms hang from the T pose, legs and spine follow)', () => {
   const j = (o = {}) => ({ armL: { x: 0, z: 0 }, armR: { x: 0, z: 0 }, upper: { x: 0 }, head: { x: 0, z: 0 }, legL: { x: 0 }, legR: { x: 0 }, ...o });
   const rest = poseBones(j());

@@ -118,7 +118,7 @@ export const PALETTES = {
   furniture: { byName: { wood: '#c8935c', metal: '#8b929f', metalMedium: '#4a505d', metalDark: '#2a2f3a', carpet: '#505869' } },
   potDesk: { byName: { wood: '#e9e4da', plant: '#58ab58' } },
   potFloor: { byName: { wood: '#c8704a', plant: '#5fb25b' } },
-  tree: { byName: { leafsGreen: '#5daa55', leafsDark: '#3f8c58', woodBark: '#8a5d3b', woodBarkDark: '#7a5236' } },
+  tree: { byName: { leafsGreen: '#5daa55', leafsDark: '#3f8c58', woodBark: '#8a5d3b', woodBarkDark: '#7a5236', grass: '#5aa653', _defaultMat: '#7a5236' } },
   rock: { byName: { stone: '#a7a29b', _defaultMat: '#a7a29b' } },
 };
 // which palette goes with which model, so a test can check the material names
