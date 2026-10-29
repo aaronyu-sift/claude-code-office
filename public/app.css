@@ -669,9 +669,10 @@ main { flex: 1; min-height: 0; position: relative; }
 .of-sum .w b { color: var(--warn); }
 .view-ofis[data-scene="pixel"]:not([hidden]) { display: flex; }          /* not for a hidden view: `.view[hidden]` has the same weight and this rule comes later */
 .of-area { position: relative; flex: 1 1 auto; min-width: 0; height: 100%; overflow: hidden; }
-/* The right-hand column: the shelf card (the style of the cards of the Setup Atlas page: dark glass, hairline border, mono chip, round buttons) with the zoom
-   buttons right under it. The Office is dark whatever the system theme is, so the colours here are fixed. With no card (the shelf is empty or folded) the
-   column is only the buttons, and they float in the bottom-right corner of the view. Both float over the scene, which spans the whole view. */
+/* The right-hand column: the shelf card (the style of the cards of the Setup Atlas page: dark glass, hairline border, mono chip, round buttons) above the zoom
+   buttons. The buttons are always in the bottom-right corner of the view, at the same distance whether the card is open or not (margin-top: auto keeps them at the
+   bottom of the column, the card ends above them). The Office is dark whatever the system theme is, so the colours here are fixed. With no card (the shelf is empty
+   or folded) the column is only the buttons. Both float over the scene, which spans the whole view. */
 .of-side, .of-shelf-tab {
   --sh-ink: #eaeeff; --sh-muted: #a9b3d6; --sh-accent: #8fb0ff; --sh-line: rgba(150, 165, 255, .22); --sh-hair: rgba(196, 208, 255, .32);
   --sh-mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace; color-scheme: dark;
@@ -679,7 +680,7 @@ main { flex: 1; min-height: 0; position: relative; }
 .of-side { position: absolute; right: 16px; bottom: 16px; z-index: 4; display: flex; flex-direction: column; align-items: flex-end; gap: 10px; min-height: 0; pointer-events: none; }
 .of-side > * { pointer-events: auto; }
 .view-ofis[data-shelf="open"] .of-side { top: calc(var(--top-h, 72px) + 4px); right: 0; bottom: 0; width: 340px; padding: 0 16px 16px 14px; align-items: stretch; }
-.of-ctl { display: flex; gap: 6px; align-self: flex-end; flex: none; }
+.of-ctl { display: flex; gap: 6px; align-self: flex-end; flex: none; margin-top: auto; }
 .of-ctl button, .sh-hide, .sh-more-btn, .of-shelf-tab {
   border: 1px solid var(--sh-hair); background: var(--sh-btn, rgba(10, 14, 32, .55)); color: var(--sh-ink); cursor: pointer;
   transition: border-color var(--m-hover) var(--ease-out), background var(--m-hover) var(--ease-out);
@@ -718,7 +719,7 @@ main { flex: 1; min-height: 0; position: relative; }
 .of-shelf-tab[hidden] { display: none; }
 .view-ofis[data-shelf="collapsed"] .of-hud { right: 140px; }           /* room for the tab at the corner */
 @media (max-width: 760px) {
-  .view-ofis[data-shelf="open"] .of-side { z-index: 6; width: min(340px, 100%); padding: 0 8px 8px 0; }
+  .view-ofis[data-shelf="open"] .of-side { z-index: 6; width: min(340px, 100%); padding: 0 16px 16px 0; }
 }
 .of-empty { position: absolute; inset: 0; display: grid; place-items: center; color: var(--muted); pointer-events: none; }
 .of-empty[hidden] { display: none; }
@@ -755,6 +756,7 @@ main { flex: 1; min-height: 0; position: relative; }
   .of-hud { left: 8px; top: calc(var(--top-h, 72px) + 4px); right: 52px; }
   .of-sum { font-size: 12px; padding: 6px 10px; }
   .of-side { right: 8px; bottom: 8px; }
+  .view-ofis[data-shelf="open"] .of-side { padding: 0 8px 8px 0; }
   .of-ctl button { width: 30px; height: 30px; }
 }
 @media (prefers-reduced-motion: reduce) {

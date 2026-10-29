@@ -610,7 +610,7 @@ if (want('shelf')) {
   } finally { await S.done(); }
 }
 
-// ---- the shelf as a card of the Setup Atlas style, with the zoom buttons under it in the same right-hand column. The computed styles of the card, its chip, a
+// ---- the shelf as a card of the Setup Atlas style, with the zoom buttons fixed in the bottom-right corner under it, open or folded. The computed styles of the card, its chip, a
 // row and the round buttons are read back and compared with the tokens of the Atlas page; the geometry is measured in every window width from 360 to 2560 px
 // (the buttons below the card, inside the column, over no row and over no label or figure of the scene) and in the two states with no card (folded, and
 // nothing on the shelf), where the buttons float in the bottom-right corner and the scene spans the whole view.
@@ -675,7 +675,7 @@ if (want('shelf-style')) {
     eq('row hover background', hov, 'rgba(143, 176, 255, 0.12)'); eq('zoom button hover border', hovZ, 'rgb(143, 176, 255)');
     await S.page.mouse.move(2, 2);
 
-    // 2. geometry in every width: the shelf open (the zoom buttons under the card, in the column), then folded (the buttons in the corner)
+    // 2. geometry in every width: the shelf open (the zoom buttons in the corner under the card, in the column), then folded (the buttons in the same corner)
     const rowsOut = [];
     const around = async () => {
       const g = await geoOf(ev), x = Math.min(...g.btns.map(b => b.x)), y = Math.min(...g.btns.map(b => b.y));
@@ -692,6 +692,8 @@ if (want('shelf-style')) {
       const vOk = g.btns.every(b => b.x >= 0 && b.r <= g.vw + 0.5 && b.y >= 0 && b.b <= g.vh + 0.5) && g.host && g.host.x >= 0 && g.host.r <= g.vw + 0.5;
       if (g.mode !== 'open' || !g.host) bad.push(`${L}: the shelf is ${g.mode}`);
       if (g.inArea) bad.push(`${L}: the zoom buttons are inside the scene area`);
+      { const last = g.btns[g.btns.length - 1], want16o = w <= 640 ? 8 : 16, gr = g.view.r - last.r, gb = g.view.b - last.b;      // fixed in the bottom-right corner, open or folded: the card ends above them and never pulls them up
+        if (Math.abs(gr - want16o) > 1.5 || Math.abs(gb - want16o) > 1.5) bad.push(`${L}: with the card open the zoom buttons are ${gr.toFixed(1)} px from the right and ${gb.toFixed(1)} px from the bottom of the view, not ${want16o} (they must stay in the corner)`); }
       if (g.host && g.btns.some(b => b.y < g.host.b - 0.5)) bad.push(`${L}: a zoom button starts at ${Math.min(...g.btns.map(b => b.y)).toFixed(0)}, above the card's bottom edge ${g.host.b.toFixed(0)}`);
       if (g.host && !(btnsRect.x >= g.side.x - 0.5 && btnsRect.x + btnsRect.w <= g.side.r + 0.5 && btnsRect.x >= g.host.x - 0.5 && btnsRect.x + btnsRect.w <= g.host.r + 0.5)) bad.push(`${L}: the zoom buttons (x ${btnsRect.x.toFixed(0)}..${(btnsRect.x + btnsRect.w).toFixed(0)}) leave the column (x ${g.side.x.toFixed(0)}..${g.side.r.toFixed(0)}, card ${g.host.x.toFixed(0)}..${g.host.r.toFixed(0)})`);
       if (g.rows.some(r => hit(r, btnsRect))) bad.push(`${L}: a zoom button is over a list row`);
@@ -719,6 +721,14 @@ if (want('shelf-style')) {
       if (Math.abs(f.area.w - f.view.w) > 1 || Math.abs(f.canvas.w - f.view.w) > 1) bad.push(`${F}: the scene is ${f.area.w.toFixed(0)} px wide in a ${f.view.w.toFixed(0)} px view`);
       if (f.inArea || !f.reachable.every(Boolean)) bad.push(`${F}: the zoom buttons are in the area or covered`);
       rowsOut.push(`${w}: folded, buttons ${gapR.toFixed(0)}/${gapB.toFixed(0)} px from the right/bottom corner, scene ${f.area.w.toFixed(0)} of ${f.view.w.toFixed(0)}`);
+    }
+    // a window taller than the card: the buttons stay in the corner, the card does not pull them up (its height is the list, so here the column is longer than the card)
+    for (const [w, h] of [[1500, 1400], [1024, 1300]]) {
+      await S.page.setViewport(w, h, 1);
+      await P('p.setShelfFolded(false)'); await sleep(900);
+      const { g } = await around(), last = g.btns[g.btns.length - 1], gr = g.view.r - last.r, gb = g.view.b - last.b;
+      rowsOut.push(`${w}x${h}: open, buttons ${gr.toFixed(0)}/${gb.toFixed(0)} px from the right/bottom corner, card ${g.host ? g.host.h.toFixed(0) : '-'} px tall`);
+      if (!g.host || Math.abs(gr - 16) > 1.5 || Math.abs(gb - 16) > 1.5) bad.push(`${w}x${h}: with the card open (${g.host ? g.host.h.toFixed(0) + ' px tall' : 'missing'}) the zoom buttons are ${gr.toFixed(1)} px from the right and ${gb.toFixed(1)} px from the bottom, not 16 (they must stay in the corner)`);
     }
     await S.page.setViewport(1500, 900, 1);
     // 3. nothing on the shelf at all: the same corner, the same full-width scene (a second page: no asleep and no closed chats)
@@ -1010,6 +1020,8 @@ if (want('card')) {
     // 2. it follows the agent: pan the scene, then zoom; the card keeps its place beside the agent and never covers it
     const rel0 = { dx: c1.rect.x - (area.left + fA.x), dy: c1.rect.y - (area.top + fA.y), side: c1.side };
     await S.page.mouse.drag(area.left + 30, area.top + area.height - 30, area.left + 75, area.top + area.height - 55);
+    // the card follows on the next frame the scheduler draws; wait for it to move (up to 4 s) instead of a fixed sleep, because a busy machine can hold a frame back for longer than that
+    for (const t0 = Date.now(); Date.now() - t0 < 4000; await sleep(150)) { const c = await card(); if (c.open && (Math.abs(c.rect.x - c1.rect.x) > 1 || Math.abs(c.rect.y - c1.rect.y) > 1)) break; }
     await sleepFrames(); await mouseAway();
     const c2 = await card(), fA2 = await P(`p.agentCss(${JSON.stringify(A.agent.id)})`);
     const moved = Math.hypot(fA2.x - fA.x, fA2.y - fA.y);
