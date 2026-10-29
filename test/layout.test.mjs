@@ -200,3 +200,14 @@ test('garden island: path, pond, trees, fences, beds and a bench around any offi
     assert.ok(count(/^(bush|hedge|rock|tuft)/) >= 8, `${n}: low plants and stones`);
   }
 });
+
+for (const proj of [ISO, FRONT]) test(`${proj.name}: the garden keeps its seasonal spots (a bird bath, pumpkins or a snowman; a pile of leaves), in the same place in every season`, () => {
+  for (const n of [1, 4, 10, 20]) {
+    const L = layoutOffice(agents(n, n === 10 ? [0, 1, 2] : [0]), proj);
+    const spots = L.outdoor.items.filter(i => i.id.startsWith('seasonal_'));
+    assert.ok(spots.some(s => s.id === 'seasonal_a'), `${proj.name} ${n}: no seasonal_a spot`);
+    if (n >= 4) assert.ok(spots.some(s => s.id === 'seasonal_b'), `${proj.name} ${n}: no seasonal_b spot`);
+    for (const s of spots) assert.deepEqual([s.w, s.d], [16, 16]);
+    assert.equal(JSON.stringify(L), JSON.stringify(layoutOffice(agents(n, n === 10 ? [0, 1, 2] : [0]), proj)));     // the layout never looks at the season
+  }
+});

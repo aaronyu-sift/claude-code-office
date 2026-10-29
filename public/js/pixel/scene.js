@@ -9,6 +9,7 @@ import { drawMarker, drawBalloon, drawBeam, drawRing, drawBubble, drawSteam, dra
 import { glowSprite, GLOW } from './lighting.js';
 import { workerId, deskId, isFloor } from './ids.js';
 import { depthSort } from './depth.js';
+import { spriteFor } from './season.js';
 
 const WALL_TINT = 0.45, FLOOR_TINT = 0.32;
 const newCanvas = (w, h) => (typeof OffscreenCanvas !== 'undefined' ? new OffscreenCanvas(w, h) : Object.assign(document.createElement('canvas'), { width: w, height: h }));
@@ -35,6 +36,11 @@ export function createScene({ atlas, proj }) {
   let entries = [], figs = [], roomById = new Map(), sortMs = 0, outdoorKey = '', pendingLight = null, ambientPts = { flowers: [], trees: [] };
   const actors = new Map();                     // `${roomId}:${slot}` -> { id, main, status, ap, name, since }
   let hoverId = null, quiet = false;             // quiet: draw no status effects (QA measures the light on the figures alone)
+  // The season only changes which sprites the garden is drawn with (baked variants, season.js); the layout is the same in every season.
+  let season = 'summer', lastLight = null;
+  const animals = { butterflies: true, birds: true };            // the view turns them off in winter and in rain, snow and fog
+  const seasonal = { drawn: 0, variants: 0, slots: 0 };         // what the last layout put in the garden (QA reads it)
+  const rid = id => spriteFor(id, season, atlas.has);
 
   // ---- sprite sources: where to take pixels from and where to put them (integers), computed once per sprite and pivot
   function src(id, facing, px, py, tint, strength) {
@@ -70,8 +76,9 @@ export function createScene({ atlas, proj }) {
     let gOut, gIn;
     [groundOut, gOut] = layer(); [groundIn, gIn] = layer(); groundOutT = null;
     const outFlat = [], inFlat = [];
-    for (const t of L.outdoor.tiles) outFlat.push({ ...t, w: 16, d: 16, facing: 0, order: 0 });
-    for (const it of L.outdoor.items) if (it.layer === 'floor') outFlat.push({ ...it, tint: null, order: 2 });
+    seasonal.drawn = seasonal.variants = seasonal.slots = 0;
+    for (const t of L.outdoor.tiles) outFlat.push({ ...t, id: rid(t.id), w: 16, d: 16, facing: 0, order: 0 });
+    for (const it of L.outdoor.items) if (it.layer === 'floor') outFlat.push({ ...it, id: rid(it.id), tint: null, order: 2 });
     for (const r of L.rooms) {
       for (const f of r.floor) inFlat.push({ ...f, tint: f.tint ? r.color : null, order: 1 });
       for (const it of r.items) if (it.layer === 'floor') inFlat.push({ ...it, tint: null, order: 2 });
@@ -85,17 +92,21 @@ export function createScene({ atlas, proj }) {
       }
     }
     outdoorKey = '';
-    pendingLight = light;
+    pendingLight = lastLight = light;
+    for (const f of outFlat) if (f.id && f.id.includes('@')) seasonal.variants++;
 
     // upright sprites
     const list = [];
     const make = (it, tint, outdoor = false) => {
+      const id = outdoor ? rid(it.id) : it.id;                     // garden pieces are drawn in the season's variant (or not at all)
+      if (!id) return null;
       const [px, py] = centre(it);
-      const s = src(it.id, it.facing, px, py, tint, WALL_TINT);
+      const s = src(id, it.facing, px, py, tint, WALL_TINT);
       if (!s) return null;
       const fp = { x0: it.x, y0: it.y, x1: it.x + it.w, y1: it.y + it.d };
-      const tags = atlas.sprite(it.id, it.facing).def.tags;
-      return { kind: 's', id: it.id, facing: it.facing, s, fp, key: proj.depthKey(fp, 0), x0: s.dx, y0: s.dy, x1: s.dx + s.w, y1: s.dy + s.h, outdoor, sway: tags.includes('sway'), phase: ((it.x * 7 + it.y * 13) & 15) / 16 * 6.28 };
+      const tags = atlas.sprite(id, it.facing).def.tags;
+      if (outdoor) { seasonal.drawn++; if (id.includes('@') || id !== it.id) seasonal.variants++; if (id !== it.id) seasonal.slots++; }
+      return { kind: 's', id, facing: it.facing, s, fp, key: proj.depthKey(fp, 0), x0: s.dx, y0: s.dy, x1: s.dx + s.w, y1: s.dy + s.h, outdoor, sway: tags.includes('sway'), phase: ((it.x * 7 + it.y * 13) & 15) / 16 * 6.28 };
     };
     const addStatic = (it, tint, outdoor = false) => { const e = make(it, tint, outdoor); if (e) list.push(e); };
     ambientPts = { flowers: [], trees: [] };
@@ -169,6 +180,7 @@ export function createScene({ atlas, proj }) {
   // are dropped (they are made again on demand). Returns the time it took in ms. `light` is { roomStr, outStr, lights, phase } or null.
   function retint(light) {
     const t0 = performance.now();
+    lastLight = light;
     atlas.clearShades();
     for (const e of entries) e.shKey = null;
     if (groundOut && light && light.outStr) {
@@ -271,12 +283,12 @@ export function createScene({ atlas, proj }) {
           for (const an of e.s.anchors) if (an.k === 'steam') { drawSteam(g, e.s.dx + an.x, e.s.dy + an.y, t); fx.steam++; }
         }
         if (!light || (lights < 0.5 && light.phase !== 'night')) {
-          ambientPts.flowers.forEach(([bx, by], i) => {
+          if (animals.butterflies) ambientPts.flowers.forEach(([bx, by], i) => {
             const x = bx + Math.round(Math.cos(t / 1300 + i * 1.7) * 16), y = by + Math.round(Math.sin(t / 900 + i * 2.3) * 8);
             if (x < vx0 || x > vx1 || y < vy0 || y > vy1) return;
             drawButterfly(g, x, y, t, i); fx.butterflies++;
           });
-          ambientPts.trees.forEach(([bx, by], i) => {
+          if (animals.birds) ambientPts.trees.forEach(([bx, by], i) => {
             const x = bx + Math.round(Math.cos(t / 2100 + i * 3) * 26), y = by + Math.round(Math.sin(t / 1700 + i * 2) * 10);
             if (x < vx0 || x > vx1 || y < vy0 || y > vy1) return;
             drawBird(g, x, y, t); fx.birds++;
@@ -377,6 +389,11 @@ export function createScene({ atlas, proj }) {
     setHover(id) { hoverId = id; },
     setQuiet(on) { quiet = !!on; },
     retint,
+    // draw the garden in another season (the layout stays); `light` is the current light of the scene, for the garden's night tint
+    setSeason(next, light = lastLight) { if (next === season) return false; season = next; if (layout) setLayout(layout, light); return true; },
+    get season() { return season; },
+    setAnimals(butterflies, birds) { animals.butterflies = !!butterflies; animals.birds = !!birds; },
+    get seasonal() { return { season, ...seasonal }; },
     get bounds() { return bounds; },
     get fitBox() { return fitBox; },
     get effects() { return { ...fx }; },

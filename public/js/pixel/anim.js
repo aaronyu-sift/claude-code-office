@@ -7,7 +7,7 @@
 
 export function createScheduler(o) {
   const {
-    draw,                                             // (t, animating) => void
+    draw,                                             // (t, animating, requested) => void; requested: a pan, a zoom or a state change asked for this frame
     maxFps = 10,
     raf = f => requestAnimationFrame(f),
     caf = id => cancelAnimationFrame(id),
@@ -29,8 +29,8 @@ export function createScheduler(o) {
     stats.callbacks++;
     if (dead || isHidden()) return;                   // resumed by wake() when the page shows again
     const anim = animating();
-    if (dirty) { dirty = false; last = t; stats.frames++; draw(t, anim); }
-    else if (anim && t - last >= interval - 1) { last = t; stats.frames++; stats.animFrames++; draw(t, true); }
+    if (dirty) { dirty = false; last = t; stats.frames++; draw(t, anim, true); }
+    else if (anim && t - last >= interval) { last = t; stats.frames++; stats.animFrames++; draw(t, true, false); }
     arm();
   }
   function arm() {

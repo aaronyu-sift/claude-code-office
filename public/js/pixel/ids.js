@@ -2,7 +2,14 @@
 // The table itself is generated (footprints.js, from tools/sprites/catalog.mjs); test/manifest.test.mjs checks that it matches public/pixel/manifest.json.
 import { FOOTPRINTS, FLAT_IDS } from './footprints.js';
 
+// Spots of the garden whose content depends on the season. The layout keeps a 16 x 16 spot; the scene draws `by[season]` there, or nothing
+// when the season has no entry (season.js `spriteFor`). Every sprite named here has a footprint inside the spot.
+export const SEASONAL_SLOTS = {
+  seasonal_a: { fp: [-8, -8, 16, 16], by: { spring: 'birdbath', summer: 'birdbath', autumn: 'pumpkins', winter: 'snowman' } },
+  seasonal_b: { fp: [-8, -8, 16, 16], by: { autumn: 'leafpile' } },
+};
 export const FP = { ...FOOTPRINTS };
+for (const [id, s] of Object.entries(SEASONAL_SLOTS)) FP[id] = s.fp;
 export const POSES = ['typeA', 'typeB', 'wait', 'sleep', 'relax', 'think'];     // seated poses; every appearance also has a `stand` figure (4 facings, no chair)
 export const APPEARANCES = 6;
 

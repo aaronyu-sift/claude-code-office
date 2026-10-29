@@ -258,6 +258,10 @@ function buildOutdoor(rooms, b, proj) {
   place('pond', E + 50, my, 0, 1); place('stones', E + 40, my + 34, 0, 1); place('flowerbed_b', E + 56, my - 44, 0, 1);
   place('picnictable', E + 58, my + 66, 1, 1);
   place('hedge_a', E + 66, S - 28, 1, 1);
+  // two seasonal spots (a bird bath or pumpkins or a snowman, a pile of leaves): the scene decides what stands there, the layout only keeps them
+  const spot = (id, list) => list.some(([cx, cy]) => place(id, cx, cy, 0, 1));
+  spot('seasonal_a', [[mx - 92, S - 40], [mx + 92, S - 40], [E + 28, S - 18], [Wst - 26, S - 18]]);
+  spot('seasonal_b', [[E + 30, S - 44], [mx + 60, S - 26], [mx - 60, S - 26], [Wst - 26, S - 44], [E + 28, S - 72], [mx, S - 76]]);
   // the far sides (north, west): trees, the well, the shed, fences along the edge
   place('shed', E - 20, N + 54, 0, 1); place('well', Wst - 40, my + 40, 0, 1);
   place('picnictable', Wst - 52, my - 40, 1, 1);

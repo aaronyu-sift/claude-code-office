@@ -9,6 +9,9 @@ import { APPEARANCES } from './ids.js';
 import { createScene } from './scene.js';
 import { createScheduler } from './anim.js';
 import { ambient, rgba, fmtClock, createMinuteTicker } from './time.js';
+import { merge, load as loadSettings, save as saveSettings, clean as cleanSetting, timeMinutes } from './settings.js';
+import { seasonOfDate, dateKey, parseDateKey, lightMonth } from './season.js';
+import { resolveWeather, planFor, createField, drawRainbow, rainbowFor, skyFor, PARTICLE_CAP } from './weather.js';
 import { drawSky } from './lighting.js';
 import { createLabelLayer, placeLabels } from './labels.js';
 import { fitZoom, stepZoom, centerPan, clampPan, zoomAbout } from './input.js';
@@ -29,14 +32,16 @@ function shortDesc(s) {
 
 function storedProj() { try { return localStorage.getItem(PROJ_KEY) || 'iso'; } catch { return 'iso'; } }
 
-// opts: { proj ('iso' | 'front', from the URL; without it the stored choice or iso), time (minutes, from ?time=) }
+const offscreen = (w, h) => (typeof OffscreenCanvas !== 'undefined' ? new OffscreenCanvas(w, h) : Object.assign(document.createElement('canvas'), { width: w, height: h }));
+
+// opts: { proj ('iso' | 'front', from the URL; without it the stored choice or iso), overrides (settings from the URL, see settings.js `fromQuery`) }
 export function createPixelOffice(root, ctx, opts = {}) {
   const { store } = ctx;
   let proj = projectionByName(opts.proj || storedProj());
   root.dataset.scene = 'pixel';
   root.dataset.proj = proj.name;
   root.innerHTML =
-    '<div class="of-stage"><canvas class="of-sky"></canvas><canvas class="of-main"></canvas></div><div class="of-layer"></div>' +
+    '<div class="of-stage"><canvas class="of-sky"></canvas><canvas class="of-main"></canvas><canvas class="of-wx"></canvas></div><div class="of-layer"></div>' +
     '<div class="of-hud"><div class="of-sum"></div></div>' +
     '<div class="of-ctl">' +
     `<button type="button" data-z="in" title="${esc(msg('of.zoomIn'))}">+</button>` +
@@ -59,22 +64,40 @@ export function createPixelOffice(root, ctx, opts = {}) {
   const seats = new Map();                    // sub id -> { roomId, slot, doneAt }
   let expiry = 0, hoverId = null, seq = 0;
 
+  // ---------------------------------------------------------- settings (settings.js)
+  // Stored settings, overridden by the URL (?time=, ?season=, ?weather=, ?hemisphere=: not stored). `from` says where each one came from.
+  const storage = (() => { try { return window.localStorage; } catch { return null; } })();
+  const from = {};
+  let settings;
+  { const m = merge(loadSettings(storage), opts.overrides || {}); settings = m.values; Object.assign(from, m.from); }
+  let dateOverride = null;                       // QA only: a fake "today" ("YYYY-MM-DD")
+  const today = () => {
+    const now = new Date();
+    if (!dateOverride) return now;
+    const o = parseDateKey(dateOverride);
+    o.setHours(now.getHours(), now.getMinutes(), now.getSeconds());
+    return o;
+  };
+
   // ---------------------------------------------------------- time of day
-  // The clock is the browser's local clock, read once a minute; ?time=HH:MM (opts.time, in minutes) pins it and starts no timer.
-  // A new minute re-tints only when the light really changed (full day and full night stay the same for hours).
-  const fixedMin = opts.time == null ? null : opts.time;
+  // The clock is the browser's local clock, read once a minute; a fixed time (?time=HH:MM or the time setting) pins it and starts no timer.
+  // A new minute re-tints only when the light really changed (full day and full night stay the same for hours). The sunrise table is the
+  // northern hemisphere's: in the southern one the month is shifted by six.
+  let fixedMin = timeMinutes(settings.time);
   let amb = null, light = null, lightKey = '', clockStale = false;
   const stats = { retints: 0, retintMs: 0, lastRetintMs: 0, firstFrameMs: 0, awaitFrame: false, clockMin: -1, month: 0 };
   const lightOf = a => ({ roomStr: a.room[3] > 0.004 ? rgba(a.room) : null, outStr: a.out[3] > 0.004 ? rgba(a.out) : null, lights: a.lights, phase: a.phase });
-  const realClock = () => { const d = new Date(); return { minute: d.getHours() * 60 + d.getMinutes(), month: d.getMonth() + 1 }; };
+  const realClock = () => { const d = today(); return { minute: d.getHours() * 60 + d.getMinutes(), month: lightMonth(d.getMonth() + 1, settings.hemisphere) }; };
   const nowClock = () => (fixedMin == null ? realClock() : { minute: fixedMin, month: realClock().month });
-  function drawSkyNow() { if (amb) drawSky(skyCanvas, amb); }
+  function drawSkyNow() { if (amb) drawSky(skyCanvas, skyFor(amb, wx.weather)); }
   function applyTime(c, force = false) {
     const a = ambient(c.minute, c.month), L = lightOf(a);
     const key = [L.roomStr, L.outStr, L.lights, a.stars, a.top, a.bottom, a.sun && a.sun.f, a.moon && a.moon.f].join('|');
     stats.clockMin = c.minute; stats.month = c.month;
     if (!force && key === lightKey) return false;
+    const phaseChanged = !amb || amb.phase !== a.phase;
     lightKey = key; amb = a; light = L;
+    if (phaseChanged && wxReady) updateWeather();
     if (scene) { const ms = scene.retint(light); stats.retints++; stats.lastRetintMs = ms; stats.retintMs += ms; stats.awaitFrame = true; }
     drawSkyNow();
     redraw(false);
@@ -83,15 +106,22 @@ export function createPixelOffice(root, ctx, opts = {}) {
 
   // ---------------------------------------------------------- scheduler
   const sched = createScheduler({
-    draw(t, anim) {
+    draw(t, anim, requested) {
       if (!scene) return;
-      const t0 = performance.now();
-      scene.draw(g, view, t, anim, light);
-      if (labelsDirty) { labelsDirty = false; placeLabelsNow(); }
-      const dt = performance.now() - t0;
-      if (stats.awaitFrame) { stats.awaitFrame = false; stats.firstFrameMs = dt; }
-      frameTimes.push(dt); stamps.push(t);
-      if (frameTimes.length > 400) frameTimes.shift();
+      // the scene is redrawn when something asked for it or something in it moves; a frame that only moves the weather draws the overlay alone
+      const t0 = performance.now(), moves = requested || sceneMoves();
+      let drewWeather = false;
+      if (wx.u !== unit() || wx.w !== wxCanvas.width || wx.h !== wxCanvas.height) { updateWeather(); drewWeather = true; }        // zoom or size changed
+      if (moves) {
+        scene.draw(g, view, t, anim, light);
+        if (labelsDirty) { labelsDirty = false; placeLabelsNow(); }
+        const dt = performance.now() - t0;
+        if (stats.awaitFrame) { stats.awaitFrame = false; stats.firstFrameMs = dt; }
+        frameTimes.push(dt);
+        if (frameTimes.length > 400) frameTimes.shift();
+      }
+      if (!drewWeather && wx.kind) drawWeather(t);
+      stamps.push(t);
       if (stamps.length > 1000) stamps.shift();
     },
     isHidden: () => document.hidden || !visible,
@@ -99,8 +129,93 @@ export function createPixelOffice(root, ctx, opts = {}) {
   });
   document.addEventListener('visibilitychange', () => sched.wake());
   const redraw = (withLabels = true) => { if (withLabels) labelsDirty = true; sched.requestFrame(); };
-  createMinuteTicker({ onChange: c => { if (visible) applyTime(c); else clockStale = true; }, fixed: fixedMin });
+
+  // ---------------------------------------------------------- season and weather
+  // The season only picks which baked sprites the garden is drawn with (season.js). The weather is one overlay canvas above the scene with at
+  // most PARTICLE_CAP particles (weather.js); it is off by default, runs through the scheduler above (at most 10 fps, nothing while hidden)
+  // and is off with prefers-reduced-motion. A fixed season or weather, the hemisphere and the time are settings that apply without a reload.
+  const wxCanvas = stage.querySelector('.of-wx'), wxg = wxCanvas.getContext('2d');
+  const field = createField(), reducedQuery = matchMedia('(prefers-reduced-motion: reduce)');
+  let season = 'summer', dayKey = dateKey(today()), wxReady = false, wxLast = 0, rainbowCanvas = null;
+  let wx = { weather: null, phase: 'day', rainbow: false, kind: null, u: 1, w: 0, h: 0 };
+  const wxStats = { frames: 0, times: [] };
+  const srcOn = { typing: false, attention: false, ambient: false };       // what moves in the scene itself (the weather source is separate)
+  const setSource = (k, on) => { srcOn[k] = on; sched.setActive(k, on); };
+  const sceneMoves = () => srcOn.typing || srcOn.attention || srcOn.ambient;
+  const unit = () => Math.max(1, view.zoom | 0);
+  function drawWeather(t) {
+    const w0 = performance.now();
+    wxg.clearRect(0, 0, wxCanvas.width, wxCanvas.height);
+    if (wx.rainbow && rainbowCanvas) { wxg.globalAlpha = 0.34; wxg.drawImage(rainbowCanvas, 0, 0); wxg.globalAlpha = 1; }
+    field.step(wxLast ? t - wxLast : 0); wxLast = t;
+    field.draw(wxg, t);
+    wxStats.frames++;
+    wxStats.times.push(performance.now() - w0);
+    if (wxStats.times.length > 400) wxStats.times.shift();
+  }
+  function updateWeather() {
+    const d = today(), key = dateKey(d), weather = reducedQuery.matches ? null : resolveWeather(settings.weather, key, season);
+    const phase = amb ? amb.phase : 'day', plan = weather ? planFor({ weather, season, phase }) : { kind: null, count: 0, tint: null };
+    const rainbow = !!weather && settings.weather === 'auto' && rainbowFor(key, season) && (phase === 'day' || phase === 'golden');
+    const w = wxCanvas.width, h = wxCanvas.height, u = unit();
+    wx = { weather, phase, rainbow, kind: plan.kind, u, w, h };
+    field.configure(plan, w, h, u);
+    rainbowCanvas = null;
+    if (rainbow && w > 1 && h > 1) { rainbowCanvas = offscreen(w, h); drawRainbow(rainbowCanvas.getContext('2d'), w, h, u); }
+    sched.setActive('weather', plan.count > 0);
+    root.dataset.weather = weather || 'off';
+    applyAnimals();
+    drawSkyNow();
+    wxLast = 0;
+    if (weather) drawWeather(performance.now()); else wxg.clearRect(0, 0, wxCanvas.width, wxCanvas.height);       // off: cleared once, never drawn again
+  }
+  reducedQuery.addEventListener('change', () => updateWeather());
+  // butterflies fly from spring to autumn and birds all year, neither in rain, snow or fog
+  function applyAnimals() {
+    if (!scene) return;
+    const wet = wx.weather === 'rain' || wx.weather === 'snow' || wx.weather === 'fog';
+    scene.setAnimals(!wet && season !== 'winter', !wet);
+  }
+  function updateSeason(force = false) {
+    const s = settings.season === 'auto' ? seasonOfDate(today(), settings.hemisphere) : settings.season;
+    if (s === season && !force) return false;
+    season = s;
+    root.dataset.season = s;
+    if (scene) { scene.setSeason(s, light); redraw(); }
+    updateWeather();
+    return true;
+  }
+  // one setting changed by the user: applied now, remembered for the next visit (a URL override is not stored by loading, only by this)
+  function applySetting(key, value) {
+    const v = cleanSetting(key, value);
+    if (v == null || !(key in settings)) return false;
+    settings = { ...settings, [key]: v };
+    from[key] = 'user';
+    saveSettings(storage, { [key]: v });
+    if (key === 'time') { fixedMin = timeMinutes(v); armTicker(); applyTime(nowClock(), true); }
+    else if (key === 'season') updateSeason();
+    else if (key === 'hemisphere') { updateSeason(); applyTime(nowClock(), true); }
+    else if (key === 'weather') updateWeather();
+    redraw(false);
+    return true;
+  }
+  let ticker = null;
+  function armTicker() {
+    if (ticker) ticker.stop();
+    ticker = createMinuteTicker({
+      onChange: () => {
+        if (!visible) { clockStale = true; return; }
+        applyTime(nowClock());
+        const k = dateKey(today());
+        if (k !== dayKey) { dayKey = k; if (!updateSeason()) updateWeather(); }      // a new day: the season and the automatic weather may change
+      },
+      fixed: fixedMin,
+    });
+  }
+  wxReady = true;
+  armTicker();
   applyTime(nowClock(), true);
+  updateSeason(true);
 
   // ---------------------------------------------------------- store -> rooms and seats
   function mains() {
@@ -187,10 +302,10 @@ export function createPixelOffice(root, ctx, opts = {}) {
       if (a) actors.push({ roomId: s.roomId, slot: s.slot, id, main: false, status: a.status, ap: hashStr(id) % APPEARANCES, act: a.act && a.act.c, thinking: !!(a.act && a.act.code === 'thinking') });
     }
     scene.setActors(actors);
-    sched.setActive('typing', actors.some(a => a.status === 'working'));
-    sched.setActive('attention', actors.some(a => a.main && (a.status === 'waiting' || a.status === 'ask')));
+    setSource('typing', actors.some(a => a.status === 'working'));
+    setSource('attention', actors.some(a => a.main && (a.status === 'waiting' || a.status === 'ask')));
     // steam, the small animals and the swaying garden move only while somebody is awake; with everyone dormant or stale the scene is still
-    sched.setActive('ambient', actors.some(a => a.status !== 'dormant' && a.status !== 'stale'));
+    setSource('ambient', actors.some(a => a.status !== 'dormant' && a.status !== 'stale'));
   }
 
   // ---------------------------------------------------------- labels
@@ -295,6 +410,8 @@ export function createPixelOffice(root, ctx, opts = {}) {
     if (w === view.w && h === view.h && dpr === view.dpr) return;
     view.w = w; view.h = h; view.dpr = dpr;
     canvas.width = w; canvas.height = h;
+    wxCanvas.width = w; wxCanvas.height = h;
+    updateWeather();
     drawSkyNow();
     if (autoFit) fit(false); else clampView();
     redraw();
@@ -450,6 +567,8 @@ export function createPixelOffice(root, ctx, opts = {}) {
     return ready.then(a => {
       if (seq !== projSeq) return;                                  // a later switch is already on its way
       proj = pr; atlas = a; scene = createScene({ atlas, proj });
+      scene.setSeason(season, light);
+      applyAnimals();
       root.dataset.proj = proj.name;
       layout = null; layoutSig = ''; hoverId = null; autoFit = true;
       if (visible) { resize(); sync(); }
@@ -457,6 +576,7 @@ export function createPixelOffice(root, ctx, opts = {}) {
   }
   useProjection(proj.name);
 
+  const wxP95 = () => { const a = [...wxStats.times].sort((p, q) => p - q); return a.length ? +a[Math.min(a.length - 1, Math.floor(a.length * 0.95))].toFixed(3) : 0; };
   // read-only state for verification: document.querySelector('#view-ofis').__pixel
   root.__pixel = {
     get zoom() { return view.zoom; }, get dpr() { return view.dpr; }, get size() { return [view.w, view.h]; }, get autoFit() { return autoFit; },
@@ -519,6 +639,28 @@ export function createPixelOffice(root, ctx, opts = {}) {
       return { retinted: stats.retints > before, ...this.retintCost };
     },
     tick() { return applyTime(nowClock()); },
+    // ---- season, weather and settings (QA)
+    get season() { return season; },
+    get seasonal() { return scene ? scene.seasonal : null; },
+    get settings() { return { ...settings }; },
+    get settingsFrom() { return { ...from }; },
+    get weather() { return { ...wx, count: field.count, cap: PARTICLE_CAP, frames: wxStats.frames, p95: wxP95(), reduced: reducedQuery.matches }; },
+    resetWeatherStats() { wxStats.frames = 0; wxStats.times.length = 0; },
+    // how many (sampled) pixels of the weather overlay are not transparent: 0 means nothing is drawn there
+    weatherPixels() { const d = wxg.getImageData(0, 0, wxCanvas.width, wxCanvas.height).data; let n = 0; for (let i = 3; i < d.length; i += 28) if (d[i]) n++; return n; },
+    // a hash of one still frame of the scene (no status effects, no animation): equal pictures give equal numbers, so QA can tell seasons apart
+    stillHash() {
+      if (!scene) return 0;
+      scene.setQuiet(true);
+      try { scene.draw(g, view, 0, false, light); } finally { scene.setQuiet(false); }
+      const d = g.getImageData(0, 0, view.w, view.h).data;
+      let h = 2166136261;
+      for (let i = 0; i < d.length; i += 13) h = Math.imul(h ^ d[i], 16777619);
+      return h >>> 0;
+    },
+    // pretend it is another day: the season (when automatic) and the automatic weather follow it
+    setDate(key) { dateOverride = key; dayKey = dateKey(today()); updateSeason(); updateWeather(); applyTime(nowClock(), true); return { season, weather: wx.weather, rainbow: wx.rainbow }; },
+    setSetting(key, value) { return applySetting(key, value); },
     // Draw one still frame now (no status effects, no animation) and measure, for every agent, the mean luminance (Rec. 709, 0..255) of the
     // canvas pixels under its sprite's silhouette, as shown: tint, glow and whatever stands in front of it included. { id: { lum, pixels } }
     agentLuminances() {
@@ -567,6 +709,11 @@ export function createPixelOffice(root, ctx, opts = {}) {
     },
     update() { if (visible) sync(); },
     get projection() { return proj.name; },
+    get settings() { return { ...settings }; },
+    get settingsFrom() { return { ...from }; },
+    get season() { return season; },
+    // change one setting (time, season, weather, hemisphere): applied now and remembered; false when the value is not valid
+    setSetting(key, value) { return applySetting(key, value); },
     // switch the view; the choice is kept for the next visit unless `keep` is false
     setProjection(name, keep = true) {
       const pr = projectionByName(name);
