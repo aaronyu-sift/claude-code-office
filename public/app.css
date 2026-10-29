@@ -628,38 +628,58 @@ main { flex: 1; min-height: 0; position: relative; }
 .of-sum .sep { color: var(--faint); }
 .of-sum .w { color: color-mix(in srgb, var(--warn) 70%, var(--text)); }
 .of-sum .w b { color: var(--warn); }
-.of-ctl { position: absolute; right: 16px; bottom: 16px; display: flex; flex-direction: column; gap: 4px; }
-.of-ctl button {
-  width: 34px; height: 34px; display: grid; place-items: center; border: 0; border-radius: 10px; cursor: pointer;
-  background: color-mix(in srgb, var(--panel) 90%, transparent); color: var(--muted); font: 500 17px/1 var(--font);
-  box-shadow: var(--shadow);
-}
-.of-ctl button:hover { color: var(--text); background: var(--panel-2); }
 .view-ofis[data-scene="pixel"]:not([hidden]) { display: flex; }          /* not for a hidden view: `.view[hidden]` has the same weight and this rule comes later */
 .of-area { position: relative; flex: 1 1 auto; min-width: 0; height: 100%; overflow: hidden; }
-.of-shelf { flex: 0 0 264px; width: 264px; display: flex; flex-direction: column; min-height: 0; background: var(--panel); border-left: 1px solid var(--line-2); user-select: text; -webkit-user-select: text; }
+/* The right-hand column: the shelf card (the style of the cards of the Setup Atlas page: dark glass, hairline border, mono chip, round buttons) with the zoom
+   buttons right under it. The Office is dark whatever the system theme is, so the colours here are fixed. With no card (the shelf is empty or folded) the
+   column is only the buttons, and they float in the bottom-right corner of the view over the scene, which then spans the full width. */
+.of-side, .of-shelf-tab {
+  --sh-ink: #eaeeff; --sh-muted: #a9b3d6; --sh-accent: #8fb0ff; --sh-line: rgba(150, 165, 255, .22); --sh-hair: rgba(196, 208, 255, .32);
+  --sh-mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace; color-scheme: dark;
+}
+.of-side { position: absolute; right: 16px; bottom: 16px; z-index: 4; display: flex; flex-direction: column; align-items: flex-end; gap: 10px; min-height: 0; pointer-events: none; }
+.of-side > * { pointer-events: auto; }
+.view-ofis[data-shelf="open"] .of-side { position: static; flex: 0 0 auto; width: 340px; height: 100%; padding: 14px 16px 14px 14px; align-items: stretch; }
+.of-ctl { display: flex; gap: 6px; align-self: flex-end; flex: none; }
+.of-ctl button, .sh-hide, .sh-more-btn, .of-shelf-tab {
+  border: 1px solid var(--sh-hair); background: var(--sh-btn, rgba(10, 14, 32, .55)); color: var(--sh-ink); cursor: pointer;
+  transition: border-color .2s, background .2s;
+}
+.of-ctl button:hover, .sh-hide:hover, .sh-more-btn:hover, .of-shelf-tab:hover { border-color: var(--sh-accent); background: rgba(30, 40, 84, .7); }
+.view-ofis:not([data-shelf="open"]) .of-side, .of-shelf-tab { --sh-btn: rgba(9, 12, 28, .80); }          /* over the scene, not over the dark page: more opaque, so the glyphs stay readable on the grass */
+.of-ctl button:disabled { opacity: .45; cursor: default; }
+.of-ctl button:disabled:hover { border-color: var(--sh-hair); background: var(--sh-btn, rgba(10, 14, 32, .55)); }
+.of-ctl button { width: 34px; height: 34px; display: grid; place-items: center; padding: 0; border-radius: 50%; backdrop-filter: blur(6px); -webkit-backdrop-filter: blur(6px); font: 500 17px/1 var(--font); }
+.of-shelf {
+  flex: 0 1 auto; min-height: 0; display: flex; flex-direction: column; padding: 14px 16px; color: var(--sh-ink);
+  background: rgba(9, 12, 28, .80); backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px); border: 1px solid var(--sh-hair); border-radius: 18px;
+  user-select: text; -webkit-user-select: text;
+}
 .of-shelf[hidden] { display: none; }
-.sh-head { display: flex; align-items: center; gap: 8px; padding: 14px 10px 10px 16px; }
-.sh-title { margin: 0; font: 600 13px var(--font-d); color: var(--text); }
-.sh-count { margin-right: auto; color: var(--muted); font-size: 12px; }
-.sh-hide { width: 26px; height: 26px; border-radius: 8px; border: 0; background: transparent; color: var(--faint); font-size: 18px; line-height: 1; cursor: pointer; }
-.sh-hide:hover { background: var(--panel-2); color: var(--text); }
-.sh-list { list-style: none; margin: 0; padding: 2px 8px 16px; flex: 1 1 auto; min-height: 0; overflow-y: auto; overscroll-behavior: contain; display: flex; flex-direction: column; gap: 2px; }
-.sh-item { display: flex; align-items: center; gap: 10px; width: 100%; padding: 8px; border-radius: 10px; border: 0; background: transparent; color: inherit; text-align: left; cursor: pointer; font: inherit; }
-.sh-item:hover, .sh-item:focus-visible { background: var(--panel-2); outline: none; }
-.sh-item:focus-visible { box-shadow: inset 0 0 0 2px var(--accent); }
+.sh-head { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; margin-bottom: 8px; }          /* wraps only if a long title and a three-digit count meet in a narrow card */
+.sh-title { margin: 0; font: 600 12px/1.6 var(--sh-mono); letter-spacing: .08em; text-transform: uppercase; color: var(--sh-accent); border: 1px solid var(--sh-line); border-radius: 999px; padding: 1px 10px; white-space: nowrap; }
+.sh-count { color: var(--sh-muted); font: 12px/1.4 var(--sh-mono); white-space: nowrap; }
+.sh-hide { flex: none; margin-left: auto; width: 28px; height: 28px; padding: 0; border-radius: 50%; font-size: 18px; line-height: 1; }
+.sh-list { list-style: none; margin: 0; padding: 0; flex: 1 1 auto; min-height: 0; overflow-y: auto; overscroll-behavior: contain; display: flex; flex-direction: column; gap: 2px; scrollbar-width: thin; scrollbar-color: rgba(143, 176, 255, .4) transparent; }
+.sh-item { display: flex; align-items: center; gap: 10px; width: 100%; min-height: 44px; padding: 6px 8px; border-radius: 10px; border: 0; background: transparent; color: inherit; text-align: left; cursor: pointer; font: inherit; }
+.sh-item:hover, .sh-item:focus-visible { background: rgba(143, 176, 255, .12); outline: none; }
+.sh-item:focus-visible { box-shadow: inset 0 0 0 2px var(--sh-accent); }
 .sh-fig { flex: none; min-width: 18px; image-rendering: pixelated; }
-.sh-txt { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
-.sh-name { font: 500 13px/1.35 var(--font); color: var(--text); overflow-wrap: anywhere; }
-.sh-meta { display: grid; grid-template-columns: auto minmax(0, 1fr); align-items: center; gap: 1px 6px; color: var(--muted); font-size: 11.5px; }
-.sh-sw { width: 7px; height: 7px; border-radius: 50%; }
+.sh-txt { display: flex; flex-direction: column; gap: 1px; min-width: 0; }
+.sh-name { font: 600 14px/1.35 var(--font); color: var(--sh-ink); overflow-wrap: anywhere; }
+.sh-meta { display: flex; flex-wrap: wrap; align-items: baseline; gap: 0 10px; color: var(--sh-muted); font-size: 13px; line-height: 1.5; }
+.sh-pj { display: inline-flex; align-items: baseline; gap: 6px; min-width: 0; }
+.sh-sw { flex: none; width: 7px; height: 7px; border-radius: 50%; }
 .sh-proj { overflow-wrap: anywhere; }
-.sh-when { grid-column: 2; color: var(--faint); }
-.of-shelf-tab { position: absolute; top: 14px; right: 16px; z-index: 3; padding: 6px 12px; border-radius: 999px; border: 1px solid var(--line-2); background: var(--panel); color: var(--text-2); font: 500 12px var(--font); cursor: pointer; }
-.of-shelf-tab:hover { background: var(--panel-2); color: var(--text); }
+.sh-when { font: 12px/1.5 var(--sh-mono); color: var(--sh-muted); }
+.sh-more { flex: none; display: flex; flex-direction: column; align-items: flex-start; gap: 8px; margin-top: 10px; padding-top: 10px; border-top: 1px solid var(--sh-line); color: var(--sh-muted); font-size: 13px; line-height: 1.4; }
+.sh-more[hidden] { display: none; }
+.sh-more-btn { min-height: 30px; padding: 2px 14px; border-radius: 999px; font: 500 13px/1.4 var(--font); }
+.of-shelf-tab { position: absolute; top: 14px; right: 16px; z-index: 3; padding: 1px 12px; border-radius: 999px; backdrop-filter: blur(6px); -webkit-backdrop-filter: blur(6px); color: var(--sh-accent); font: 600 12px/1.6 var(--sh-mono); letter-spacing: .08em; text-transform: uppercase; }
 .of-shelf-tab[hidden] { display: none; }
+.view-ofis[data-shelf="collapsed"] .of-hud { right: 140px; }           /* room for the tab at the corner */
 @media (max-width: 760px) {
-  .of-shelf { position: absolute; top: 0; right: 0; bottom: 0; z-index: 6; box-shadow: -18px 0 40px -20px rgba(0, 0, 0, .8); }
+  .view-ofis[data-shelf="open"] .of-side { position: absolute; top: 0; right: 0; bottom: 0; z-index: 6; width: min(340px, 100%); padding: 8px 8px 8px 0; pointer-events: none; --sh-btn: rgba(9, 12, 28, .80); }
 }
 .of-empty { position: absolute; inset: 0; display: grid; place-items: center; color: var(--muted); pointer-events: none; }
 .of-empty[hidden] { display: none; }
@@ -695,7 +715,7 @@ main { flex: 1; min-height: 0; position: relative; }
 @media (max-width: 640px) {
   .of-hud { left: 8px; top: 8px; right: 52px; }
   .of-sum { font-size: 12px; padding: 6px 10px; }
-  .of-ctl { right: 8px; bottom: 8px; }
+  .of-side { right: 8px; bottom: 8px; }
   .of-ctl button { width: 30px; height: 30px; }
 }
 @media (prefers-reduced-motion: reduce) {

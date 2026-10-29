@@ -42,16 +42,17 @@ export function createPixelOffice(root, ctx, opts = {}) {
   let proj = projectionByName(opts.proj || storedProj());
   root.dataset.scene = 'pixel';
   root.dataset.proj = proj.name;
-  // the scene (`area`) and the shelf lane beside it: pointer, wheel and size belong to the area, so the lane scrolls on its own
+  // the scene (`area`) and the column beside it (`.of-side`: the shelf card, shelf-view.js, with the zoom buttons right under it): pointer, wheel and size
+  // belong to the area, so the shelf scrolls on its own. With no shelf card the column is only the zoom buttons, floating in the corner of the view.
   root.innerHTML =
     '<div class="of-area">' +
     '<div class="of-stage"><canvas class="of-main"></canvas><canvas class="of-wx"></canvas></div><div class="of-layer"></div>' +
     '<div class="of-hud"><div class="of-sum"></div></div>' +
-    '<div class="of-ctl">' +
+    '<div class="of-empty" hidden></div></div>' +
+    '<div class="of-side"><div class="of-ctl">' +
     `<button type="button" data-z="in" title="${esc(msg('of.zoomIn'))}">+</button>` +
     `<button type="button" data-z="out" title="${esc(msg('of.zoomOut'))}">−</button>` +
-    `<button type="button" data-z="fit" title="${esc(msg('of.fit'))}">${FIT_ICON}</button></div>` +
-    '<div class="of-empty" hidden></div></div>';
+    `<button type="button" data-z="fit" title="${esc(msg('of.fit'))}">${FIT_ICON}</button></div></div>`;
   const area = root.querySelector('.of-area');
   const stage = root.querySelector('.of-stage'), canvas = stage.querySelector('.of-main');
   const layer = root.querySelector('.of-layer'), sumEl = root.querySelector('.of-sum'), emptyEl = root.querySelector('.of-empty');
@@ -70,7 +71,7 @@ export function createPixelOffice(root, ctx, opts = {}) {
   let expiry = 0, hoverId = null, seq = 0;
 
   // ---------------------------------------------------------- settings (settings.js)
-  // Stored settings, overridden by the URL (?time=, ?season=, ?weather=, ?hemisphere=: not stored). `from` says where each one came from.
+  // Stored settings, overridden by the URL (?time=, ?season=, ?weather=, ?hemisphere=, ?shelf=: not stored). `from` says where each one came from.
   const storage = (() => { try { return window.localStorage; } catch { return null; } })();
   const from = {};
   let settings;
@@ -201,6 +202,7 @@ export function createPixelOffice(root, ctx, opts = {}) {
     else if (key === 'season') updateSeason();
     else if (key === 'hemisphere') { updateSeason(); applyTime(nowClock(), true); }
     else if (key === 'weather') updateWeather();
+    else if (key === 'shelf') shelf.setMax(v);
     redraw(false);
     return true;
   }
@@ -224,9 +226,10 @@ export function createPixelOffice(root, ctx, opts = {}) {
 
   // ---------------------------------------------------------- the shelf
   // Chats without a room: asleep ones (they leave their room) and closed ones (the server's list). shelf.js decides who and in which order,
-  // shelf-view.js draws the lane beside the scene; a click opens the same details panel as a click on a figure.
+  // shelf-view.js draws the card beside the scene; a click opens the same card as a click on a figure, next to the row.
   const shelf = createShelfView({ root, area, msg, fmtShort, now: () => store.now(), open: (id, row) => { ctx.tip.hide(); card.open(id, row); }, storage });
   const syncShelf = () => shelf.update(shelfEntries({ agents: [...store.agents.values()], closed: store.closed || [] }));
+  shelf.setMax(settings.shelf);                                      // only the newest few have a row (setting `shelf`, ?shelf=N)
 
   // ---------------------------------------------------------- the card
   // A click on an agent, on a room's floor (its main agent) or on a row of the shelf opens a card next to it (card.js): no drawer, no dimming. The

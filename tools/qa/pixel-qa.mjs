@@ -462,7 +462,7 @@ if (want('language')) {
 // with their full chat names and "closed N min ago"; a chat that waits for you never is; a click on a shelf entry or on a figure in a room opens the
 // details panel of that id (full name, project, status, time since, last prompt and reply, tool mix, the VS Code link, the copy button)
 if (want('shelf')) {
-  const S = await scenario(10, { tag: 'shelf', query: '?time=12:00', fixture: { closed: 12 } });
+  const S = await scenario(10, { tag: 'shelf', query: '?time=12:00&shelf=200', fixture: { closed: 12 } });           // ?shelf=200: a row for every chat (the cap has its own check, 15-shelf-cap)
   try {
     const P = e => S.page.evaluate(px(e));
     const ev = e => S.page.evaluate(e);
@@ -498,6 +498,8 @@ if (want('shelf')) {
     const overLabels = labels.filter(l => hit(l, sh.rect)).length;
     const overTargets = (await P(`p.figures().map(id => p.agentCss(id))`)).filter(f => f && hit({ x: A.left + f.x - 12, y: A.top + f.y - 12, w: 24, h: 24 }, sh.rect)).length;
     const sceneClear = A.right <= sh.rect.x + 1 && canvasR.right <= sh.rect.x + 1 && A.width + sh.rect.w <= (await ev('innerWidth')) + 1;
+    // the card is the first thing in the right-hand column and the zoom buttons come right after it, outside the scene area
+    const columnOk = await ev(`(() => { const h = document.querySelector('.of-shelf'), c = document.querySelector('.of-ctl'); return h.parentElement.classList.contains('of-side') && h.nextElementSibling === c && !document.querySelector('.of-area').contains(c) && c.getBoundingClientRect().top >= h.getBoundingClientRect().bottom - 0.5; })()`);
     const z0 = await P('p.zoom'), pan0 = await P('p.pan');
     await S.page.mouse.wheel(sh.rect.x + sh.rect.w / 2, sh.rect.y + sh.rect.h / 2, 260);
     await sleep(350);
@@ -521,7 +523,7 @@ if (want('shelf')) {
     const api = async () => (await (await fetch(`http://127.0.0.1:${S.srv.port}/api/closed`)).json()).closed.map(c => c.id + ':' + c.closedAt).join();
     const api1 = await api(); await sleep(1200); const api2 = await api();
     const idsBefore = sh.rows.map(r => r.id).join();
-    await S.page.goto(`http://127.0.0.1:${S.srv.port}/?time=12:00&proj=${proj}&season=${season}#ofis`, 800);
+    await S.page.goto(`http://127.0.0.1:${S.srv.port}/?time=12:00&shelf=200&proj=${proj}&season=${season}#ofis`, 800);
     await waitReady(S.page, live.length - asleep.length);
     await until(async () => (await shelf()).rows.length === expected.length);
     const reloaded = await shelf();
@@ -530,11 +532,11 @@ if (want('shelf')) {
     check('15-shelf',
       S.ready && orderOk && namesOk && !whenBad.length && !figBad.length && !!longName && sh.count === `${expected.length} chats` &&
       !waitingOnShelf.length && waitingInRooms.length === waiting.length && waiting.length > 0 && asleepOnShelf.length === asleep.length && !asleepInRooms.length && asleep.length > 0 &&
-      sceneClear && overLabels === 0 && overTargets === 0 && sh.scroll.height > sh.scroll.client && sh.scroll.overflowY === 'auto' && scrolled.scroll.top > 0 && sceneStill &&
+      sceneClear && columnOk && overLabels === 0 && overTargets === 0 && sh.scroll.height > sh.scroll.client && sh.scroll.overflowY === 'auto' && scrolled.scroll.top > 0 && sceneStill &&
       folded.mode === 'collapsed' && !folded.tabHidden && /^Shelf · \d+$/.test(folded.tab) && foldedStore === 'closed' && foldedArea > A.width + 200 &&
       unfolded.mode === 'open' && unfolded.tabHidden && unfoldedStore === 'open' &&
       api1 === api2 && reloaded.rows.map(r => r.id).join() === idsBefore,
-      `${live.length} live + ${S.fx.closed.length} closed sessions: shelf "${sh.title}", ${sh.count} (${sh.rows.filter(r => r.kind === 'closed').length} closed, ${sh.rows.filter(r => r.kind === 'dormant').length} asleep); order newest first as expected ${orderOk}; full chat names ${namesOk} (longest ${Math.max(...sh.rows.map(r => r.name.length))} chars, emoji name included); times: ${sh.rows.slice(0, 4).map(r => `"${r.when}"`).join(', ')} … within tolerance of the fixture ages (off ${whenBad.length}); figures drawn in every row (${sh.rows.length - figBad.length}/${sh.rows.length}, ${sh.rows[0].figure.w}x${sh.rows[0].figure.h} px); waiting (${waiting.length}): on the shelf ${waitingOnShelf.length}, in rooms ${waitingInRooms.length}; asleep (${asleep.length}): on the shelf ${asleepOnShelf.length}, in rooms ${asleepInRooms.length}; lane x ${sh.rect.x.toFixed(0)}..${(sh.rect.x + sh.rect.w).toFixed(0)}, scene ends at ${A.right.toFixed(0)} (canvas ${canvasR.right.toFixed(0)}), overlap with ${labels.length} shown labels ${overLabels}, with figure targets ${overTargets}; own scroll: content ${sh.scroll.height} px in ${sh.scroll.client} px (${sh.scroll.overflowY}), wheel on the lane moved it to ${scrolled.scroll.top.toFixed(0)} and left the scene's zoom and pan alone ${sceneStill}; fold: ${folded.mode} (tab "${folded.tab}", saved "${foldedStore}", scene ${foldedArea.toFixed(0)} px wide against ${A.width.toFixed(0)}), unfold: ${unfolded.mode} (saved "${unfoldedStore}"); the server's list twice identical ${api1 === api2}; the shelf after a reload identical ${reloaded.rows.map(r => r.id).join() === idsBefore}`);
+      `${live.length} live + ${S.fx.closed.length} closed sessions: shelf "${sh.title}", ${sh.count} (${sh.rows.filter(r => r.kind === 'closed').length} closed, ${sh.rows.filter(r => r.kind === 'dormant').length} asleep); order newest first as expected ${orderOk}; full chat names ${namesOk} (longest ${Math.max(...sh.rows.map(r => r.name.length))} chars, emoji name included); times: ${sh.rows.slice(0, 4).map(r => `"${r.when}"`).join(', ')} … within tolerance of the fixture ages (off ${whenBad.length}); figures drawn in every row (${sh.rows.length - figBad.length}/${sh.rows.length}, ${sh.rows[0].figure.w}x${sh.rows[0].figure.h} px); waiting (${waiting.length}): on the shelf ${waitingOnShelf.length}, in rooms ${waitingInRooms.length}; asleep (${asleep.length}): on the shelf ${asleepOnShelf.length}, in rooms ${asleepInRooms.length}; lane x ${sh.rect.x.toFixed(0)}..${(sh.rect.x + sh.rect.w).toFixed(0)}, scene ends at ${A.right.toFixed(0)} (canvas ${canvasR.right.toFixed(0)}), the zoom buttons right under the card in the same column ${columnOk}, overlap with ${labels.length} shown labels ${overLabels}, with figure targets ${overTargets}; own scroll: content ${sh.scroll.height} px in ${sh.scroll.client} px (${sh.scroll.overflowY}), wheel on the lane moved it to ${scrolled.scroll.top.toFixed(0)} and left the scene's zoom and pan alone ${sceneStill}; fold: ${folded.mode} (tab "${folded.tab}", saved "${foldedStore}", scene ${foldedArea.toFixed(0)} px wide against ${A.width.toFixed(0)}), unfold: ${unfolded.mode} (saved "${unfoldedStore}"); the server's list twice identical ${api1 === api2}; the shelf after a reload identical ${reloaded.rows.map(r => r.id).join() === idsBefore}`);
 
     // ---- the card, from a shelf entry and from a figure in a room
     const card = () => P('p.card');
@@ -608,6 +610,207 @@ if (want('shelf')) {
   } finally { await S.done(); }
 }
 
+// ---- the shelf as a card of the Setup Atlas style, with the zoom buttons under it in the same right-hand column. The computed styles of the card, its chip, a
+// row and the round buttons are read back and compared with the tokens of the Atlas page; the geometry is measured in every window width from 360 to 2560 px
+// (the buttons below the card, inside the column, over no row and over no label or figure of the scene) and in the two states with no card (folded, and
+// nothing on the shelf), where the buttons float in the bottom-right corner and the scene spans the whole view.
+if (want('shelf-style')) {
+  const cssOf = (ev, sel, props) => ev(`(() => { const e = document.querySelector(${JSON.stringify(sel)}), c = getComputedStyle(e); return JSON.stringify(Object.fromEntries(${JSON.stringify(props)}.map(p => [p, c[p]]))); })()`).then(JSON.parse);
+  const geoOf = ev => ev(`(() => {
+    const r = e => { const b = e.getBoundingClientRect(); return { x: b.left, y: b.top, w: b.width, h: b.height, r: b.right, b: b.bottom }; };
+    const view = document.querySelector('#view-ofis'), side = view.querySelector('.of-side'), host = view.querySelector('.of-shelf'), list = view.querySelector('.sh-list'), area = view.querySelector('.of-area');
+    const btns = [...view.querySelectorAll('.of-ctl button')], lr = r(list), foot = view.querySelector('.sh-more');
+    return JSON.stringify({
+      listB: lr.b, foot: foot.hidden || host.hidden ? null : r(foot),
+      mode: view.dataset.shelf, view: r(view), area: r(area), canvas: r(view.querySelector('.of-main')), side: r(side), host: host.hidden ? null : r(host),
+      btns: btns.map(r), inArea: btns.some(b => area.contains(b)), reachable: btns.map(b => { const q = b.getBoundingClientRect(), e = document.elementFromPoint(q.left + q.width / 2, q.top + q.height / 2); return e === b || b.contains(e); }),
+      rows: host.hidden ? [] : [...list.children].map(li => r(li)).filter(b => b.b > lr.y && b.y < lr.b).map(b => ({ x: b.x, w: b.w, y: Math.max(b.y, lr.y), h: Math.min(b.b, lr.b) - Math.max(b.y, lr.y) })),   // the part of each row that is on show (the rest is scrolled out and clipped)
+      names: host.hidden ? [] : [...list.querySelectorAll('.sh-name')].map(n => ({ clipped: n.scrollWidth > n.clientWidth + 1 || getComputedStyle(n).textOverflow === 'ellipsis' || getComputedStyle(n).webkitLineClamp !== 'none', lines: Math.round(n.getBoundingClientRect().height / parseFloat(getComputedStyle(n).lineHeight)) })),
+      vw: innerWidth, vh: innerHeight });
+  })()`).then(JSON.parse);
+  const hit = (a, b) => a.x < b.x + b.w && a.x + a.w > b.x && a.y < b.y + b.h && a.y + a.h > b.y;
+  const S = await scenario(10, { tag: 'shstyle', query: '?time=12:00', fixture: { closed: 12 } });
+  try {
+    const P = e => S.page.evaluate(px(e)), ev = e => S.page.evaluate(e), sleepUntil = async (fn, ms = 8000) => { let r; for (const t0 = Date.now(); Date.now() - t0 < ms; await sleep(200)) { r = await fn().catch(() => null); if (r) return r; } return r; };
+    await sleepUntil(async () => (await P('p.shelf().total')) >= 13);                // the default cap: 10 rows and the footer under them
+    const bad = [];
+    const eq = (what, got, want_) => { if (JSON.stringify(got) !== JSON.stringify(want_)) bad.push(`${what}: ${JSON.stringify(got)} instead of ${JSON.stringify(want_)}`); };
+    // 1. the tokens of the Atlas card, in the window the scene is normally seen in (and again with a light operating system, the Office is dark either way)
+    const readStyles = async () => {
+      const card = await cssOf(ev, '.of-shelf', ['backgroundColor', 'backdropFilter', 'borderTopColor', 'borderTopWidth', 'borderTopStyle', 'borderTopLeftRadius', 'borderBottomRightRadius', 'paddingTop', 'paddingLeft', 'colorScheme']);
+      const chip = await cssOf(ev, '.sh-title', ['color', 'fontWeight', 'fontSize', 'textTransform', 'letterSpacing', 'fontFamily', 'borderTopColor', 'borderTopLeftRadius', 'paddingLeft']);
+      const hide = await cssOf(ev, '.sh-hide', ['borderTopLeftRadius', 'width', 'height', 'borderTopColor', 'backgroundColor', 'color']);
+      const row = await cssOf(ev, '.sh-item', ['borderTopLeftRadius', 'paddingTop', 'paddingLeft']);
+      const name = await cssOf(ev, '.sh-name', ['fontSize', 'fontWeight', 'color']);
+      const meta = await cssOf(ev, '.sh-meta', ['fontSize', 'color']);
+      const when = await cssOf(ev, '.sh-when', ['fontSize', 'fontFamily']);
+      const zoom = await cssOf(ev, '.of-ctl button', ['borderTopLeftRadius', 'borderTopColor', 'borderTopWidth', 'backgroundColor', 'color']);
+      const more = await cssOf(ev, '.sh-more-btn', ['borderTopLeftRadius', 'borderTopColor', 'backgroundColor', 'color']);
+      return { card, chip, hide, row, name, meta, when, zoom, more };
+    };
+    const checkStyles = (st, tag) => {
+      eq(tag + ' card background', st.card.backgroundColor, 'rgba(9, 12, 28, 0.8)'); eq(tag + ' card blur', st.card.backdropFilter, 'blur(10px)');
+      eq(tag + ' card border', [st.card.borderTopWidth, st.card.borderTopStyle, st.card.borderTopColor], ['1px', 'solid', 'rgba(196, 208, 255, 0.32)']);
+      eq(tag + ' card radius', [st.card.borderTopLeftRadius, st.card.borderBottomRightRadius], ['18px', '18px']); eq(tag + ' card padding', [st.card.paddingTop, st.card.paddingLeft], ['14px', '16px']);
+      eq(tag + ' chip', [st.chip.color, st.chip.fontWeight, st.chip.fontSize, st.chip.textTransform, st.chip.letterSpacing, st.chip.borderTopColor, st.chip.borderTopLeftRadius, st.chip.paddingLeft], ['rgb(143, 176, 255)', '600', '12px', 'uppercase', '0.96px', 'rgba(150, 165, 255, 0.22)', '999px', '10px']);
+      if (!/ui-monospace/.test(st.chip.fontFamily) || !/ui-monospace/.test(st.when.fontFamily)) bad.push(tag + ' mono font ' + st.chip.fontFamily);
+      eq(tag + ' hide button', [st.hide.borderTopLeftRadius, st.hide.width, st.hide.height, st.hide.borderTopColor, st.hide.backgroundColor], ['50%', '28px', '28px', 'rgba(196, 208, 255, 0.32)', 'rgba(10, 14, 32, 0.55)']);
+      eq(tag + ' row', [st.row.borderTopLeftRadius, st.row.paddingTop, st.row.paddingLeft], ['10px', '6px', '8px']);
+      eq(tag + ' name', [st.name.fontSize, st.name.fontWeight, st.name.color], ['14px', '600', 'rgb(234, 238, 255)']); eq(tag + ' meta', [st.meta.fontSize, st.meta.color], ['13px', 'rgb(169, 179, 214)']); eq(tag + ' time', st.when.fontSize, '12px');
+      eq(tag + ' footer button', [st.more.borderTopLeftRadius, st.more.borderTopColor, st.more.backgroundColor, st.more.color], ['999px', 'rgba(196, 208, 255, 0.32)', 'rgba(10, 14, 32, 0.55)', 'rgb(234, 238, 255)']);
+      eq(tag + ' zoom button', [st.zoom.borderTopLeftRadius, st.zoom.borderTopWidth, st.zoom.borderTopColor, st.zoom.backgroundColor], ['50%', '1px', 'rgba(196, 208, 255, 0.32)', 'rgba(10, 14, 32, 0.55)']);
+    };
+    const dark = await readStyles(); checkStyles(dark, 'dark');
+    await S.page.send('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-color-scheme', value: 'light' }] });
+    await sleep(300);
+    const light = await readStyles(); checkStyles(light, 'light'); eq('light card color-scheme', light.card.colorScheme, 'dark');
+    await S.page.send('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-color-scheme', value: 'dark' }] });
+    // hover: a row gets the Atlas list hover colour, a round button the accent border
+    const rowC = await ev(`(() => { const b = document.querySelector('.sh-list li:nth-child(2) .sh-item').getBoundingClientRect(); return { x: b.left + b.width / 2, y: b.top + b.height / 2 }; })()`);
+    await S.page.mouse.move(rowC.x, rowC.y); await sleep(300);
+    const hov = await ev(`getComputedStyle(document.querySelector('.sh-list li:nth-child(2) .sh-item')).backgroundColor`);
+    const zC = await ev(`(() => { const b = document.querySelector('.of-ctl button[data-z="fit"]').getBoundingClientRect(); return { x: b.left + b.width / 2, y: b.top + b.height / 2 }; })()`);
+    await S.page.mouse.move(zC.x, zC.y); await sleep(450);
+    const hovZ = await ev(`getComputedStyle(document.querySelector('.of-ctl button[data-z="fit"]')).borderTopColor`);
+    eq('row hover background', hov, 'rgba(143, 176, 255, 0.12)'); eq('zoom button hover border', hovZ, 'rgb(143, 176, 255)');
+    await S.page.mouse.move(2, 2);
+
+    // 2. geometry in every width: the shelf open (the zoom buttons under the card, in the column), then folded (the buttons in the corner)
+    const rowsOut = [];
+    const around = async () => {
+      const g = await geoOf(ev), x = Math.min(...g.btns.map(b => b.x)), y = Math.min(...g.btns.map(b => b.y));
+      return { g, btnsRect: { x, y, w: Math.max(...g.btns.map(b => b.r)) - x, h: Math.max(...g.btns.map(b => b.b)) - y } };         // the three buttons as one box
+    };
+    const widths = [360, 700, 1024, 1500, 2560];
+    for (const w of widths) {
+      await S.page.setViewport(w, 900, 1);
+      await P('p.setShelfFolded(false)'); await sleep(700);
+      const { g, btnsRect } = await around();
+      const L = `${w}px open`, A = g.area, labs = (await P('p.labelRects()')).filter(l => l.shown).map(l => ({ x: A.x + l.x, y: A.y + l.y, w: l.w, h: l.h }));
+      const figs = (await P('p.figures().map(id => p.agentCss(id))')).filter(Boolean).map(f => ({ x: A.x + f.x - 12, y: A.y + f.y - 12, w: 24, h: 24 }));
+      const vOk = g.btns.every(b => b.x >= 0 && b.r <= g.vw + 0.5 && b.y >= 0 && b.b <= g.vh + 0.5) && g.host && g.host.x >= 0 && g.host.r <= g.vw + 0.5;
+      if (g.mode !== 'open' || !g.host) bad.push(`${L}: the shelf is ${g.mode}`);
+      if (g.inArea) bad.push(`${L}: the zoom buttons are inside the scene area`);
+      if (g.host && g.btns.some(b => b.y < g.host.b - 0.5)) bad.push(`${L}: a zoom button starts at ${Math.min(...g.btns.map(b => b.y)).toFixed(0)}, above the card's bottom edge ${g.host.b.toFixed(0)}`);
+      if (g.host && !(btnsRect.x >= g.side.x - 0.5 && btnsRect.x + btnsRect.w <= g.side.r + 0.5 && btnsRect.x >= g.host.x - 0.5 && btnsRect.x + btnsRect.w <= g.host.r + 0.5)) bad.push(`${L}: the zoom buttons (x ${btnsRect.x.toFixed(0)}..${(btnsRect.x + btnsRect.w).toFixed(0)}) leave the column (x ${g.side.x.toFixed(0)}..${g.side.r.toFixed(0)}, card ${g.host.x.toFixed(0)}..${g.host.r.toFixed(0)})`);
+      if (g.rows.some(r => hit(r, btnsRect))) bad.push(`${L}: a zoom button is over a list row`);
+      if (!g.foot || g.foot.y < g.listB - 0.5 || g.foot.y + g.foot.h > g.host.b + 0.5 || g.foot.x < g.host.x || g.foot.x + g.foot.w > g.host.r) bad.push(`${L}: the footer is missing or is not inside the card under the list`);
+      if (!g.reachable.every(Boolean)) bad.push(`${L}: a zoom button is covered by something (hit test)`);
+      if (!vOk) bad.push(`${L}: the card or a zoom button leaves the window`);
+      if (g.names.some(n => n.clipped)) bad.push(`${L}: a chat name is cut off`);
+      if (w >= 761) {            // a column beside the scene: the scene ends where the column starts, so nothing of the scene lies under the buttons or the card
+        if (!(g.area.r <= g.side.x + 0.5 && g.canvas.r <= g.side.x + 0.5)) bad.push(`${L}: the scene (to ${g.area.r.toFixed(0)}) reaches into the column (from ${g.side.x.toFixed(0)})`);
+        if (labs.some(l => hit(l, btnsRect) || hit(l, g.host)) || figs.some(f => hit(f, btnsRect) || hit(f, g.host))) bad.push(`${L}: a label or an agent lies under the card or the buttons`);
+        if (g.view.w - g.area.w < 300) bad.push(`${L}: the column is only ${(g.view.w - g.area.w).toFixed(0)} px wide`);
+      }
+      rowsOut.push(`${w}: open, card ${g.host ? `${g.host.w.toFixed(0)}x${g.host.h.toFixed(0)}` : '-'}, buttons ${btnsRect.w.toFixed(0)}x${btnsRect.h.toFixed(0)} ${(btnsRect.y - (g.host ? g.host.b : 0)).toFixed(0)} px under it, ${g.rows.length} rows on show, scene ${g.area.w.toFixed(0)} wide`);
+      // folded: no card, the buttons float in the corner and the scene is as wide as the view
+      await P('p.setShelfFolded(true)'); await sleep(700);
+      const f = (await around()).g, fb = f.btns[f.btns.length - 1], F = `${w}px folded`, gapR = f.view.r - fb.r, gapB = f.view.b - fb.b, want16 = w <= 640 ? 8 : 16;
+      if (f.mode !== 'collapsed' || f.host) bad.push(`${F}: the shelf is ${f.mode}`);
+      if (Math.abs(gapR - want16) > 1.5 || Math.abs(gapB - want16) > 1.5) bad.push(`${F}: the zoom buttons are ${gapR.toFixed(1)} px from the right and ${gapB.toFixed(1)} px from the bottom of the view, not ${want16}`);
+      if (Math.abs(f.area.w - f.view.w) > 1 || Math.abs(f.canvas.w - f.view.w) > 1) bad.push(`${F}: the scene is ${f.area.w.toFixed(0)} px wide in a ${f.view.w.toFixed(0)} px view`);
+      if (f.inArea || !f.reachable.every(Boolean)) bad.push(`${F}: the zoom buttons are in the area or covered`);
+      rowsOut.push(`${w}: folded, buttons ${gapR.toFixed(0)}/${gapB.toFixed(0)} px from the right/bottom corner, scene ${f.area.w.toFixed(0)} of ${f.view.w.toFixed(0)}`);
+    }
+    await S.page.setViewport(1500, 900, 1);
+    // 3. nothing on the shelf at all: the same corner, the same full-width scene (a second page: no asleep and no closed chats)
+    const N = await scenario(3, { tag: 'shnone', query: '?time=12:00', fixture: { statuses: ['working'] } });
+    let none;
+    try {
+      await sleep(900);
+      none = await geoOf(e => N.page.evaluate(e));
+      const nb = none.btns[none.btns.length - 1];
+      if (none.mode !== 'none' || none.host) bad.push(`empty shelf: mode ${none.mode}`);
+      if (Math.abs(none.view.r - nb.r - 16) > 1.5 || Math.abs(none.view.b - nb.b - 16) > 1.5) bad.push(`empty shelf: the zoom buttons are not in the corner (${(none.view.r - nb.r).toFixed(1)}/${(none.view.b - nb.b).toFixed(1)})`);
+      if (Math.abs(none.area.w - none.view.w) > 1 || none.inArea || !none.reachable.every(Boolean)) bad.push('empty shelf: the scene is not as wide as the view, or the buttons are misplaced');
+    } finally { await N.done(); }
+    check('15-shelf-style', bad.length === 0 && S.page.errors.length === 0,
+      `${bad.length ? 'FAILED: ' + bad.slice(0, 6).join('; ') + '; ' : ''}card ${dark.card.backgroundColor}, ${dark.card.backdropFilter}, border ${dark.card.borderTopWidth} ${dark.card.borderTopColor}, radius ${dark.card.borderTopLeftRadius}, padding ${dark.card.paddingTop} ${dark.card.paddingLeft}; chip ${dark.chip.color} ${dark.chip.fontWeight} ${dark.chip.fontSize} ${dark.chip.textTransform} spacing ${dark.chip.letterSpacing}; row radius ${dark.row.borderTopLeftRadius}, name ${dark.name.fontSize}/${dark.name.fontWeight} ${dark.name.color}, hover ${hov}; round buttons ${dark.zoom.borderTopColor} on ${dark.zoom.backgroundColor}, hover border ${hovZ}; the same in a light system theme ${JSON.stringify(light.card) === JSON.stringify(dark.card) && JSON.stringify(light.name) === JSON.stringify(dark.name)}; ${rowsOut.join('; ')}; empty shelf: ${none ? none.mode : '?'}, scene ${none ? none.area.w.toFixed(0) : '?'} of ${none ? none.view.w.toFixed(0) : '?'}; console errors ${S.page.errors.length}`);
+  } finally { await S.done(); }
+}
+
+// ---- the shelf shows only the newest few chats (setting `shelf`, default 10, ?shelf=N overrides it for a visit). 10 live and 36 closed chats, so 37 are on the
+// shelf with the one that is asleep: with ?shelf=5 there are exactly 5 rows, the 5 newest by time, a footer that says so and a button that adds ten; with
+// ?shelf=50 there is a row for each of them and no footer; a choice made in the settings popover is stored and survives a reload, the address is not stored
+if (want('shelf-cap')) {
+  const S = await scenario(10, { tag: 'shcap', query: '?time=12:00&shelf=5', fixture: { closed: 36 } });
+  try {
+    const P = e => S.page.evaluate(px(e)), ev = e => S.page.evaluate(e);
+    const until = async (fn, ms = 20000) => { let r; for (const t0 = Date.now(); Date.now() - t0 < ms; await sleep(250)) { r = await fn().catch(() => null); if (r) return r; } return r; };
+    const live = S.agents.filter(a => a.kind === 'main'), asleep = live.filter(a => a.status === 'dormant');
+    const expected = [...S.fx.closed.map(c => ({ id: c.id, at: c.closedAt, name: c.name })), ...asleep.map(a => ({ id: a.id, at: a.updated || a.since, name: a.name }))].sort((p, q) => q.at - p.at || (p.id < q.id ? -1 : 1));
+    const TOTAL = expected.length;
+    const shelf = () => P('p.shelf()'), ids = sh => sh.rows.map(r => r.id).join();
+    const want_ = n => expected.slice(0, n).map(e => e.id).join();
+    const bad = [];
+    const short = x => { const t = JSON.stringify(x); return t.length > 110 ? t.slice(0, 110) + '…' : t; };
+    const eq = (what, got, want) => { if (JSON.stringify(got) !== JSON.stringify(want)) bad.push(`${what}: ${short(got)} instead of ${short(want)}`); };
+    await until(async () => (await shelf()).total === TOTAL);
+    const stored = () => ev(`JSON.parse(localStorage.getItem('ajan-ofisi.settings') || '{}')`);
+    const click = async css => { const r = await ev(`(() => { const b = document.querySelector(${JSON.stringify(css)}).getBoundingClientRect(); return { x: b.left + b.width / 2, y: b.top + b.height / 2 }; })()`); await S.page.mouse.click(r.x, r.y); await sleep(450); };
+    const word = n => `Showing the newest ${n} of ${TOTAL}`;
+
+    // 1. ?shelf=5
+    const a = await shelf();
+    eq('total', a.total, TOTAL); eq('rows with ?shelf=5', a.rows.length, 5); eq('the rows are the 5 newest by time', ids(a), want_(5)); eq('header count', a.count, '5 chats');
+    eq('footer text', a.foot.text, word(5)); eq('footer button', a.foot.button, 'Show 10 more'); eq('footer shown', a.foot.hidden, false);
+    const inCard = r => r.x >= a.rect.x - 0.5 && r.x + r.w <= a.rect.x + a.rect.w + 0.5 && r.y >= a.rect.y - 0.5 && r.y + r.h <= a.rect.y + a.rect.h + 0.5;
+    const lastRow = a.rows[a.rows.length - 1];
+    if (!inCard(a.foot.rect) || !inCard(a.foot.buttonRect)) bad.push('the footer or its button is outside the card');
+    if (a.foot.rect.y < lastRow.rect.y + lastRow.rect.h - 0.5) bad.push('the footer is over the list');
+    const figs = await P('p.figures()'), asleepId = asleep.map(x => x.id);
+    eq('the asleep chat (older than 5 closed ones) has no row', asleepId.filter(id => a.rows.some(r => r.id === id)).length, 0);
+    eq('and no room: it is not drawn in the scene', asleepId.filter(id => figs.includes(id)).length, 0);
+    eq('a ?shelf= value is not stored', (await stored()).shelf, undefined);
+    eq('the settings say 5 from the address', [(await P('p.settings')).shelf, (await P('p.settingsFrom')).shelf], [5, 'url']);
+
+    // 2. the footer button: ten more each time, the last click takes what is left, then no footer
+    const steps = [];
+    for (const [rowsWant, text, btn] of [[15, word(15), 'Show 10 more'], [25, word(25), 'Show 10 more'], [35, word(35), 'Show 2 more'], [TOTAL, null, null]]) {
+      await click('.sh-more-btn');
+      const b = await shelf();
+      steps.push(b.rows.length);
+      eq(`rows after the click that makes ${rowsWant}`, b.rows.length, rowsWant); eq('they are the newest in order', ids(b), want_(rowsWant)); eq('header count', b.count, `${rowsWant} chats`);
+      if (text) { eq('footer text', b.foot.text, text); eq('footer button', b.foot.button, btn); eq('footer shown', b.foot.hidden, false); } else eq('footer gone when nothing is left out', b.foot.hidden, true);
+    }
+    const afterAll = await shelf();
+    eq('the asleep chat has its row once everything is shown', asleepId.filter(id => afterAll.rows.some(r => r.id === id)).length, asleep.length);
+    // the tab of a folded shelf keeps the total
+    await click('.sh-hide');
+    const folded = await shelf();
+    eq('folded tab', folded.tab, `Shelf · ${TOTAL}`);
+    await click('.of-shelf-tab');
+
+    // 3. the settings popover: a choice is applied at once, takes back what the footer added, is stored, and the address is kept in step
+    const origin0 = await ev('performance.timeOrigin');
+    await click('#set-btn');
+    const opts = await ev(`[...document.querySelector('#set-shelf').options].map(o => o.value).join()`), label = await ev(`document.querySelector('label[for="set-shelf"]').textContent.trim()`);
+    eq('the select offers', opts, '5,10,20,50'); eq('its label', label, 'Chats on the shelf'); eq('the select shows the 5 of the address', await ev(`document.querySelector('#set-shelf').value`), '5');
+    await ev(`(() => { const s = document.querySelector('#set-shelf'); s.value = '20'; s.dispatchEvent(new Event('change', { bubbles: true })); })()`);
+    await sleep(500);
+    const b20 = await shelf(), st20 = await stored();
+    eq('rows after choosing 20 (no reload, the earlier "more" is gone)', b20.rows.length, 20); eq('they are the 20 newest', ids(b20), want_(20)); eq('footer', b20.foot.text, word(20));
+    eq('no reload', await ev('performance.timeOrigin'), origin0); eq('stored', st20.shelf, 20); eq('the address follows', await ev('location.search.includes("shelf=20")'), true);
+    const folded20 = await shelf(); eq('the tab still has the total', folded20.total, TOTAL);
+
+    // 4. ?shelf=50: everything, no footer; the stored 20 is not touched; a plain reload gives the stored 20 back
+    const base = `http://127.0.0.1:${S.srv.port}/`, load = async q => { await S.page.goto(base + q + '#ofis', 800); await waitReady(S.page, live.length - asleep.length); await until(async () => (await shelf()).total === TOTAL); await sleep(300); return shelf(); };
+    const all = await load(`?time=12:00&shelf=50&proj=${proj}&season=${season}`);
+    eq('rows with ?shelf=50', all.rows.length, TOTAL); eq('no footer', all.foot.hidden, true); eq('in order', ids(all), want_(TOTAL)); eq('count', all.count, `${TOTAL} chats`);
+    const keptStored = (await stored()).shelf;
+    eq('still stored 20 after a visit with ?shelf=50', keptStored, 20);
+    const again = await load(`?time=12:00&proj=${proj}&season=${season}`);
+    eq('rows after a reload with the stored 20', again.rows.length, 20); eq('footer after the reload', again.foot.text, word(20));
+    eq('settings say 20 from the store', [(await P('p.settings')).shelf, (await P('p.settingsFrom')).shelf], [20, 'stored']);
+    // 5. a value out of range in the address is ignored (the stored 20 stays)
+    const odd = await load(`?time=12:00&shelf=2&proj=${proj}&season=${season}`);
+    eq('?shelf=2 is ignored', odd.rows.length, 20);
+    check('15-shelf-cap', bad.length === 0 && S.page.errors.length === 0,
+      `${bad.length ? 'FAILED: ' + bad.slice(0, 6).join('; ') + '; ' : ''}${live.length} live (${asleep.length} asleep) + ${S.fx.closed.length} closed chats = ${TOTAL} on the shelf; ?shelf=5: ${a.rows.length} rows, the 5 newest by time ${ids(a) === want_(5)}, header "${a.count}", footer "${a.foot.text}" with the button "${a.foot.button}", not stored; the asleep chat (rank ${expected.findIndex(e => asleepId.includes(e.id)) + 1}) has no row and no room; the button adds ten: rows ${steps.join(' → ')}, no footer at the end; folded tab "${folded.tab}"; popover: options ${opts}, 20 chosen → ${b20.rows.length} rows without a reload, stored ${st20.shelf}; ?shelf=50 → ${all.rows.length} rows, footer hidden ${all.foot.hidden}, stored value still ${keptStored}; plain reload → ${again.rows.length} rows; ?shelf=2 ignored → ${odd.rows.length}; console errors ${S.page.errors.length}`);
+  } finally { await S.done(); }
+}
+
 // ---- Goal 5: the scan of closed sessions has a count cap and a time budget, reads only tails, and never reads an unchanged file again
 if (want('scan')) {
   const dir = join(tmpdir(), `cco-qa-${process.pid}-scan`);
@@ -649,7 +852,7 @@ if (want('scan')) {
 // stayed displayed under the other tabs (its display rule was heavier than the hidden attribute) the Dashboard was a blue sky and the Cost
 // tab had it behind its text. Each tab is opened with a real click; what lies on top of the view, and what is displayed of the other views, is read back
 if (want('views')) {
-  const S = await scenario(10, { tag: 'views', query: '?time=12:00', fixture: { closed: 12 } });
+  const S = await scenario(10, { tag: 'views', query: '?time=12:00&shelf=200', fixture: { closed: 12 } });
   try {
     const ev = e => S.page.evaluate(e);
     const probe = view => ev(`(() => {
@@ -679,7 +882,7 @@ if (want('views')) {
     const back = await ev(px('p ? { figures: p.figures().length, shelf: p.shelf().rows.length } : null'));
     // the shelf's first state follows the window, not the size of a view that is hidden while it is built: a page that opens on the Dashboard and
     // goes to the Office later shows the shelf in a wide window, and folded in a narrow one
-    const url = `http://127.0.0.1:${S.srv.port}/?time=12:00&proj=${proj}&season=${season}`;
+    const url = `http://127.0.0.1:${S.srv.port}/?time=12:00&shelf=200&proj=${proj}&season=${season}`;
     const firstShelf = async (w, hash) => {
       await S.page.setViewport(w, 900, 1);
       await ev(`localStorage.removeItem('ajan-ofisi.shelf')`);
@@ -1009,7 +1212,7 @@ if (want('settings')) {
   try {
     const ev = e => S.page.evaluate(e);
     const base = `http://127.0.0.1:${S.srv.port}/`;
-    const st = () => ev(`(() => { const p = document.querySelector('#view-ofis').__pixel; const n = document.querySelector('#set-note'); return JSON.stringify({ settings: p.settings, from: p.settingsFrom, season: p.season, weather: p.weather.weather, wcount: p.weather.count, clock: p.time.clock, fixed: p.time.fixed, proj: p.proj, stored: localStorage.getItem('ajan-ofisi.settings'), url: location.search, origin: performance.timeOrigin, variants: p.seasonal && p.seasonal.variants, hash: p.stillHash(), note: n.hidden ? '' : n.textContent, open: !document.querySelector('#set-pop').hidden }); })()`).then(JSON.parse);
+    const st = () => ev(`(() => { const p = document.querySelector('#view-ofis').__pixel; const n = document.querySelector('#set-note'); return JSON.stringify({ settings: p.settings, from: p.settingsFrom, season: p.season, weather: p.weather.weather, wcount: p.weather.count, clock: p.time.clock, fixed: p.time.fixed, proj: p.proj, stored: localStorage.getItem('ajan-ofisi.settings'), url: location.search, origin: performance.timeOrigin, variants: p.seasonal && p.seasonal.variants, hash: p.stillHash(), note: n.hidden ? '' : n.textContent, open: !document.querySelector('#set-pop').hidden, shelfRows: p.shelf().rows.length, shelfSel: document.querySelector('#set-shelf').value, shelfOpts: [...document.querySelector('#set-shelf').options].map(o => o.value).join() }); })()`).then(JSON.parse);
     const sel = (id, v) => ev(`(() => { const s = document.querySelector('#${id}'); s.value = ${JSON.stringify(v)}; s.dispatchEvent(new Event('change', { bubbles: true })); return s.value; })()`);
     const range = v => ev(`(() => { const s = document.querySelector('#set-time'); s.value = '${v}'; s.dispatchEvent(new Event('input', { bubbles: true })); })()`);
     const click = async css => {
@@ -1031,18 +1234,18 @@ if (want('settings')) {
     await sel('set-hemisphere', 'south'); await sleep(300); const s5 = await st();
     const camBtn = await click('#set-pop .proj-seg button[data-proj="front"]'); const s6 = await settle(s => s.proj === 'front');
     await click('#set-pop .proj-seg button[data-proj="iso"]'); const s6b = await settle(s => s.proj === 'iso');
-    await sel('set-season', 'autumn'); await sel('set-weather', 'snow'); await range(390); await sleep(500); const s7 = await st();
+    await sel('set-season', 'autumn'); await sel('set-weather', 'snow'); await range(390); await sel('set-shelf', '20'); await sleep(500); const s7 = await st();
     const s8 = await load('');                                                                // reload, no parameters: what was chosen is still there
-    const s9 = await load('?season=spring&weather=fog&time=22:00&hemisphere=north');          // URL overrides win over what is stored, and are not stored
+    const s9 = await load('?season=spring&weather=fog&time=22:00&hemisphere=north&shelf=7');   // URL overrides win over what is stored, and are not stored
     await click('#set-btn'); await sleep(250); const s9n = await st();
     const s10 = await load('');                                                               // and the stored choice is back without them
     await load('?season=spring');
     await sel('set-season', 'winter'); await sleep(400); const s11 = await st();               // a change keeps an explicit parameter in step and is remembered
     const same = (a, b) => JSON.stringify(a) === JSON.stringify(b);
-    const E = { time: '06:30', season: 'autumn', weather: 'snow', hemisphere: 'south' };
+    const E = { time: '06:30', season: 'autumn', weather: 'snow', hemisphere: 'south', shelf: 20 };
     const noReload = [s2, s3, s4, s5].every(x => x.origin === s1.origin);
     const C = {
-      defaults: s0.settings.time === 'auto' && s0.settings.season === 'auto' && s0.settings.weather === 'off' && s0.settings.hemisphere === 'north' && Object.values(s0.from).every(v => v === 'default') && s0.weather === null && s0.stored === null && !s0.open,
+      defaults: s0.settings.time === 'auto' && s0.settings.season === 'auto' && s0.settings.weather === 'off' && s0.settings.hemisphere === 'north' && s0.settings.shelf === 10 && s1.shelfSel === '10' && s1.shelfOpts === '5,10,20,50' && Object.values(s0.from).every(v => v === 'default') && s0.weather === null && s0.stored === null && !s0.open,
       opened: opened && s1.open,
       season: s2.season === 'winter' && s2.settings.season === 'winter' && s2.from.season === 'user' && /winter/.test(s2.stored) && s2.variants > 40 && s2.hash !== s1.hash,
       weather: s3.weather === 'rain' && s3.wcount >= 100 && s3.wcount <= 120,
@@ -1050,18 +1253,18 @@ if (want('settings')) {
       hemisphere: s5.settings.hemisphere === 'south' && s5.clock === '22:00',
       noReload: noReload && s5.url === `?proj=${proj}`,
       camera: camBtn && s6.proj === 'front' && s6b.proj === 'iso',
-      stored: same(s7.settings, E) && same(JSON.parse(s7.stored), E),
+      stored: same(s7.settings, E) && same(JSON.parse(s7.stored), E) && s7.shelfSel === '20' && s7.settings.shelf === 20 && s7.from.shelf === 'user',
       reload: same(s8.settings, E) && Object.values(s8.from).every(v => v === 'stored') && s8.season === 'autumn' && s8.weather === 'snow' && s8.wcount > 0 && s8.clock === '06:30' && s8.fixed && !s8.open,
-      url: same(s9.settings, { time: '22:00', season: 'spring', weather: 'fog', hemisphere: 'north' }) && Object.values(s9.from).every(v => v === 'url') && s9.season === 'spring' && s9.weather === 'fog' && s9.clock === '22:00' && same(JSON.parse(s9.stored), E) && /\?\u2060?season=spring/.test(s9n.note),
+      url: same(s9.settings, { time: '22:00', season: 'spring', weather: 'fog', hemisphere: 'north', shelf: 7 }) && s9n.shelfSel === '7' && s9n.shelfOpts === '5,7,10,20,50' && /\?\u2060?shelf=7/.test(s9n.note) && Object.values(s9.from).every(v => v === 'url') && s9.season === 'spring' && s9.weather === 'fog' && s9.clock === '22:00' && same(JSON.parse(s9.stored), E) && /\?\u2060?season=spring/.test(s9n.note),
       back: same(s10.settings, E) && s10.season === 'autumn',
       keepUrl: /season=winter/.test(s11.url) && s11.season === 'winter' && JSON.parse(s11.stored).season === 'winter',
       noErrors: S.page.errors.length === 0,
     };
     const bad = Object.keys(C).filter(k => !C[k]), ok = bad.length === 0;
     check('14-settings', ok,
-      `${ok ? '' : 'FAILED PARTS: ' + bad.join(', ') + '; '}fresh profile: defaults ${JSON.stringify(s0.settings)} (all from "default", weather off, nothing stored); popover opened by a click: ${s1.open}; no reload for any change (page origin unchanged ${noReload}): season select → ${s2.season} (${s2.variants} variants drawn, picture changed ${s2.hash !== s1.hash}, stored ${/winter/.test(s2.stored)}), weather select → ${s3.weather} (${s3.wcount} particles), time Fixed + slider → ${s4.clock} (fixed ${s4.fixed}), hemisphere → ${s5.settings.hemisphere}, camera buttons in the popover → ${s6.proj} then ${s6b.proj}; ` +
+      `${ok ? '' : 'FAILED PARTS: ' + bad.join(', ') + '; '}fresh profile: defaults ${JSON.stringify(s0.settings)} (all from "default", weather off, nothing stored); popover opened by a click: ${s1.open}; no reload for any change (page origin unchanged ${noReload}): season select → ${s2.season} (${s2.variants} variants drawn, picture changed ${s2.hash !== s1.hash}, stored ${/winter/.test(s2.stored)}), weather select → ${s3.weather} (${s3.wcount} particles), time Fixed + slider → ${s4.clock} (fixed ${s4.fixed}), hemisphere → ${s5.settings.hemisphere}, camera buttons in the popover → ${s6.proj} then ${s6b.proj}, shelf size select (options ${s1.shelfOpts}, default ${s1.shelfSel}) → ${s7.settings.shelf} (stored, from "${s7.from.shelf}"); ` +
       `after the last changes stored ${s7.stored}; reload with no parameters: ${JSON.stringify(s8.settings)} (all from "${[...new Set(Object.values(s8.from))]}", clock ${s8.clock}, ${s8.wcount} particles); ` +
-      `URL ?season=spring&weather=fog&time=22:00&hemisphere=north: ${JSON.stringify(s9.settings)} (from "${[...new Set(Object.values(s9.from))]}", store unchanged ${same(JSON.parse(s9.stored), E)}, popover note "${s9n.note.slice(0, 70)}"); plain reload again: ${JSON.stringify(s10.settings)}; changing the season with ?season=spring in the URL: URL now "${s11.url}", stored season ${JSON.parse(s11.stored).season}; console errors ${S.page.errors.length}`);
+      `URL ?season=spring&weather=fog&time=22:00&hemisphere=north&shelf=7: ${JSON.stringify(s9.settings)} (from "${[...new Set(Object.values(s9.from))]}", store unchanged ${same(JSON.parse(s9.stored), E)}, popover note "${s9n.note.slice(0, 70)}", shelf select ${s9n.shelfSel} among ${s9n.shelfOpts}); plain reload again: ${JSON.stringify(s10.settings)}; changing the season with ?season=spring in the URL: URL now "${s11.url}", stored season ${JSON.parse(s11.stored).season}; console errors ${S.page.errors.length}`);
   } finally { await S.done(); }
 }
 

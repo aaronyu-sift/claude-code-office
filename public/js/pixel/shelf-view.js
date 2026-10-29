@@ -1,28 +1,34 @@
-// The shelf lane of the Office view: a column beside the scene (never over it) with one row per chat that has no room (shelf.js decides which):
-// a small sleeping or leaning pixel figure, the full chat name, the project and "closed 12m ago". It scrolls on its own, a click opens the details
-// panel, and it can be folded away (a tab at the edge of the scene brings it back). Rows are kept by id, so a refresh keeps the scroll position
-// and the focus; the times are refreshed every 20 s while the view is on screen, and nothing runs otherwise.
+// The shelf of the Office view: a card in the right-hand column (`.of-side`, beside the scene and never over it, with the zoom buttons right under it)
+// with one row per chat that has no room (shelf.js decides which): a small sleeping or leaning pixel figure, the full chat name, the project and
+// "closed 12m ago". It scrolls on its own, a click opens the details panel (`open(id, rowElement)`), and it can be folded away (a tab at the edge of the
+// scene brings it back). Only the newest few chats get a row (the setting `shelf`, capEntries in shelf.js); a footer in the card says how many are left out
+// and adds ten more rows to the view for this visit. Rows are kept by id, so a refresh keeps the scroll position and the focus; the times are refreshed
+// every 20 s while the view is on screen, and nothing runs otherwise.
 import { workerId, APPEARANCES } from './ids.js';
 import { hashStr } from './layout.js';
-import { poseOf } from './shelf.js';
+import { poseOf, capEntries, DEFAULT_CAP } from './shelf.js';
 
 const KEY = 'ajan-ofisi.shelf';          // 'open' or 'closed': the visitor's last choice (without one, the lane starts folded in a window narrower than NARROW)
 const REFRESH_MS = 20e3;
 const NARROW = 760;
+const MORE = 10;                         // the footer button adds this many rows
 
 export function createShelfView({ root, area, msg, fmtShort, now, open, storage = null }) {
   const el = (tag, props = {}, ...kids) => { const n = Object.assign(document.createElement(tag), props); n.append(...kids); return n; };
   const pref = () => { try { return storage && storage.getItem(KEY); } catch { return null; } };
   let collapsed = pref() ? pref() === 'closed' : window.innerWidth < NARROW;         // the window, as the media query below: the view itself can be hidden (width 0) while it is built
-  let atlas = null, atlasSeq = 0, entries = [], visible = false, timer = 0;
+  let atlas = null, atlasSeq = 0, entries = [], shown = [], max = DEFAULT_CAP, extra = 0, visible = false, timer = 0;          // entries: every chat, shown: the newest of them that have a row
   const rows = new Map();                                    // id -> { li, fig, name, meta, when, sw, figKey }
 
   const count = el('span', { className: 'sh-count' });
   const list = el('ol', { className: 'sh-list' });
   const hideBtn = el('button', { type: 'button', className: 'sh-hide', textContent: '›', onclick: () => setCollapsed(true) });
-  const host = el('aside', { className: 'of-shelf', hidden: true }, el('header', { className: 'sh-head' }, el('h3', { className: 'sh-title' }), count, hideBtn), list);
+  const moreInfo = el('span', { className: 'sh-more-txt' });
+  const moreBtn = el('button', { type: 'button', className: 'sh-more-btn', onclick: () => { extra += MORE; render(); } });           // `extra` is for this visit only
+  const foot = el('footer', { className: 'sh-more', hidden: true }, moreInfo, moreBtn);
+  const host = el('aside', { className: 'of-shelf', hidden: true }, el('header', { className: 'sh-head' }, el('h3', { className: 'sh-title' }), count, hideBtn), list, foot);
   const tab = el('button', { type: 'button', className: 'of-shelf-tab', hidden: true, onclick: () => setCollapsed(false) });
-  root.append(host);
+  (root.querySelector('.of-side') || root).prepend(host);                                 // above the zoom buttons
   area.append(tab);
 
   function setCollapsed(on) {
@@ -34,12 +40,14 @@ export function createShelfView({ root, area, msg, fmtShort, now, open, storage 
   const whenText = e => msg(e.kind === 'closed' ? 'shelf.closed' : 'shelf.idle', { t: fmtShort(Math.max(0, now() - e.at)) });
 
   function paint() {
-    const n = entries.length;
+    const n = entries.length, left = n - shown.length;
     host.hidden = !n || collapsed;
     tab.hidden = !n || !collapsed;
     root.dataset.shelf = !n ? 'none' : collapsed ? 'collapsed' : 'open';
     host.querySelector('.sh-title').textContent = msg('shelf.title');
-    count.textContent = countText(n);
+    count.textContent = countText(shown.length);                                    // the rows on show; the tab keeps the total
+    foot.hidden = !left;
+    if (left) { moreInfo.textContent = msg('shelf.cap', { shown: shown.length, total: n }); moreBtn.textContent = msg('shelf.more', { n: Math.min(MORE, left) }); }
     hideBtn.title = msg('shelf.hide');
     hideBtn.setAttribute('aria-label', msg('shelf.hide'));
     host.setAttribute('aria-label', msg('shelf.title'));
@@ -64,21 +72,21 @@ export function createShelfView({ root, area, msg, fmtShort, now, open, storage 
   function makeRow(e) {
     const fig = el('canvas', { className: 'sh-fig' });
     const name = el('span', { className: 'sh-name' }), sw = el('i', { className: 'sh-sw' }), proj = el('span', { className: 'sh-proj' }), when = el('span', { className: 'sh-when' });
-    const btn = el('button', { type: 'button', className: 'sh-item', onclick: () => open(e.id) }, fig, el('span', { className: 'sh-txt' }, name, el('span', { className: 'sh-meta' }, sw, proj, when)));
+    const btn = el('button', { type: 'button', className: 'sh-item' }, fig, el('span', { className: 'sh-txt' }, name, el('span', { className: 'sh-meta' }, el('span', { className: 'sh-pj' }, sw, proj), when)));
     const li = el('li', {}, btn);
     const row = { li, btn, fig, name, proj, when, sw, figKey: '' };
     rows.set(e.id, row);
     return row;
   }
 
-  function update(next) {
-    entries = next;
-    const ids = new Set(next.map(e => e.id));
+  function render() {
+    shown = capEntries(entries, max + extra).shown;
+    const ids = new Set(shown.map(e => e.id));
     for (const [id, row] of [...rows]) if (!ids.has(id)) { row.li.remove(); rows.delete(id); }
-    next.forEach((e, i) => {
+    shown.forEach((e, i) => {
       const row = rows.get(e.id) || makeRow(e);
       row.li.dataset.id = e.id; row.li.dataset.kind = e.kind;
-      row.btn.onclick = () => open(e.id);
+      row.btn.onclick = () => open(e.id, row.btn);                                     // the row's button too: the details can anchor to it
       if (row.name.textContent !== e.name) row.name.textContent = e.name;
       if (row.proj.textContent !== e.project) row.proj.textContent = e.project;
       row.sw.style.background = e.color || '#7d8597';
@@ -103,16 +111,21 @@ export function createShelfView({ root, area, msg, fmtShort, now, open, storage 
   }
 
   return {
-    update(next) { update(next); arm(); },
+    update(next) { entries = next; render(); arm(); },
+    // how many chats get a row at first (the setting `shelf`); a change takes back what the footer button added
+    setMax(n) { if (n === max) return; max = n; extra = 0; render(); },
     setAtlas(a) { atlas = a; atlasSeq++; for (const e of entries) { const row = rows.get(e.id); if (row) drawFigure(row, e); } },
     setVisible(on) { visible = on; if (on) refreshTimes(); arm(); },
     get collapsed() { return collapsed; },
     setCollapsed,
-    // QA: what the lane shows (read-only)
+    // QA: what the shelf shows (read-only)
     read() {
+      const rectOf = e => { const b = e.getBoundingClientRect(); return { x: b.left, y: b.top, w: b.width, h: b.height }; };
       const r = host.getBoundingClientRect(), lr = list.getBoundingClientRect();
       return {
         mode: root.dataset.shelf, hidden: host.hidden, tabHidden: tab.hidden, tab: tab.textContent, title: host.querySelector('.sh-title').textContent, count: count.textContent,
+        total: entries.length, shown: shown.length, max, extra,
+        foot: { hidden: foot.hidden, text: moreInfo.textContent, button: moreBtn.textContent, rect: rectOf(foot), buttonRect: rectOf(moreBtn) },
         rect: { x: r.left, y: r.top, w: r.width, h: r.height }, listRect: { x: lr.left, y: lr.top, w: lr.width, h: lr.height },
         scroll: { top: list.scrollTop, height: list.scrollHeight, client: list.clientHeight, overflowY: getComputedStyle(list).overflowY },
         rows: [...list.children].map(li => {
