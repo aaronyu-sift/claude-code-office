@@ -73,12 +73,20 @@ export function createOfisUi({ root, area, ctx, camera, size, charOf, setSelecte
   const storage = (() => { try { return window.localStorage; } catch { return null; } })();
   const P = new THREE.Vector3(), hip = new THREE.Vector3(), scale = new THREE.Vector3();
 
-  // the box of an agent on the screen: the same box as api.pickFigure tests (the hips plus or minus 0.34 across, from half a metre below to 1.1 above), projected
+  // The hip of an agent in the world. A person of the model pack keeps its joints as plain objects that are not in the scene (no parent), so its hip is the character's root
+  // plus the hip height that the scene keeps in `pivotW`.
+  function hipOf(c, out) {
+    if (c.hip.parent) return c.hip.getWorldPosition(out);
+    c.root.getWorldPosition(out);
+    out.y += (typeof c.pivotW === 'number' ? c.pivotW : c.hip.position.y) * c.root.getWorldScale(scale).y;
+    return out;
+  }
+  // the box of an agent on the screen: the box api.pickFigure tests (the hips plus or minus 0.34 across, from half a metre below to 1.1 above), projected
   function agentBox(id) {
     const c = charOf(id);
     if (!c || !c.root.parent || c.root.visible === false) return null;
     const [vw, vh] = size();
-    c.hip.getWorldPosition(hip);
+    hipOf(c, hip);
     const s = c.root.getWorldScale(scale).y;
     let x0 = Infinity, x1 = -Infinity, y0 = Infinity, y1 = -Infinity;
     for (const dx of [-1, 1]) for (const dz of [-1, 1]) for (const y of [-0.5, 1.1]) {

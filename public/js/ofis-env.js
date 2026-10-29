@@ -8,6 +8,13 @@
 // Preview another time of day by adding ?hour=21 to the page URL (before the #); ?env=0 leaves the surroundings out.
 import * as THREE from 'three';
 import { RoundedBoxGeometry } from 'three/addons/geometries/RoundedBoxGeometry.js';
+import * as AS from './ofis-assets.js';
+import { makePalette, PALETTES } from './ofis-rig.js';
+
+// Trees, bushes and rocks come from the Nature Kit (ofis-assets.js loaded it before this module runs), recoloured to this scene's greens
+// and browns and baked into vertex colours; a model that did not load leaves the procedural tree, bush or rock in its place.
+const PK = AS.packs.models;
+const TREE_PAL = makePalette(PALETTES.tree), ROCK_PAL = makePalette(PALETTES.rock);
 
 // ------------------------------------------------------------ levels (1 unit ≈ 1 meter; the office floor is at y = 0)
 
@@ -198,6 +205,31 @@ class Mesher {
       this.reserveI(cnt);
       for (let i = 0; i < cnt; i++) this.I[this.n++] = base + i;
     }
+  }
+  // geometry with its own vertex colours (a baked pack model), tinted by `k` (multiply)
+  addVC(geo, m, k = null) {
+    const pos = geo.attributes.position.array, nor = geo.attributes.normal.array, col = geo.attributes.color.array;
+    const cnt = geo.attributes.position.count, base = this.v, cs = this.cs;
+    this.reserve(cnt);
+    _n.getNormalMatrix(m);
+    const e = m.elements, ne = _n.elements, P = this.P, N = this.N, Cc = this.C, U = this.U;
+    for (let i = 0; i < cnt; i++) {
+      const s = i * 3, o = (base + i) * 3, q = (base + i) * cs;
+      const x = pos[s], y = pos[s + 1], z = pos[s + 2], a = nor[s], b = nor[s + 1], c = nor[s + 2];
+      P[o] = e[0] * x + e[4] * y + e[8] * z + e[12];
+      P[o + 1] = e[1] * x + e[5] * y + e[9] * z + e[13];
+      P[o + 2] = e[2] * x + e[6] * y + e[10] * z + e[14];
+      const nx = ne[0] * a + ne[3] * b + ne[6] * c, ny = ne[1] * a + ne[4] * b + ne[7] * c, nz = ne[2] * a + ne[5] * b + ne[8] * c;
+      const l = 1 / (Math.sqrt(nx * nx + ny * ny + nz * nz) || 1);
+      N[o] = nx * l; N[o + 1] = ny * l; N[o + 2] = nz * l;
+      Cc[q] = col[s] * (k ? k.r : 1); Cc[q + 1] = col[s + 1] * (k ? k.g : 1); Cc[q + 2] = col[s + 2] * (k ? k.b : 1);
+      if (cs === 4) Cc[q + 3] = 1;
+      if (U) { U[(base + i) * 2] = 0; U[(base + i) * 2 + 1] = 0; }
+    }
+    this.v += cnt;
+    const ix = geo.index.array;
+    this.reserveI(ix.length);
+    for (let i = 0; i < ix.length; i++) this.I[this.n++] = base + ix[i];
   }
   // rotation order: first rz, then rx (tilt), then ry (heading)
   put(geo, x, y, z, sx, sy, sz, color, ry = 0, rx = 0, rz = 0) {
@@ -894,6 +926,14 @@ function mountain(S, m) {
 
 function rock(c, x, z, s, seed, y = GY) {
   const r = hash2(seed, 3, 70);
+  const pk = PK['rock' + (1 + (((seed % 4) + 4) % 4))], b = pk && AS.bake(pk, ROCK_PAL, 'r');
+  if (b) {
+    const sc = s / Math.max(b.size.x, b.size.z);
+    _q.setFromEuler(_e.set((r - 0.5) * 0.15, r * 6, 0, 'YXZ'));
+    _m.compose(_p.set(x, y - 0.03, z), _q, _s.set(sc, sc * (0.7 + r * 0.3), sc));
+    c.S.addVC(b.geo, _m);
+    return;
+  }
   c.S.put(G.rock, x, y + s * 0.18, z, s, s * (0.55 + r * 0.25), s * (0.8 + r * 0.3), ROCKS[((seed % 3) + 3) % 3], r * 6, (r - 0.5) * 0.3);
 }
 
@@ -1098,7 +1138,23 @@ function scatterTrees(c) {
   }
 }
 
+// Pack variants of a kind of tree (two models each, picked per tree by its own random number); [] when none of them loaded
+function packTrees(keys, H, wides) {
+  return keys.flatMap((key, i) => {
+    const b = PK[key] && AS.bake(PK[key], TREE_PAL, 't');
+    if (!b) return [];
+    const g = b.geo.clone(), sc = H / b.size.y;
+    g.scale(sc * wides[i], sc, sc * wides[i]);
+    return [g];
+  });
+}
+
 function treeGeometries() {
+  const pack = {
+    round: packTrees(['treeA', 'treeA2'], TREE_H.round, [1.45, 1.35]),
+    pine: packTrees(['treeB', 'treeB2'], TREE_H.pine, [1.4, 1.3]),
+    bush: packTrees(['bushA', 'bushA2'], TREE_H.bush * 1.1, [0.9, 1.0]),
+  };
   const round = new Mesher();
   round.put(G.cyl, 0, 0.5, 0, 0.2, 1.0, 0.2, '#8a5d3b');
   round.put(G.ico, 0, 1.45, 0, 1.5, 1.35, 1.5, '#5daa55', 0.3);
@@ -1113,7 +1169,7 @@ function treeGeometries() {
   bush.put(G.ico, 0, 0.32, 0, 1.0, 0.72, 1.0, '#5aa653', 0.4);
   bush.put(G.ico, 0.34, 0.27, 0.12, 0.66, 0.54, 0.66, '#68b35c', 1.3);
   bush.put(G.ico, -0.3, 0.25, -0.1, 0.6, 0.5, 0.6, '#4f9a4b', 2.2);
-  return { round: round.build(), pine: pine.build(), bush: bush.build() };
+  return { round: pack.round.length ? pack.round : [round.build()], pine: pack.pine.length ? pack.pine : [pine.build()], bush: pack.bush.length ? pack.bush : [bush.build()] };
 }
 
 // ------------------------------------------------------------ water
@@ -1314,13 +1370,16 @@ export function createEnv({ scene, camera, lights = null, lightDir = null, softw
     if (c.LT.v) mesh(c.LT.build(), MAT.lit);
     mesh(c.W.build(), MAT.water);
     for (const type of ['round', 'pine', 'bush']) {
-      const im = instanced(TREE[type], MAT.stat, c.trees[type], (it, m, col) => {
-        _q.setFromEuler(_e.set(0, it.ry, 0));
-        m.compose(_p.set(it.x, GY - 0.02, it.z), _q, _s.set(it.s, it.s * it.sy, it.s));
-        const k = 0.9 + it.t * 0.2;
-        col.setRGB(k * (1 + (it.w - 0.5) * 0.12), k, k * (1 - (it.w - 0.5) * 0.16));
+      TREE[type].forEach((geo, vi) => {
+        const list = TREE[type].length === 1 ? c.trees[type] : c.trees[type].filter(it => ((it.w * 7.3) % 1 > 0.5 ? 1 : 0) === vi);
+        const im = instanced(geo, MAT.stat, list, (it, m, col) => {
+          _q.setFromEuler(_e.set(0, it.ry, 0));
+          m.compose(_p.set(it.x, GY - 0.02, it.z), _q, _s.set(it.s, it.s * it.sy, it.s));
+          const k = 0.9 + it.t * 0.2;
+          col.setRGB(k * (1 + (it.w - 0.5) * 0.12), k, k * (1 - (it.w - 0.5) * 0.16));
+        });
+        if (im) im.receiveShadow = true;
       });
-      if (im) im.receiveShadow = true;
     }
     instanced(G.flat, MAT.blob, c.blobs, (it, m) => {
       _q.setFromEuler(_e.set(0, it.ry, 0));
@@ -1502,7 +1561,7 @@ export function createEnv({ scene, camera, lights = null, lightDir = null, softw
       scene.remove(root);
       Object.values(MAT).forEach(m => m.dispose());
       Object.values(TEX).forEach(t => t.dispose());
-      Object.values(TREE).forEach(g => g.dispose());
+      Object.values(TREE).forEach(a => a.forEach(g => g.dispose()));
     },
   };
 }

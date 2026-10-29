@@ -610,7 +610,7 @@ if (want('shelf')) {
   } finally { await S.done(); }
 }
 
-// ---- the shelf as a card of the Setup Atlas style, with the zoom buttons under it in the same right-hand column. The computed styles of the card, its chip, a
+// ---- the shelf as a card of the Setup Atlas style, with the zoom buttons fixed in the bottom-right corner under it, open or folded. The computed styles of the card, its chip, a
 // row and the round buttons are read back and compared with the tokens of the Atlas page; the geometry is measured in every window width from 360 to 2560 px
 // (the buttons below the card, inside the column, over no row and over no label or figure of the scene) and in the two states with no card (folded, and
 // nothing on the shelf), where the buttons float in the bottom-right corner and the scene spans the whole view.
@@ -675,7 +675,7 @@ if (want('shelf-style')) {
     eq('row hover background', hov, 'rgba(143, 176, 255, 0.12)'); eq('zoom button hover border', hovZ, 'rgb(143, 176, 255)');
     await S.page.mouse.move(2, 2);
 
-    // 2. geometry in every width: the shelf open (the zoom buttons under the card, in the column), then folded (the buttons in the corner)
+    // 2. geometry in every width: the shelf open (the zoom buttons in the corner under the card, in the column), then folded (the buttons in the same corner)
     const rowsOut = [];
     const around = async () => {
       const g = await geoOf(ev), x = Math.min(...g.btns.map(b => b.x)), y = Math.min(...g.btns.map(b => b.y));
@@ -692,6 +692,8 @@ if (want('shelf-style')) {
       const vOk = g.btns.every(b => b.x >= 0 && b.r <= g.vw + 0.5 && b.y >= 0 && b.b <= g.vh + 0.5) && g.host && g.host.x >= 0 && g.host.r <= g.vw + 0.5;
       if (g.mode !== 'open' || !g.host) bad.push(`${L}: the shelf is ${g.mode}`);
       if (g.inArea) bad.push(`${L}: the zoom buttons are inside the scene area`);
+      { const last = g.btns[g.btns.length - 1], want16o = w <= 640 ? 8 : 16, gr = g.view.r - last.r, gb = g.view.b - last.b;      // fixed in the bottom-right corner, open or folded: the card ends above them and never pulls them up
+        if (Math.abs(gr - want16o) > 1.5 || Math.abs(gb - want16o) > 1.5) bad.push(`${L}: with the card open the zoom buttons are ${gr.toFixed(1)} px from the right and ${gb.toFixed(1)} px from the bottom of the view, not ${want16o} (they must stay in the corner)`); }
       if (g.host && g.btns.some(b => b.y < g.host.b - 0.5)) bad.push(`${L}: a zoom button starts at ${Math.min(...g.btns.map(b => b.y)).toFixed(0)}, above the card's bottom edge ${g.host.b.toFixed(0)}`);
       if (g.host && !(btnsRect.x >= g.side.x - 0.5 && btnsRect.x + btnsRect.w <= g.side.r + 0.5 && btnsRect.x >= g.host.x - 0.5 && btnsRect.x + btnsRect.w <= g.host.r + 0.5)) bad.push(`${L}: the zoom buttons (x ${btnsRect.x.toFixed(0)}..${(btnsRect.x + btnsRect.w).toFixed(0)}) leave the column (x ${g.side.x.toFixed(0)}..${g.side.r.toFixed(0)}, card ${g.host.x.toFixed(0)}..${g.host.r.toFixed(0)})`);
       if (g.rows.some(r => hit(r, btnsRect))) bad.push(`${L}: a zoom button is over a list row`);
@@ -719,6 +721,14 @@ if (want('shelf-style')) {
       if (Math.abs(f.area.w - f.view.w) > 1 || Math.abs(f.canvas.w - f.view.w) > 1) bad.push(`${F}: the scene is ${f.area.w.toFixed(0)} px wide in a ${f.view.w.toFixed(0)} px view`);
       if (f.inArea || !f.reachable.every(Boolean)) bad.push(`${F}: the zoom buttons are in the area or covered`);
       rowsOut.push(`${w}: folded, buttons ${gapR.toFixed(0)}/${gapB.toFixed(0)} px from the right/bottom corner, scene ${f.area.w.toFixed(0)} of ${f.view.w.toFixed(0)}`);
+    }
+    // a window taller than the card: the buttons stay in the corner, the card does not pull them up (its height is the list, so here the column is longer than the card)
+    for (const [w, h] of [[1500, 1400], [1024, 1300]]) {
+      await S.page.setViewport(w, h, 1);
+      await P('p.setShelfFolded(false)'); await sleep(900);
+      const { g } = await around(), last = g.btns[g.btns.length - 1], gr = g.view.r - last.r, gb = g.view.b - last.b;
+      rowsOut.push(`${w}x${h}: open, buttons ${gr.toFixed(0)}/${gb.toFixed(0)} px from the right/bottom corner, card ${g.host ? g.host.h.toFixed(0) : '-'} px tall`);
+      if (!g.host || Math.abs(gr - 16) > 1.5 || Math.abs(gb - 16) > 1.5) bad.push(`${w}x${h}: with the card open (${g.host ? g.host.h.toFixed(0) + ' px tall' : 'missing'}) the zoom buttons are ${gr.toFixed(1)} px from the right and ${gb.toFixed(1)} px from the bottom, not 16 (they must stay in the corner)`);
     }
     await S.page.setViewport(1500, 900, 1);
     // 3. nothing on the shelf at all: the same corner, the same full-width scene (a second page: no asleep and no closed chats)
@@ -1010,6 +1020,8 @@ if (want('card')) {
     // 2. it follows the agent: pan the scene, then zoom; the card keeps its place beside the agent and never covers it
     const rel0 = { dx: c1.rect.x - (area.left + fA.x), dy: c1.rect.y - (area.top + fA.y), side: c1.side };
     await S.page.mouse.drag(area.left + 30, area.top + area.height - 30, area.left + 75, area.top + area.height - 55);
+    // the card follows on the next frame the scheduler draws; wait for it to move (up to 4 s) instead of a fixed sleep, because a busy machine can hold a frame back for longer than that
+    for (const t0 = Date.now(); Date.now() - t0 < 4000; await sleep(150)) { const c = await card(); if (c.open && (Math.abs(c.rect.x - c1.rect.x) > 1 || Math.abs(c.rect.y - c1.rect.y) > 1)) break; }
     await sleepFrames(); await mouseAway();
     const c2 = await card(), fA2 = await P(`p.agentCss(${JSON.stringify(A.agent.id)})`);
     const moved = Math.hypot(fA2.x - fA.x, fA2.y - fA.y);
@@ -1289,6 +1301,54 @@ if (want('motion')) {
     check('21-motion', bad.length === 0 && S.page.errors.length === 0,
       bad.length ? `FAILED: ${bad.join('; ')}` :
       `tokens equal motion.js (${Object.entries(SPRING).map(([n, s]) => `${n} ${s.duration} s/bounce ${s.bounce} = ${s.ms} ms`).join(', ')}); no literal duration in a transition of app.css and ${loops.length} looping animations on the two loop tempos (${LOOP.slow} and ${LOOP.quick} ms); the card comes out of its agent (${side} side) on the enter spring: ${inMove.duration} ms, travel ${SLIDE} px and growth from ${SCALE}, a quarter of the way through the curve it is already at ${pts[12].toFixed(2)} and it peaks at ${Math.max(...pts).toFixed(3)}; the fade is ${inFade.duration} ms; it glides to another agent on the glide spring (${SPRING.glide.ms} ms); the menu pops on the pop spring; the card leaves on the leave spring (${outMove.duration} ms, no bounce) and takes no clicks while it leaves; the details card (closed: ${SLIDE} px right, scaled ${SCALE}) and the shelf card use the same springs; the pan and zoom of the map were identical (${v0}) after every one of these; reduced motion: ${fadeOf(inR).duration} ms fade, no travel, no menu pop; errors ${S.page.errors.length}`);
+  } finally { await S.done(); }
+}
+
+// ---- 22-glass-bar: the glass bar floats over every page, not only the Office. The Office map fills the page under it; Dashboard, Timeline and Cost start below it (and below the your-turn
+// strip when one shows) and their content scrolls under it; the strip floats under the bar and is not shown in the Office view.
+if (want('glass-bar')) {
+  const S = await scenario(10, { tag: 'glass', query: '?time=12:00', fixture: { statuses: ['working', 'waiting', 'working'] } });
+  try {
+    const ev = e => S.page.evaluate(e);
+    const bad = [], rows = [];
+    await S.page.setViewport(1500, 700, 1);
+    for (const [view, sel] of [['ofis', '#view-ofis'], ['pano', '#view-pano'], ['akis', '#view-akis'], ['maliyet', '#view-maliyet']]) {
+      await ev(`document.querySelector('.top [data-view="${view}"]').click()`);
+      await sleep(900);
+      const g = await ev(`(() => {
+        const bar = document.querySelector('.top'), cs = getComputedStyle(bar), b = bar.getBoundingClientRect(), v = document.querySelector('${sel}'), st = document.getElementById('attention');
+        const stripShown = !st.hidden && st.offsetParent !== null, sr = stripShown ? st.getBoundingClientRect() : null, vr = v.getBoundingClientRect(), vs = getComputedStyle(v);
+        const kids = [...v.children].filter(c => c.offsetParent !== null && c.getBoundingClientRect().height > 0);
+        return JSON.stringify({ pos: cs.position, blur: cs.backdropFilter, border: cs.borderTopColor, radius: cs.borderTopLeftRadius, bar: [b.left, b.top, b.right, b.bottom], vw: innerWidth, topH: getComputedStyle(document.documentElement).getPropertyValue('--top-h'),
+          stripH: getComputedStyle(document.documentElement).getPropertyValue('--strip-h'), stripShown, strip: sr && [sr.top, sr.bottom], view: [vr.left, vr.top, vr.right, vr.bottom], pad: vs.paddingTop, firstTop: kids.length ? Math.min(...kids.map(c => c.getBoundingClientRect().top)) : null,
+          scrolls: v.scrollHeight > v.clientHeight + 1 });
+      })()`).then(JSON.parse);
+      const L = view;
+      if (g.pos !== 'absolute') bad.push(`${L}: the bar is ${g.pos}, not floating`);
+      if (!/blur\(10px\)/.test(g.blur) || g.radius !== '18px' || !/196, 208, 255/.test(g.border)) bad.push(`${L}: the bar is not the glass card (${g.blur}, ${g.radius}, ${g.border})`);
+      if (!(g.bar[0] >= 0 && g.bar[2] <= g.vw && g.bar[1] >= 0)) bad.push(`${L}: the bar leaves the window ${JSON.stringify(g.bar)}`);
+      if (Math.abs(parseFloat(g.topH) - g.bar[3]) > 1) bad.push(`${L}: --top-h ${g.topH} is not the bar's bottom edge ${g.bar[3].toFixed(0)}`);
+      if (Math.abs(g.view[1]) > 0.5) bad.push(`${L}: the view starts at ${g.view[1]}, not at the top of the page (it must fill it under the bar)`);
+      if (view === 'ofis') {
+        if (g.stripShown) bad.push('ofis: the your-turn strip shows over the map');
+      } else {
+        if (!g.stripShown) bad.push(`${L}: the fixture has a waiting chat but the your-turn strip is not shown`);
+        else {
+          if (g.strip[0] < g.bar[3] - 0.5) bad.push(`${L}: the strip (${g.strip[0].toFixed(0)}) is under the bar (${g.bar[3].toFixed(0)})`);
+          if (g.firstTop !== null && g.firstTop < g.strip[1] - 0.5) bad.push(`${L}: the content starts at ${g.firstTop.toFixed(0)}, under the strip (${g.strip[1].toFixed(0)})`);
+        }
+        if (g.firstTop !== null && g.firstTop < g.bar[3] - 0.5) bad.push(`${L}: the content starts at ${g.firstTop.toFixed(0)}, under the bar (${g.bar[3].toFixed(0)})`);
+      }
+      rows.push(`${view}: bar ${g.bar.map(Math.round).join(',')}, ${g.stripShown ? 'strip ' + g.strip.map(Math.round).join('-') : 'no strip'}, content from ${g.firstTop === null ? '-' : Math.round(g.firstTop)}`);
+    }
+    // the content scrolls under the bar: scroll the dashboard in a short window and the first card must reach the bar's top edge
+    await S.page.setViewport(1500, 380, 1);
+    await ev(`document.querySelector('.top [data-view="pano"]').click()`);
+    await sleep(700);
+    const sc = await ev(`(() => { const v = document.querySelector('#view-pano'); v.scrollTop = 150; const bar = document.querySelector('.top').getBoundingClientRect(), t = [...v.querySelectorAll('.tile')].map(e => e.getBoundingClientRect().top); return JSON.stringify({ scrollTop: v.scrollTop, bottom: bar.bottom, minTop: Math.min(...t) }); })()`).then(JSON.parse);
+    if (!(sc.scrollTop > 100 && sc.minTop < sc.bottom)) bad.push(`the dashboard does not scroll under the bar (scrollTop ${sc.scrollTop}, first tile at ${sc.minTop}, bar bottom ${sc.bottom})`);
+    check('22-glass-bar', bad.length === 0 && S.page.errors.length === 0,
+      bad.length ? `FAILED: ${bad.join('; ')}` : `the bar floats as the glass card (blur 10px, radius 18px, absolute) on all four pages; ${rows.join('; ')}; scrolled 150 px the dashboard's tiles pass under the bar (first tile at ${Math.round(sc.minTop)}, bar bottom ${Math.round(sc.bottom)}); errors ${S.page.errors.length}`);
   } finally { await S.done(); }
 }
 

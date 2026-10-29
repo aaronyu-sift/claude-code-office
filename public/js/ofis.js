@@ -11,6 +11,16 @@ import { LOOP, wave } from './motion.js';
 import { createOfisUi } from './ofis-ui.js';
 import { layoutLabels } from './ofis-label-layout.js';
 import { isShelved } from './pixel/shelf.js';
+import * as AS from './ofis-assets.js';
+import * as PL from './ofis-polish.js';
+import { makePalette, PALETTES, chooseOutfit, poseBones } from './ofis-rig.js';
+
+// Models (ofis-assets.js has loaded them before this module runs): a piece that did not load is missing from PK and the procedural shape
+// below is drawn in its place. POLISH is the procedural polish: occlusion baked into the room batch, a noise floor, tone mapping, contact
+// shadows and the extra detail of the procedural pieces (drawers, five-star chairs, keys, ears and shoes).
+const PK = AS.packs.models;
+const POLISH = AS.look.polish;
+const PAL = Object.fromEntries(Object.entries(PALETTES).map(([k, v]) => [k, makePalette(v)]));
 
 // ------------------------------------------------------------ dimensions (1 unit ≈ 1 meter)
 
@@ -116,6 +126,7 @@ const GEO = {
     return g;
   })(),
 };
+GEO.smile = new THREE.TorusGeometry(0.04, 0.0085, 5, 10, Math.PI);
 const SHARED = new Set(Object.values(GEO));
 const roundedCache = new Map();
 function rounded(w, h, d, r) {
@@ -128,14 +139,19 @@ function rounded(w, h, d, r) {
 // ------------------------------------------------------------ batch that merges the static scene into one mesh
 
 const _m = new THREE.Matrix4(), _nm = new THREE.Matrix3(), _q = new THREE.Quaternion(), _e = new THREE.Euler();
-const _p = new THREE.Vector3(), _s = new THREE.Vector3(), _v = new THREE.Vector3();
+const _p = new THREE.Vector3(), _s = new THREE.Vector3(), _v = new THREE.Vector3(), _s2 = new THREE.Vector3();
 
 class Batch {
-  constructor() { this.p = []; this.n = []; this.c = []; this.i = []; this.v = 0; }
+  constructor() { this.p = []; this.n = []; this.c = []; this.i = []; this.v = 0; this.rg = []; }
   add(geo, m, color) {
     _c.set(color);
     const pos = geo.attributes.position, nor = geo.attributes.normal;
     _nm.getNormalMatrix(m);
+    if (POLISH) {     // remember each piece's size: the occlusion pass leaves big flat pieces (walls) alone, their few vertices cannot hold it
+      if (!geo.boundingBox) geo.computeBoundingBox();
+      const sz = geo.boundingBox.getSize(_v), sc = _s2.setFromMatrixScale(m);
+      this.rg.push([this.v, this.v + pos.count, Math.max(sz.x * sc.x, sz.y * sc.y, sz.z * sc.z)]);
+    }
     for (let k = 0; k < pos.count; k++) {
       _v.fromBufferAttribute(pos, k).applyMatrix4(m); this.p.push(_v.x, _v.y, _v.z);
       _v.fromBufferAttribute(nor, k).applyMatrix3(_nm).normalize(); this.n.push(_v.x, _v.y, _v.z);
@@ -152,6 +168,30 @@ class Batch {
   }
   box(x, y, z, w, h, d, color, ry = 0) { this.put(GEO.unit, x, y, z, w, h, d, color, ry); }
   rbox(x, y, z, w, h, d, r, color, ry = 0) { this.put(rounded(w, h, d, r), x, y, z, 1, 1, 1, color, ry); }
+  // A baked pack model (ofis-assets.js) with its own vertex colours. o: { s | h (scale, or target height), fx fy fz (extra stretch), ry,
+  // pal (a palette of PAL), pk (tells two palettes of one model apart) }. Returns its size, or null when the piece did not load or
+  // cannot be baked: the caller then builds the procedural shape.
+  model(key, x, y, z, o = {}) {
+    const src = PK[key];
+    if (!src) return null;
+    const b = AS.bake(src, o.pal || PAL.furniture, o.pk || '');
+    if (!b) return null;
+    const sc = o.h ? o.h / b.size.y : (o.s || 1), fx = o.fx || 1, fy = o.fy || 1, fz = o.fz || 1;
+    _q.setFromEuler(_e.set(0, o.ry || 0, 0));
+    _m.compose(_p.set(x, y, z), _q, _s.set(sc * fx, sc * fy, sc * fz));
+    const col = b.geo.attributes.color, pos = b.geo.attributes.position, nor = b.geo.attributes.normal;
+    if (POLISH) this.rg.push([this.v, this.v + pos.count, Math.max(b.size.x * sc * fx, b.size.y * sc * fy, b.size.z * sc * fz)]);
+    _nm.getNormalMatrix(_m);
+    for (let k = 0; k < pos.count; k++) {
+      _v.fromBufferAttribute(pos, k).applyMatrix4(_m); this.p.push(_v.x, _v.y, _v.z);
+      _v.fromBufferAttribute(nor, k).applyMatrix3(_nm).normalize(); this.n.push(_v.x, _v.y, _v.z);
+      this.c.push(col.getX(k), col.getY(k), col.getZ(k));
+    }
+    const ix = b.geo.index.array;
+    for (let k = 0; k < ix.length; k++) this.i.push(this.v + ix[k]);
+    this.v += pos.count;
+    return { w: b.size.x * sc * fx, h: b.size.y * sc * fy, d: b.size.z * sc * fz, sc };
+  }
   build() {
     const g = new THREE.BufferGeometry();
     g.setAttribute('position', new THREE.Float32BufferAttribute(this.p, 3));
@@ -330,6 +370,7 @@ export function createOfis(root, ctx) {
   renderer.shadowMap.autoUpdate = false;
   renderer.shadowMap.needsUpdate = true;
   renderer.shadowMap.type = THREE.PCFShadowMap;
+  if (POLISH) { renderer.toneMapping = THREE.NeutralToneMapping; renderer.toneMappingExposure = 1.0; }   // gentle: keeps the flat colours, rolls off the highlights
   stage.appendChild(renderer.domElement);
   const aniso = Math.min(8, renderer.capabilities.getMaxAnisotropy());
 
@@ -358,6 +399,12 @@ export function createOfis(root, ctx) {
     signSide: new THREE.MeshLambertMaterial({ color: '#1b1f28' }),
     hall: new THREE.MeshLambertMaterial({ color: '#f2ede3', map: TEX.tile }),
   };
+  if (POLISH) {
+    TEX.blob = PL.softBlobTexture();
+    MAT.blob = new THREE.MeshBasicMaterial({ map: TEX.blob, color: '#1d2b3a', transparent: true, opacity: 0.3, depthWrite: false });
+    GEO.blobPlane = new THREE.PlaneGeometry(1, 1).rotateX(-Math.PI / 2);
+    SHARED.add(GEO.blobPlane);
+  }
   const matCache = new Map();
   const mat = hex => {
     let m = matCache.get(hex);
@@ -434,6 +481,7 @@ export function createOfis(root, ctx) {
   // ---------------------------------------------------------- state
 
   let visible = false, raf = 0, lastT = 0, resized = true, instantNext = true;
+  let floorJobs = [], rebuildMs = 0;
   const world = { group: null, rooms: new Map(), pick: [], screens: [], screenMesh: null, bounds: null, sig: '' };
   const roomState = new Map();   // session id → { cls, low }
   const chars = new Map();       // agent id → character
@@ -547,6 +595,8 @@ export function createOfis(root, ctx) {
   }
 
   function rebuild(list) {
+    const t0 = performance.now();
+    floorJobs = [];
     disposeWorld();
     const g = new THREE.Group();
     world.group = g;
@@ -618,6 +668,15 @@ export function createOfis(root, ctx) {
     });
     buildHalls(B, g, items, areas);
 
+    if (POLISH) {
+      const occ = PL.makeOcc(B.p, B.i);
+      PL.bakeBatchAO(B, occ);
+      for (const j of floorJobs) {
+        const fm = new THREE.Mesh(PL.floorMesh(j.X, j.Z, j.W, j.D, j.hex, occ), MAT.stat);
+        fm.receiveShadow = true; fm.userData.own = true;
+        g.add(fm);
+      }
+    }
     const stat = new THREE.Mesh(B.build(), MAT.stat);
     stat.castShadow = stat.receiveShadow = true;
     stat.userData.own = true;
@@ -633,7 +692,7 @@ export function createOfis(root, ctx) {
     const sm = new THREE.InstancedMesh(GEO.screen, MAT.screen, n);
     sm.count = world.screens.length;
     world.screens.forEach((s, i) => {
-      _q.setFromEuler(_e.set(0, s.ry + Math.PI / 2, 0));
+      _q.setFromEuler(_e.set(s.rx || 0, s.ry + Math.PI / 2, 0, 'YXZ'));
       _m.compose(_p.set(s.x, s.y, s.z), _q, _s.set(s.w, s.h, 1));
       sm.setMatrixAt(i, _m);
       sm.setColorAt(i, _c.set(SCR_OFF));
@@ -659,6 +718,7 @@ export function createOfis(root, ctx) {
     for (const [id, L] of signs) if (!world.rooms.has(id)) { dropLabel(L); signs.delete(id); }
 
     applyBounds();
+    rebuildMs = performance.now() - t0;
   }
 
   // Union of the building and the local lots: camera framing, pan limits and the shadow camera follow it.
@@ -681,6 +741,20 @@ export function createOfis(root, ctx) {
     if (autoFit) fit();
   }
 
+  // verification only (tools/qa/office3d-qa.mjs, the QA pictures): what the scene drew, how long a rebuild took, which models are in use, a camera on a point
+  root.__ofis3d = {
+    get info() { const i = renderer.info; return { calls: i.render.calls, tris: i.render.triangles, geos: i.memory.geometries, tex: i.memory.textures }; },
+    get rebuildMs() { return +rebuildMs.toFixed(1); },
+    get models() { return { loaded: Object.keys(PK), failed: [...AS.packs.failed.keys()] }; },
+    get look() { return { assets: AS.look.assets, polish: POLISH }; },
+    figures() { return [...chars.values()].map(c => ({ id: c.id, main: c.main, pack: !!c.pk, shirt: c.shirt, tinted: c.tinted, mode: c.mode, x: c.root.position.x, z: c.root.position.z })); },
+    draw() { renderer.render(scene, camera); return this.info; },
+    figureVisible(id, on) { const c = chars.get(id); if (c) c.root.visible = !!on; },
+    rebuildNow() { world.sig = ''; sync(); return this.rebuildMs; },
+    view(x, y, z, zm) { autoFit = false; camA = PV.set(x, y, z).dot(R); camB = PV.dot(U); lim = { a0: -1e9, a1: 1e9, b0: -1e9, b1: 1e9 }; zoom = clamp(zm, 1, 400); applyCam(); return [camA, camB, zoom]; },
+    room(id) { const r = world.rooms.get(id); return r ? { X: r.X, Z: r.Z, W: r.W, D: r.D } : null; },
+  };
+
   // Room shell: carpet, back walls (full height), front walls (low cutaway) and the door facing the hall.
   // door === 'back' → glass door in the back-right wall; 'front' → opening in the low front wall.
   function buildShell(B, g, X, Z, W, D, th, door) {
@@ -689,14 +763,17 @@ export function createOfis(root, ctx) {
     const trim = '#f3efe6';
     const b = (x, y, z, w, hh, d, col, ry) => B.box(X + x, y, Z + z, w, hh, d, col, ry);
 
-    const fg = new THREE.PlaneGeometry(W, D).rotateX(-Math.PI / 2);
-    const fuv = fg.attributes.uv;
-    for (let i = 0; i < fuv.count; i++) fuv.setXY(i, fuv.getX(i) * W, fuv.getY(i) * D);
-    const floor = new THREE.Mesh(fg, floorMat(th.floor));
-    floor.position.set(X + W / 2, 0.012, Z + D / 2);
-    floor.receiveShadow = true;
-    floor.userData.own = true;
-    g.add(floor);
+    if (POLISH) floorJobs.push({ X, Z, W, D, hex: th.floor });       // drawn after the furniture exists (occlusion), with vertex colours
+    else {
+      const fg = new THREE.PlaneGeometry(W, D).rotateX(-Math.PI / 2);
+      const fuv = fg.attributes.uv;
+      for (let i = 0; i < fuv.count; i++) fuv.setXY(i, fuv.getX(i) * W, fuv.getY(i) * D);
+      const floor = new THREE.Mesh(fg, floorMat(th.floor));
+      floor.position.set(X + W / 2, 0.012, Z + D / 2);
+      floor.receiveShadow = true;
+      floor.userData.own = true;
+      g.add(floor);
+    }
     b(W / 2, 0.004, D / 2, W + 0.04, 0.008, D + 0.04, shade(th.floor, -0.3));
 
     // back-left wall (x = 0 plane)
@@ -775,12 +852,59 @@ export function createOfis(root, ctx) {
 
     // ---- chief's corner
     const cz = D / 2;
-    rb(0.95, 0.615, cz, 0.9, 0.05, 2.3, 0.02, shade(WOOD, -0.12));
-    b(0.95, 0.3, cz - 1.08, 0.8, 0.6, 0.06, WOOD_D);
-    b(0.95, 0.3, cz + 1.08, 0.8, 0.6, 0.06, WOOD_D);
-    b(0.6, 0.34, cz, 0.04, 0.5, 2.1, WOOD_D);
+    // the polished procedural pieces: the same furniture with more shape (edge bands, drawers, a star base with casters, a stand and chin)
+    const deskProc = (x, z, len = 1.24, dep = 0.66) => {
+      rb(x, 0.6, z, dep, 0.05, len, 0.022, WOOD);
+      rb(x, 0.572, z, dep - 0.03, 0.014, len - 0.03, 0.006, shade(WOOD, -0.3));
+      b(x - 0.02, 0.29, z - len / 2 + 0.05, dep - 0.1, 0.58, 0.04, WOOD_D);
+      b(x - 0.03, 0.29, z + len / 2 - 0.23, dep - 0.12, 0.54, 0.38, WOOD_D);
+      for (let i = 0; i < 3; i++) {
+        b(x + dep / 2 - 0.06, 0.12 + i * 0.17, z + len / 2 - 0.23, 0.012, 0.15, 0.34, shade(WOOD_D, 0.14));
+        b(x + dep / 2 - 0.05, 0.12 + i * 0.17, z + len / 2 - 0.23, 0.016, 0.02, 0.1, '#e8d9b8');
+      }
+      b(x - dep / 2 + 0.07, 0.37, z, 0.025, 0.4, len - 0.3, shade(WOOD_D, -0.08));
+    };
+    const chairProc = (sx, z) => {
+      pt(GEO.cyl, sx, 0.085, z, 0.08, 0.05, 0.08, METAL);
+      for (let k = 0; k < 5; k++) {
+        const a = k * Math.PI * 2 / 5 + 0.3, ca = Math.cos(a), sa = Math.sin(a);
+        pt(GEO.unit, sx + ca * 0.15, 0.075, z + sa * 0.15, 0.3, 0.03, 0.045, METAL, -a);
+        pt(GEO.cyl, sx + ca * 0.28, 0.035, z + sa * 0.28, 0.055, 0.05, 0.055, '#23262e');
+      }
+      pt(GEO.cyl, sx, 0.26, z, 0.05, 0.34, 0.05, METAL);
+      rb(sx, 0.465, z, 0.5, 0.09, 0.5, 0.05, CHAIR_S);
+      rb(sx - 0.01, 0.505, z, 0.43, 0.035, 0.43, 0.02, shade(CHAIR_S, 0.14));
+      b(sx + 0.22, 0.58, z, 0.06, 0.14, 0.07, METAL);
+      rb(sx + 0.26, 0.83, z, 0.08, 0.52, 0.46, 0.04, CHAIR, 0);
+      rb(sx + 0.235, 0.83, z, 0.04, 0.4, 0.38, 0.02, shade(CHAIR, 0.14));
+      for (const sg of [-1, 1]) { b(sx + 0.1, 0.58, z + sg * 0.27, 0.035, 0.14, 0.035, METAL); rb(sx + 0.04, 0.665, z + sg * 0.27, 0.3, 0.035, 0.06, 0.015, CHAIR); }
+    };
+    // pack desks (chief: two side by side, staff: one each); `top` is where things stand, whichever desk was built
+    let packDesk = false;
+    for (const sg of [-1, 1]) packDesk = !!B.model('desk', X + 0.95, 0, Z + cz + sg * 0.6, { ry: Math.PI / 2, s: 1.7 });
+    if (!packDesk && POLISH) { deskProc(0.95, cz - 0.58, 1.17, 0.9); deskProc(0.95, cz + 0.58, 1.17, 0.9); }
+    else if (!packDesk) {
+      rb(0.95, 0.615, cz, 0.9, 0.05, 2.3, 0.02, shade(WOOD, -0.12));
+      b(0.95, 0.3, cz - 1.08, 0.8, 0.6, 0.06, WOOD_D);
+      b(0.95, 0.3, cz + 1.08, 0.8, 0.6, 0.06, WOOD_D);
+      b(0.6, 0.34, cz, 0.04, 0.5, 2.1, WOOD_D);
+    }
+    const top = { chef: packDesk ? 0.653 : POLISH ? 0.625 : 0.64, slot: packDesk ? 0.634 : POLISH ? 0.625 : 0.6225 };
     const monitor = (x, z, ry, w, kind, slot) => {
       const nx = Math.cos(ry), nz = -Math.sin(ry);
+      const sc = w / 0.379;                                   // the pack's screen is 0.379 wide
+      if (B.model('screen', X + x, top[kind], Z + z, { ry: ry + Math.PI / 2, s: sc })) {
+        world.screens.push({ x: X + x + nx * (0.016 * sc + 0.004), y: top[kind] + 0.1715 * sc, z: Z + z + nz * (0.016 * sc + 0.004), ry, rx: -0.1, w: 0.355 * sc, h: 0.21 * sc, room: it.id, kind, slot });
+        return;
+      }
+      if (POLISH) {
+        pt(GEO.cyl, x, 0.652, z, 0.2, 0.018, 0.2, METAL);
+        rb(x - nx * 0.02, 0.76, z - nz * 0.02, 0.035, 0.2, 0.07, 0.015, METAL, ry);
+        rb(x, 0.98, z, 0.05, 0.38, w, 0.02, BEZEL, ry);
+        b(x, 0.8, z, 0.052, 0.025, w - 0.02, '#1d2129', ry);
+        world.screens.push({ x: X + x + nx * 0.027, y: 0.995, z: Z + z + nz * 0.027, ry, w: w - 0.07, h: 0.3, room: it.id, kind, slot });
+        return;
+      }
       b(x, 0.648, z, 0.2, 0.02, 0.24, METAL, ry);
       b(x - nx * 0.02, 0.76, z - nz * 0.02, 0.04, 0.22, 0.05, METAL, ry);
       b(x, 0.97, z, 0.05, 0.38, w, BEZEL, ry);
@@ -788,11 +912,21 @@ export function createOfis(root, ctx) {
     };
     monitor(0.74, cz - 0.4, -0.22, 0.66, 'chef', 0);
     monitor(0.74, cz + 0.4, 0.22, 0.66, 'chef', 1);
-    b(1.2, 0.652, cz, 0.2, 0.025, 0.56, '#e8ebf0');
-    b(1.22, 0.652, cz + 0.46, 0.11, 0.022, 0.07, '#e8ebf0');
-    pt(GEO.cyl, 1.15, 0.69, cz - 0.86, 0.1, 0.13, 0.1, POSTERS[(r() * POSTERS.length) | 0]);
-    pt(GEO.pot, 0.78, 0.69, cz + 0.95, 0.14, 0.12, 0.14, '#e9e4da');
-    pt(GEO.ico, 0.78, 0.8, cz + 0.95, 0.2, 0.18, 0.2, '#5aa85a', r() * 3);
+    if (B.model('keyboard', X + 1.18, top.chef, Z + cz, { ry: Math.PI / 2, s: 1.6 })) B.model('mouse', X + 1.2, top.chef, Z + cz + 0.42, { ry: Math.PI / 2, s: 1.5 });
+    else if (POLISH) {
+      rb(1.2, top.chef + 0.012, cz, 0.18, 0.024, 0.52, 0.009, '#e8ebf0');
+      for (let i = -2; i <= 2; i++) b(1.2 + i * 0.03, top.chef + 0.026, cz, 0.014, 0.005, 0.46, '#c4c9d3');
+      rb(1.24, top.chef + 0.013, cz + 0.42, 0.065, 0.026, 0.05, 0.013, '#e8ebf0');
+    } else {
+      b(1.2, 0.652, cz, 0.2, 0.025, 0.56, '#e8ebf0');
+      b(1.22, 0.652, cz + 0.46, 0.11, 0.022, 0.07, '#e8ebf0');
+    }
+    pt(GEO.cyl, 1.15, top.chef + 0.065, cz - 0.86, 0.1, 0.13, 0.1, POSTERS[(r() * POSTERS.length) | 0]);
+    const rot = r() * 6;
+    if (!B.model('plant', X + 0.78, top.chef, Z + cz + 0.95, { h: 0.3, pal: PAL.potDesk, pk: 'desk', ry: rot })) {
+      pt(GEO.pot, 0.78, top.chef + 0.05, cz + 0.95, 0.14, 0.12, 0.14, '#e9e4da');
+      pt(GEO.ico, 0.78, top.chef + 0.16, cz + 0.95, 0.2, 0.18, 0.2, '#5aa85a', rot / 2);
+    }
 
     // whiteboard (back-left wall)
     b(0.03, 1.44, cz, 0.04, 0.76, 1.6, '#c9ced7');
@@ -807,12 +941,15 @@ export function createOfis(root, ctx) {
     for (let i = 0; i < 4; i++) b(0.068, 1.62 - (i >> 1) * 0.2, cz + 0.36 + (i & 1) * 0.2, 0.01, 0.14, 0.14, notes[(i + (r() * 4 | 0)) % 4]);
 
     // corner plant
-    pt(GEO.pot, 0.42, 0.19, 0.42, 0.36, 0.38, 0.36, '#c8704a');
-    b(0.42, 0.37, 0.42, 0.3, 0.02, 0.3, '#5a3f2b');
-    pt(GEO.cyl, 0.42, 0.62, 0.42, 0.05, 0.5, 0.05, '#6b4a2e');
-    pt(GEO.ico, 0.42, 0.98, 0.42, 0.66, 0.58, 0.66, '#4c9a4f', r() * 3);
-    pt(GEO.ico, 0.34, 1.3, 0.48, 0.46, 0.46, 0.46, '#63b25c', r() * 3);
-    pt(GEO.ico, 0.52, 1.22, 0.33, 0.38, 0.38, 0.38, '#57a856', r() * 3);
+    const spin = r() * 6, leaf = [r() * 3, r() * 3, r() * 3];
+    if (!B.model('plant', X + 0.42, 0, Z + 0.42, { h: 1.0, pal: PAL.potFloor, pk: 'floor', ry: spin })) {
+      pt(GEO.pot, 0.42, 0.19, 0.42, 0.36, 0.38, 0.36, '#c8704a');
+      b(0.42, 0.37, 0.42, 0.3, 0.02, 0.3, '#5a3f2b');
+      pt(GEO.cyl, 0.42, 0.62, 0.42, 0.05, 0.5, 0.05, '#6b4a2e');
+      pt(GEO.ico, 0.42, 0.98, 0.42, 0.66, 0.58, 0.66, '#4c9a4f', leaf[0]);
+      pt(GEO.ico, 0.34, 1.3, 0.48, 0.46, 0.46, 0.46, '#63b25c', leaf[1]);
+      pt(GEO.ico, 0.52, 1.22, 0.33, 0.38, 0.38, 0.38, '#57a856', leaf[2]);
+    }
 
     // filing cabinet
     b(0.25, 0.44, 1.2, 0.46, 0.88, 0.56, '#aab2bf');
@@ -823,18 +960,24 @@ export function createOfis(root, ctx) {
     b(0.25, 0.94, 1.2, 0.36, 0.12, 0.4, '#e3e6ec');
     b(0.25, 1.005, 1.2, 0.26, 0.012, 0.3, '#f7f7f5');
 
-    // bookshelf (back-left wall, toward the front)
+    // bookshelf (back-left wall, toward the front); the pack's shelf is stretched to this size and the books follow its boards
     const bz = cz + 1.92;
-    b(0.03, 0.8, bz, 0.04, 1.6, 1.1, WOOD_D);
-    b(0.2, 0.8, bz - 0.53, 0.36, 1.6, 0.04, WOOD);
-    b(0.2, 0.8, bz + 0.53, 0.36, 1.6, 0.04, WOOD);
-    for (const y of [0.03, 0.54, 1.06, 1.58]) b(0.2, y, bz, 0.36, 0.04, 1.1, WOOD);
-    for (let s = 0; s < 3; s++) {
+    let bookRows = [0, 1, 2].map(k => ({ y: 0.05 + k * 0.515, gap: 0.5 }));
+    if (B.model('shelf', X + 0.19, 0, Z + bz, { ry: Math.PI / 2, fx: 1.375, fy: 2.025, fz: 1.44 })) {
+      const tops = AS.boardTops(AS.bake(PK.shelf, PAL.furniture, '').geo).map(y => y * 2.025);
+      if (tops.length >= 2) bookRows = tops.slice(0, -1).map((y, i) => ({ y, gap: tops[i + 1] - y }));
+    } else {
+      b(0.03, 0.8, bz, 0.04, 1.6, 1.1, WOOD_D);
+      b(0.2, 0.8, bz - 0.53, 0.36, 1.6, 0.04, WOOD);
+      b(0.2, 0.8, bz + 0.53, 0.36, 1.6, 0.04, WOOD);
+      for (const y of [0.03, 0.54, 1.06, 1.58]) b(0.2, y, bz, 0.36, 0.04, 1.1, WOOD);
+    }
+    for (const row of bookRows) {
       let z = bz - 0.49;
       while (z < bz + 0.45) {
-        const bw = 0.05 + r() * 0.05, bh = 0.26 + r() * 0.14;
+        const bw = 0.05 + r() * 0.05, bh = Math.min(0.26 + r() * 0.14, row.gap - 0.08);
         if (r() < 0.12) { z += 0.08; continue; }
-        b(0.19, 0.05 + s * 0.515 + bh / 2, z + bw / 2, 0.24, bh, bw, BOOKS[(r() * BOOKS.length) | 0]);
+        b(0.19, row.y + bh / 2, z + bw / 2, 0.24, bh, bw, BOOKS[(r() * BOOKS.length) | 0]);
         z += bw + 0.008;
       }
     }
@@ -910,22 +1053,40 @@ export function createOfis(root, ctx) {
       for (let rr = 0; rr < 3; rr++) {
         const slot = c * 3 + rr;
         const ax = CHEF_W + c * COL_W, z = ROWS_Z[rr];
-        rb(ax + 0.55, 0.6, z, 0.64, 0.045, 1.24, 0.018, WOOD);
-        b(ax + 0.55, 0.29, z - 0.57, 0.56, 0.58, 0.04, WOOD_D);
-        b(ax + 0.55, 0.29, z + 0.57, 0.56, 0.58, 0.04, WOOD_D);
-        b(ax + 0.28, 0.34, z, 0.03, 0.46, 1.1, WOOD_D);
+        if (!B.model('desk', X + ax + 0.55, 0, Z + z, { ry: Math.PI / 2, s: 1.65 })) {
+          if (POLISH) deskProc(ax + 0.55, z);
+          else {
+            rb(ax + 0.55, 0.6, z, 0.64, 0.045, 1.24, 0.018, WOOD);
+            b(ax + 0.55, 0.29, z - 0.57, 0.56, 0.58, 0.04, WOOD_D);
+            b(ax + 0.55, 0.29, z + 0.57, 0.56, 0.58, 0.04, WOOD_D);
+            b(ax + 0.28, 0.34, z, 0.03, 0.46, 1.1, WOOD_D);
+          }
+        }
         monitor(ax + 0.42, z, 0, 0.58, 'slot', slot);
-        b(ax + 0.76, 0.635, z, 0.18, 0.022, 0.46, '#e8ebf0');
-        const item = r();
-        if (item < 0.3) pt(GEO.cyl, ax + 0.55, 0.675, z + 0.46, 0.09, 0.12, 0.09, POSTERS[(r() * POSTERS.length) | 0]);
-        else if (item < 0.5) { pt(GEO.pot, ax + 0.45, 0.68, z - 0.46, 0.12, 0.1, 0.12, '#e9e4da'); pt(GEO.ico, ax + 0.45, 0.78, z - 0.46, 0.17, 0.15, 0.17, '#5aa85a', r() * 3); }
-        else if (item < 0.7) b(ax + 0.62, 0.64, z + 0.42, 0.22, 0.04, 0.3, '#f5f3ee', r() - 0.5);
+        if (B.model('keyboard', X + ax + 0.74, top.slot, Z + z - 0.02, { ry: Math.PI / 2, s: 1.4 })) B.model('mouse', X + ax + 0.76, top.slot, Z + z + 0.34, { ry: Math.PI / 2, s: 1.4 });
+        else if (POLISH) {
+          rb(ax + 0.76, top.slot + 0.012, z, 0.17, 0.022, 0.46, 0.008, '#e8ebf0');
+          for (let i = -2; i <= 2; i++) b(ax + 0.76 + i * 0.027, top.slot + 0.024, z, 0.012, 0.004, 0.41, '#c4c9d3');
+          rb(ax + 0.78, top.slot + 0.014, z + 0.36, 0.06, 0.024, 0.045, 0.012, '#e8ebf0');
+        } else b(ax + 0.76, 0.635, z, 0.18, 0.022, 0.46, '#e8ebf0');
+        const item = r(), rot2 = r() * 6;
+        if (item < 0.3) pt(GEO.cyl, ax + 0.55, top.slot + 0.06, z + 0.46, 0.09, 0.12, 0.09, POSTERS[(r() * POSTERS.length) | 0]);
+        else if (item < 0.5) {
+          if (!B.model('plant', X + ax + 0.45, top.slot, Z + z - 0.46, { h: 0.26, pal: PAL.potDesk, pk: 'desk', ry: rot2 })) {
+            pt(GEO.pot, ax + 0.45, top.slot + 0.045, z - 0.46, 0.12, 0.1, 0.12, '#e9e4da'); pt(GEO.ico, ax + 0.45, top.slot + 0.145, z - 0.46, 0.17, 0.15, 0.17, '#5aa85a', rot2 / 2);
+          }
+        } else if (item < 0.7) b(ax + 0.62, top.slot + 0.005, z + 0.42, 0.22, 0.04, 0.3, '#f5f3ee', r() - 0.5);
         // chair (backrest toward +x)
         const sx = ax + 1.2;
-        pt(GEO.cyl, sx, 0.03, z, 0.52, 0.05, 0.52, METAL);
-        pt(GEO.cyl, sx, 0.25, z, 0.06, 0.4, 0.06, METAL);
-        rb(sx, 0.46, z, 0.5, 0.09, 0.5, 0.035, CHAIR_S);
-        rb(sx + 0.25, 0.78, z, 0.09, 0.58, 0.48, 0.04, CHAIR);
+        if (!B.model('chair', X + sx + 0.03, 0, Z + z, { ry: -Math.PI / 2, s: 1.76 })) {
+          if (POLISH) chairProc(sx, z);
+          else {
+            pt(GEO.cyl, sx, 0.03, z, 0.52, 0.05, 0.52, METAL);
+            pt(GEO.cyl, sx, 0.25, z, 0.06, 0.4, 0.06, METAL);
+            rb(sx, 0.46, z, 0.5, 0.09, 0.5, 0.035, CHAIR_S);
+            rb(sx + 0.25, 0.78, z, 0.09, 0.58, 0.48, 0.04, CHAIR);
+          }
+        }
         const hit = hitBox(g, X + ax + 0.75, 0.5, Z + z, 1.2, 1.0, 1.3);
         hit.userData.pick = { t: 'slot', room: it.id, slot };
       }
@@ -1713,20 +1874,45 @@ export function createOfis(root, ctx) {
     return shade(base, k);
   }
 
+  // Merge the plain meshes of one joint (a figure's head, an arm, a leg, the upper body) into one vertex-coloured mesh: one draw call per
+  // part instead of one per piece, however much detail the figure carries. Nested joints are left as they are.
+  function mergeMeshes(joint) {
+    const meshes = joint.children.filter(m => m.isMesh);
+    if (meshes.length < 2) return;
+    const B = new Batch();
+    for (const m of meshes) { m.updateMatrix(); B.add(m.geometry, m.matrix, m.material.color); joint.remove(m); }
+    const mesh = new THREE.Mesh(B.build(), MAT.stat);
+    mesh.castShadow = true; mesh.userData.own = true;
+    joint.add(mesh);
+  }
+
   // Cute cartoon person: everyone in the office and the local add-ons use the same figure.
   function buildFigure(o) {
     const M = (geo, col, shadow) => { const m = new THREE.Mesh(geo, mat(col)); m.castShadow = !!shadow; return m; };
     const root = new THREE.Group();
     const hip = new THREE.Group(); root.add(hip);
-    const legL = M(GEO.leg, o.pants, true); legL.position.x = 0.1; hip.add(legL);
-    const legR = M(GEO.leg, o.pants, true); legR.position.x = -0.1; hip.add(legR);
+    const mkLeg = x => {
+      const leg = new THREE.Group(); leg.position.x = x;
+      leg.add(M(GEO.leg, o.pants, true));
+      if (POLISH) {
+        const shoe = M(rounded(0.15, 0.085, 0.26, 0.04), o.shoe || '#2f3340', true); shoe.position.set(0, -0.375, 0.05); leg.add(shoe);
+        const cuff = M(GEO.cyl, shade(o.pants, 0.1)); cuff.scale.set(0.17, 0.035, 0.17); cuff.position.set(0, -0.31, 0); leg.add(cuff);
+      }
+      mergeMeshes(leg);
+      hip.add(leg);
+      return leg;
+    };
+    const legL = mkLeg(0.1), legR = mkLeg(-0.1);
     const upper = new THREE.Group(); hip.add(upper);
     const torso = M(GEO.torso, o.shirt, true); torso.position.y = 0.25; upper.add(torso);
+    if (POLISH) { const belt = M(rounded(0.455, 0.05, 0.295, 0.02), shade(o.pants, -0.1)); belt.position.y = 0.31; upper.add(belt); }
+    mergeMeshes(upper);
     if (o.skirt) { const sk = M(GEO.pot, o.skirt, true); sk.scale.set(0.5, 0.34, 0.4); sk.rotation.x = Math.PI; sk.position.y = -0.06; hip.add(sk); }
     const mkArm = x => {
       const a = new THREE.Group(); a.position.set(x, 0.42, 0);
       a.add(M(GEO.arm, o.sleeve || o.shirt, true));
       const hand = M(GEO.hand, o.skin); hand.position.y = -0.34; a.add(hand);
+      mergeMeshes(a);
       upper.add(a);
       return a;
     };
@@ -1743,28 +1929,92 @@ export function createOfis(root, ctx) {
     }
     for (const x of [0.09, -0.09]) { const e = M(GEO.eye, '#23252d'); e.position.set(x, -0.005, 0.228); head.add(e); }
     if (o.blush) for (const x of [0.14, -0.14]) { const b = M(GEO.eye, '#f09a9a'); b.scale.set(1.3, 0.8, 0.5); b.position.set(x, -0.075, 0.2); head.add(b); }
+    if (POLISH) {
+      for (const x of [0.247, -0.247]) { const ear = M(GEO.hand, o.skin); ear.scale.set(0.45, 1.0, 0.8); ear.position.set(x, -0.015, 0.0); head.add(ear); }
+      const nose = M(GEO.hand, shade(o.skin, -0.07)); nose.scale.setScalar(0.5); nose.position.set(0, -0.045, 0.247); head.add(nose);
+      for (const x of [0.09, -0.09]) { const br = M(GEO.unit, o.hair); br.scale.set(0.075, 0.016, 0.014); br.position.set(x, 0.05, 0.232); br.rotation.z = x > 0 ? 0.14 : -0.14; br.rotation.y = x > 0 ? 0.35 : -0.35; head.add(br); }
+      const sm = M(GEO.smile, '#9a4a4a'); sm.rotation.z = Math.PI; sm.position.set(0, -0.075, 0.231); head.add(sm);
+    }
+    mergeMeshes(head);
     return { root, hip, upper, head, armL, armR, legL, legR };
+  }
+
+  // A pack person (Kenney Mini Characters, ofis-assets.js): its bones play the old joints. The stand-in joints below are plain objects that
+  // animChar moves exactly as before; applyPack copies them to the bones every frame (poseBones in ofis-rig.js turns the pack's T pose into
+  // hanging arms).
+  const PK_K = 1.6, PK_PIV = 0.176, PK_SEAT = 0.47;   // model scale, hip height in model units, seat height in the scene
+  const PK_TOP = 0.484;                                // head top above the hip in model units
+  const packKeys = Object.keys(PK).filter(k => /^p\d+$/.test(k));
+  function buildPackFigure(h, shirt) {
+    const key = chooseOutfit(h, packKeys);
+    if (!key) return null;
+    try {
+      const ch = AS.personInstance(key, shirt);
+      const root = new THREE.Group(), holder = new THREE.Group();
+      holder.scale.setScalar(PK_K);
+      holder.add(ch.root);
+      root.add(holder);
+      const headHost = new THREE.Group();          // old head units: the chief's headset hangs here
+      headHost.scale.setScalar(1.25 / PK_K); headHost.position.set(0, 0.11, 0.0);
+      ch.bones.head.add(headHost);
+      const J = () => new THREE.Object3D();
+      return { root, hip: J(), upper: J(), head: J(), armL: J(), armR: J(), legL: J(), legR: J(), headHost, bones: ch.bones, tinted: ch.tinted };
+    } catch (e) {
+      AS.warnPiece(key, 'could not be set up (' + ((e && e.message) || e) + ')');
+      return null;
+    }
+  }
+  const _pose = { armL: { x: 0, z: 0 }, armR: { x: 0, z: 0 }, upper: { x: 0 }, head: { x: 0, z: 0 }, legL: { x: 0 }, legR: { x: 0 } };
+  function applyPack(c) {
+    const B = c.pk, j = _pose;
+    j.armL.x = c.armL.rotation.x; j.armL.z = c.armL.rotation.z; j.armR.x = c.armR.rotation.x; j.armR.z = c.armR.rotation.z;
+    j.upper.x = c.upper.rotation.x; j.head.x = c.head.rotation.x; j.head.z = c.head.rotation.z; j.legL.x = c.legL.rotation.x; j.legR.x = c.legR.rotation.x;
+    const p = poseBones(j);
+    B.armL.rotation.set(...p.armL); B.armR.rotation.set(...p.armR); B.torso.rotation.set(...p.torso); B.head.rotation.set(...p.head);
+    B.legL.rotation.set(...p.legL); B.legR.rotation.set(...p.legR);
+    // hip pivot in world units: feet on the floor when standing, seat height when seated, plus the walking bob of the old hip
+    const bob = c.hip.position.y - lerp(0.42, 0.5, c.sit);
+    c.pivotW = lerp(PK_PIV * PK_K, PK_SEAT, c.sit) + bob;
+    B.root.position.y = c.pivotW / PK_K - PK_PIV;
   }
 
   function makeChar(id, main, shirt) {
     const h = hash(id);
-    const f = buildFigure({ skin: SKINS[h % SKINS.length], hair: HAIRS[(h >>> 4) % HAIRS.length], style: (h >>> 9) % 4, pants: PANTS[(h >>> 12) % PANTS.length], shirt });
+    const f = buildPackFigure(h, shirt) || buildFigure({ skin: SKINS[h % SKINS.length], hair: HAIRS[(h >>> 4) % HAIRS.length], style: (h >>> 9) % 4, pants: PANTS[(h >>> 12) % PANTS.length], shirt });
     const { root, hip, upper, head, armL, armR, legL, legR } = f;
     const M = (geo, col, shadow) => { const m = new THREE.Mesh(geo, mat(col)); m.castShadow = !!shadow; return m; };
     if (main) {
-      const band = M(GEO.band, '#2b2f3a'); band.position.y = 0.02; head.add(band);
-      for (const x of [0.27, -0.27]) { const cp = M(GEO.cup, '#2b2f3a'); cp.position.set(x, 0, 0); head.add(cp); }
-      const mic = M(GEO.mic, '#2b2f3a'); mic.position.set(0.2, -0.12, 0.13); mic.rotation.y = -0.6; head.add(mic);
-      const tip = M(GEO.hand, '#e24d4d'); tip.scale.setScalar(0.45); tip.position.set(0.13, -0.13, 0.22); head.add(tip);
+      const hs = new Batch();
+      hs.put(GEO.band, 0, 0.02, 0, 1, 1, 1, '#2b2f3a');
+      for (const x of [0.27, -0.27]) hs.put(GEO.cup, x, 0, 0, 1, 1, 1, '#2b2f3a');
+      hs.put(GEO.mic, 0.2, -0.12, 0.13, 1, 1, 1, '#2b2f3a', -0.6);
+      hs.put(GEO.hand, 0.13, -0.13, 0.22, 0.45, 0.45, 0.45, '#e24d4d');
+      const headset = new THREE.Mesh(hs.build(), MAT.stat);
+      headset.userData.own = true;
+      (f.headHost || head).add(headset);
       // the chief's chair turns with the character
       const chair = new THREE.Group(); root.add(chair);
-      const cm = (geo, col, x, y, z) => { const m = M(geo, col, true); m.position.set(x, y, z); chair.add(m); return m; };
-      cm(GEO.base, METAL, 0, 0.03, 0);
-      cm(GEO.post, METAL, 0, 0.24, 0);
-      cm(GEO.seat, '#343a46', 0, 0.45, 0);
-      cm(GEO.back, '#262a33', 0, 0.86, -0.27);
-      cm(GEO.arm2, '#262a33', 0.29, 0.64, 0.02);
-      cm(GEO.arm2, '#262a33', -0.29, 0.64, 0.02);
+      const chairBake = PK.chair && AS.bake(PK.chair, PAL.furniture, '');
+      if (chairBake) {
+        const cm = new THREE.Mesh(chairBake.geo, MAT.stat);
+        cm.scale.setScalar(1.76); cm.position.set(0, 0, -0.03); cm.castShadow = true;
+        chair.add(cm);
+      } else {
+        const cm = (geo, col, x, y, z) => { const m = M(geo, col, true); m.position.set(x, y, z); chair.add(m); return m; };
+        cm(GEO.base, METAL, 0, 0.03, 0);
+        cm(GEO.post, METAL, 0, 0.24, 0);
+        cm(GEO.seat, '#343a46', 0, 0.45, 0);
+        cm(GEO.back, '#262a33', 0, 0.86, -0.27);
+        cm(GEO.arm2, '#262a33', 0.29, 0.64, 0.02);
+        cm(GEO.arm2, '#262a33', -0.29, 0.64, 0.02);
+        mergeMeshes(chair);
+      }
+    }
+    if (POLISH) {
+      // soft contact shadow under the person and the chair
+      const bl = new THREE.Mesh(GEO.blobPlane, MAT.blob);
+      bl.position.y = 0.03; bl.scale.set(0.95, 0.95, 1); bl.renderOrder = 1;
+      root.add(bl);
     }
     const hit = new THREE.Mesh(GEO.hit, MAT.stat);
     hit.visible = false;
@@ -1772,7 +2022,7 @@ export function createOfis(root, ctx) {
     root.add(hit);
     scene.add(root);
     const c = {
-      id, main, root, hip, upper, head, armL, armR, legL, legR, hit,
+      id, main, root, hip, upper, head, armL, armR, legL, legR, hit, pk: f.bones || null, shirt, tinted: f.tinted ?? null,
       roomId: null, slot: -1, mode: 'seated', path: null, pi: 0, after: null,
       heading: -Math.PI / 2, th: -Math.PI / 2, sit: 1, walkPh: 0, ph: (h % 1000) / 159, doneAt: 0,
       tag: null, bal: null,
@@ -1788,6 +2038,7 @@ export function createOfis(root, ctx) {
 
   function removeChar(c) {
     scene.remove(c.root);
+    c.root.traverse(o => { if (o.userData.own && o.geometry) o.geometry.dispose(); });
     dropLabel(c.tag);
     dropLabel(c.bal);
     const room = world.rooms.get(c.roomId);
@@ -2055,7 +2306,8 @@ export function createOfis(root, ctx) {
     c.root.scale.setScalar(sc);
     c.tag.off = c.bal.off = sc < 0.7;
     c.tag.pos.set(pos.x, 0, pos.z);
-    c.bal.pos.set(pos.x, c.hip.position.y + 1.08, pos.z);
+    if (c.pk) applyPack(c);
+    c.bal.pos.set(pos.x, c.pk ? c.pivotW + PK_TOP * PK_K + 0.25 : c.hip.position.y + 1.08, pos.z);
   }
 
   const SC = new THREE.Color();

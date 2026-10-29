@@ -209,10 +209,16 @@ for (const seg of document.querySelectorAll('.proj-seg')) seg.addEventListener('
   syncProjSeg();
 });
 
-// --top-h: where the controls of the map start (the bottom edge of the bar, which floats over the map in the Office view)
-const topBar = document.querySelector('.top');
-const syncTopH = () => document.documentElement.style.setProperty('--top-h', Math.round(topBar.getBoundingClientRect().bottom) + 'px');
+// --top-h: where the page content and the controls of the map start (the bottom edge of the bar, which floats over every page); --strip-h: the room the your-turn
+// strip takes below it (it floats too, and is not shown in the Office view)
+const topBar = document.querySelector('.top'), strip = document.getElementById('attention');
+const syncTopH = () => {
+  const bottom = Math.round(topBar.getBoundingClientRect().bottom), shown = !strip.hidden && strip.offsetParent !== null;
+  document.documentElement.style.setProperty('--top-h', bottom + 'px');
+  document.documentElement.style.setProperty('--strip-h', shown ? Math.max(0, Math.round(strip.getBoundingClientRect().bottom) - bottom + 6) + 'px' : '0px');
+};
 new ResizeObserver(syncTopH).observe(topBar);
+new ResizeObserver(syncTopH).observe(strip);
 syncTopH();
 
 function setView(name) {

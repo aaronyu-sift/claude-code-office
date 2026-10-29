@@ -65,25 +65,21 @@ kbd { font: 10px/1 var(--mono); color: var(--faint); border: 1px solid var(--lin
 
 /* ---------------------------------------------------------------- top bar */
 
+/* The bar floats over every page as a glass card (the style of the cards of the Setup Atlas page): the Office map fills the whole page under it, and on the
+   other pages the content scrolls under it (each view starts below it, see .view). --top-h (main.js sets it from the bottom edge of the bar) is where the
+   page content and the controls of the map start. */
 .top {
   display: flex;
   align-items: center;
   gap: 10px 18px;
-  padding: 12px 20px;
-  background: var(--bg);
+  padding: 8px 14px;
   flex-wrap: wrap;
-  position: relative;
-  z-index: 5;
-}
-/* In the Office view the page is the map: the bar floats over it as a glass card (the style of the cards of the Setup Atlas page) and the your-turn strip
-   is not shown, because the scene already marks every waiting chat above its agent. --top-h (main.js sets it from the bottom edge of the bar) is where the
-   controls of the map start. */
-body[data-page="ofis"] .top {
-  position: absolute; top: 12px; left: 14px; right: 14px; padding: 8px 14px; border-radius: 18px;
+  position: absolute; top: 12px; left: 14px; right: 14px; z-index: 5; border-radius: 18px;
   background: rgba(9, 12, 28, .80); backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px);
   border: 1px solid rgba(196, 208, 255, .32); box-shadow: 0 18px 50px -18px rgba(0, 0, 0, .65);
 }
-body[data-page="ofis"] .top .seg { background: rgba(143, 176, 255, .08); }
+.top .seg { background: rgba(143, 176, 255, .08); }
+/* the your-turn strip is not shown in the Office view, because the scene already marks every waiting chat above its agent */
 body[data-page="ofis"] .attention { display: none; }
 .brand { display: flex; align-items: center; gap: 9px; font: 600 15px/1 var(--font-d); letter-spacing: .1px; color: var(--text); }
 .brand svg { width: 22px; height: 22px; color: var(--accent); }
@@ -152,9 +148,10 @@ body[data-page="ofis"] .attention { display: none; }
 /* ---------------------------------------------------------------- your-turn strip */
 
 .attention {
-  display: flex; align-items: center; flex-wrap: wrap; gap: 6px 8px; margin: 0 20px 6px; padding: 6px 7px 6px 14px;
-  background: var(--warn-soft); border-radius: 20px; width: fit-content; max-width: calc(100% - 40px);
-  scrollbar-width: none;
+  display: flex; align-items: center; flex-wrap: wrap; gap: 6px 8px; padding: 6px 7px 6px 14px;
+  position: absolute; top: calc(var(--top-h, 60px) + 6px); left: 20px; z-index: 4;
+  background: linear-gradient(var(--warn-soft), var(--warn-soft)), rgba(9, 12, 28, .82); border-radius: 20px; width: fit-content; max-width: calc(100% - 40px);
+  scrollbar-width: none; backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px);
 }
 .attention .lbl { display: inline-flex; align-items: center; gap: 8px; color: #f3d89a; font-weight: 600; white-space: nowrap; margin-right: 6px; }
 .attention .lbl .dot { background: var(--warn); box-shadow: 0 0 0 4px rgba(250, 178, 25, .16); }
@@ -172,6 +169,8 @@ body[data-page="ofis"] .attention { display: none; }
 
 main { flex: 1; min-height: 0; position: relative; }
 .view { position: absolute; inset: 0; overflow: auto; }
+/* every page but the map starts below the glass bar (and the your-turn strip when it shows); --strip-h is set by main.js */
+.view:not(.view-ofis) { padding-top: calc(var(--top-h, 60px) + var(--strip-h, 0px)); }
 .view[hidden], .attention[hidden] { display: none; }
 .view::-webkit-scrollbar, .akis-scroll::-webkit-scrollbar { width: 10px; height: 10px; }
 .view::-webkit-scrollbar-thumb, .akis-scroll::-webkit-scrollbar-thumb { background: #20252e; border-radius: 10px; border: 3px solid var(--bg); }
@@ -462,7 +461,7 @@ main { flex: 1; min-height: 0; position: relative; }
   .top { gap: 8px 12px; padding: 10px 14px; }
   .kpis { margin-left: 0; width: 100%; order: 5; gap: 6px 14px; }
   .accts { display: none; }
-  .attention { margin: 0 14px 6px; }
+  .attention { left: 14px; max-width: calc(100% - 28px); }
   .pano { padding: 8px 14px 24px; gap: 14px; }
   .cards { grid-template-columns: 1fr; }
   .hero { grid-template-columns: 1fr 1fr; gap: 10px; }
@@ -670,9 +669,10 @@ main { flex: 1; min-height: 0; position: relative; }
 .of-sum .w b { color: var(--warn); }
 .view-ofis[data-scene="pixel"]:not([hidden]), .view-ofis[data-scene="3d"]:not([hidden]) { display: flex; }          /* both scenes: the scene's own box and the column beside it; not for a hidden view: `.view[hidden]` has the same weight and this rule comes later */
 .of-area { position: relative; flex: 1 1 auto; min-width: 0; height: 100%; overflow: hidden; }
-/* The right-hand column: the shelf card (the style of the cards of the Setup Atlas page: dark glass, hairline border, mono chip, round buttons) with the zoom
-   buttons right under it. The Office is dark whatever the system theme is, so the colours here are fixed. With no card (the shelf is empty or folded) the
-   column is only the buttons, and they float in the bottom-right corner of the view. Both float over the scene, which spans the whole view. */
+/* The right-hand column: the shelf card (the style of the cards of the Setup Atlas page: dark glass, hairline border, mono chip, round buttons) above the zoom
+   buttons. The buttons are always in the bottom-right corner of the view, at the same distance whether the card is open or not (margin-top: auto keeps them at the
+   bottom of the column, the card ends above them). The Office is dark whatever the system theme is, so the colours here are fixed. With no card (the shelf is empty
+   or folded) the column is only the buttons. Both float over the scene, which spans the whole view. */
 .of-side, .of-shelf-tab {
   --sh-ink: #eaeeff; --sh-muted: #a9b3d6; --sh-accent: #8fb0ff; --sh-line: rgba(150, 165, 255, .22); --sh-hair: rgba(196, 208, 255, .32);
   --sh-mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace; color-scheme: dark;
@@ -680,7 +680,7 @@ main { flex: 1; min-height: 0; position: relative; }
 .of-side { position: absolute; right: 16px; bottom: 16px; z-index: 4; display: flex; flex-direction: column; align-items: flex-end; gap: 10px; min-height: 0; pointer-events: none; }
 .of-side > * { pointer-events: auto; }
 .view-ofis[data-shelf="open"] .of-side { top: calc(var(--top-h, 72px) + 4px); right: 0; bottom: 0; width: 340px; padding: 0 16px 16px 14px; align-items: stretch; }
-.of-ctl { display: flex; gap: 6px; align-self: flex-end; flex: none; }
+.of-ctl { display: flex; gap: 6px; align-self: flex-end; flex: none; margin-top: auto; }
 .of-ctl button, .sh-hide, .sh-more-btn, .of-shelf-tab {
   border: 1px solid var(--sh-hair); background: var(--sh-btn, rgba(10, 14, 32, .55)); color: var(--sh-ink); cursor: pointer;
   transition: border-color var(--m-hover) var(--ease-out), background var(--m-hover) var(--ease-out);
@@ -706,10 +706,6 @@ main { flex: 1; min-height: 0; position: relative; }
 .sh-item:focus-visible { box-shadow: inset 0 0 0 2px var(--sh-accent); }
 .sh-fig { flex: none; min-width: 18px; image-rendering: pixelated; }
 .view-ofis[data-scene="3d"] .sh-fig { image-rendering: auto; }          /* the people of the 3D scene are drawn smooth, not from the pixel atlas */
-/* The zoom buttons stay in the bottom-right corner of the view, the same 16 px (8 px at 640 px or less) from its right and bottom edges with the shelf card open or folded; the card
-   sits above them and ends above them. Rules of the 3D scene only, in case the pixel scene's `.of-ctl { margin-top: auto }` is not in yet: redundant once it is (then delete these). */
-.view-ofis[data-scene="3d"] .of-ctl { margin-top: auto; }
-@media (min-width: 641px) and (max-width: 760px) { .view-ofis[data-scene="3d"][data-shelf="open"] .of-side { padding: 0 16px 16px 0; } }
 .sh-txt { display: flex; flex-direction: column; gap: 1px; min-width: 0; }
 .sh-name { font: 600 14px/1.35 var(--font); color: var(--sh-ink); overflow-wrap: anywhere; }
 .sh-meta { display: flex; flex-wrap: wrap; align-items: baseline; gap: 0 10px; color: var(--sh-muted); font-size: 13px; line-height: 1.5; }
@@ -724,7 +720,7 @@ main { flex: 1; min-height: 0; position: relative; }
 .of-shelf-tab[hidden] { display: none; }
 .view-ofis[data-shelf="collapsed"] .of-hud { right: 140px; }           /* room for the tab at the corner */
 @media (max-width: 760px) {
-  .view-ofis[data-shelf="open"] .of-side { z-index: 6; width: min(340px, 100%); padding: 0 8px 8px 0; }
+  .view-ofis[data-shelf="open"] .of-side { z-index: 6; width: min(340px, 100%); padding: 0 16px 16px 0; }
 }
 .of-empty { position: absolute; inset: 0; display: grid; place-items: center; color: var(--muted); pointer-events: none; }
 .of-empty[hidden] { display: none; }
@@ -764,6 +760,7 @@ main { flex: 1; min-height: 0; position: relative; }
   .of-hud { left: 8px; top: calc(var(--top-h, 72px) + 4px); right: 52px; }
   .of-sum { font-size: 12px; padding: 6px 10px; }
   .of-side { right: 8px; bottom: 8px; }
+  .view-ofis[data-shelf="open"] .of-side { padding: 0 8px 8px 0; }
   .of-ctl button { width: 30px; height: 30px; }
 }
 @media (prefers-reduced-motion: reduce) {
