@@ -29,7 +29,7 @@ export function createSettingsPanel({ wrap, getOffice, afterChange = () => {} })
     const notes = [];
     if (s.weather !== 'off' && matchMedia('(prefers-reduced-motion: reduce)').matches) notes.push(msg('set.note.reduced'));
     const urlSet = Object.keys(s).filter(k => from[k] === 'url');
-    if (urlSet.length) notes.push(msg('set.note.url') + urlSet.map(k => `?${k}=${s[k]}`).join(' '));
+    if (urlSet.length) notes.push(msg('set.note.url') + urlSet.map(k => `?\u2060${k}=${s[k]}`).join(' '));   // a word joiner: a long note may wrap between parameters, not after the "?"
     note.hidden = !notes.length;
     note.textContent = notes.join(' ');
   }
