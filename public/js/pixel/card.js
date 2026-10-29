@@ -4,17 +4,14 @@
 // The main button opens the chat where the visitor last chose to (VS Code first); the arrow beside it lists the other ways (openers.js).
 import { t as msg } from '../i18n.js';
 import { esc, fmtShort, fmtClock, catColor, CATS, icon } from '../util.js';
-import { openUrl, cliCommand, sessionOf, loadChoice, saveChoice, effectiveChoice } from './openers.js';
+import { createOpenMenu } from './open-menu.js';
 import { placeCard } from './cardplace.js';
 
-const CARET = '<svg class="ic" viewBox="0 0 16 16" aria-hidden="true" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" fill="none"><path d="M4 6l4 4 4-4"/></svg>';
-const KIND_LABEL = { vscode: 'dw.openVscode', desktop: 'card.openDesktop', terminal: 'card.openTerminal' };
-const KIND_TIP = { vscode: 'dw.openVscodeTip', desktop: 'card.openDesktopTip', terminal: 'card.openTerminalTip' };
 const SUB_MAX = 6;
 // the clock texts inside a card are kept by the page's ticker; a re-render for them alone would only close the menu and move the scroll
 const unticked = html => html.replace(/(<[^>]*data-since="[^"]*"[^>]*>)[^<]*/g, '$1');
 
-// options: root (the Office view, the card's offset parent), ctx (store, statusPill, activityHtml, closedAgent, copyText, openDrawer, tip),
+// options: root (the Office view, the card's offset parent), ctx (store, statusPill, activityHtml, closedAgent, copyText, openDetails, tip),
 // storage, anchorOf(id, rowEl) -> { x, y, w, h, kind: 'scene' | 'shelf', prefer } in root coordinates or null when the anchor is not on screen,
 // boundsOf(kind) -> { x0, y0, x1, y1 } in root coordinates, onSelect(id | null) (the scene marks the chosen agent)
 export function createAgentCard({ root, ctx, storage = null, anchorOf, boundsOf, onSelect = () => {} }) {
@@ -23,7 +20,8 @@ export function createAgentCard({ root, ctx, storage = null, anchorOf, boundsOf,
   el.setAttribute('role', 'dialog');
   root.append(el);
   let cur = null;                                     // { id, row }
-  let lastHtml = '', menuOpen = false, copied = { what: '', at: 0 }, placeAt = { x: NaN, y: NaN, side: '' };
+  let lastHtml = '', placeAt = { x: NaN, y: NaN, side: '' };
+  const menu = createOpenMenu({ ctx, storage, rerender: () => { lastHtml = ''; if (cur) render(); } });
 
   const resolve = id => {
     const a = store.agents.get(id);
@@ -64,28 +62,7 @@ export function createAgentCard({ root, ctx, storage = null, anchorOf, boundsOf,
   }
 
   function actions(a, closed) {
-    const target = { id: sessionOf(a), cwd: a.cwd || (a.kind === 'sub' && store.agents.get(a.parent) ? store.agents.get(a.parent).cwd : '') || '' };
-    if (!target.id) return '';
-    const kind = effectiveChoice(loadChoice(storage), target), live = !closed, cmd = cliCommand(target);
-    const label = k => msg(KIND_LABEL[k]);
-    const link = k => {
-      const url = openUrl(k, target);
-      return url
-        ? `<li role="none"><a role="menuitem" class="oc-item" data-kind="${k}" href="${esc(url)}" title="${esc(msg(KIND_TIP[k]))}">${icon('external')}<span>${esc(label(k))}</span></a></li>`
-        : `<li role="none"><span role="menuitem" class="oc-item off" aria-disabled="true" title="${esc(msg('card.noCwd'))}">${icon('external')}<span>${esc(label(k))}</span></span></li>`;
-    };
-    const copy = (what, text, name) => {
-      const done = copied.what === what && Date.now() - copied.at < 1600;
-      return `<li role="none"><button type="button" role="menuitem" class="oc-item" data-copy="${what}" data-text="${esc(text)}">${icon(done ? 'check' : 'copy')}<span>${esc(msg(done ? 'dw.copied' : name))}</span></button></li>`;
-    };
-    const verb = a.kind === 'sub' ? msg('card.openParent') : msg(KIND_LABEL[kind]);
-    return `<div class="oc-actions"><div class="oc-open">` +
-      `<a class="oc-go" data-kind="${kind}" href="${esc(openUrl(kind, target))}" title="${esc(msg(KIND_TIP[kind]))}">${icon('external')}<span>${esc(verb)}</span></a>` +
-      `<button type="button" class="oc-caret" aria-haspopup="menu" aria-expanded="${menuOpen}" aria-label="${esc(msg('card.openMenu'))}" title="${esc(msg('card.openMenu'))}">${CARET}</button>` +
-      `<ul class="oc-menu" role="menu" ${menuOpen ? '' : 'hidden'}>${link('vscode')}${link('desktop')}${link('terminal')}<li class="oc-sep" role="separator"></li>` +
-      `${cmd ? copy('cmd', cmd, 'card.copyCmd') : ''}${copy('id', target.id, 'dw.copyId')}` +
-      (live ? `<li class="oc-hint" role="none">${esc(msg('card.liveHint'))}</li>` : '') + `</ul></div>` +
-      `<button type="button" class="oc-more" title="${esc(msg('card.moreTip'))}">${esc(msg('card.more'))}</button></div>`;
+    return `<div class="oc-actions">${menu.html(a, closed)}<button type="button" class="oc-more" title="${esc(msg('card.moreTip'))}">${esc(msg('card.more'))}</button></div>`;
   }
 
   function render(force = false) {
@@ -107,30 +84,11 @@ export function createAgentCard({ root, ctx, storage = null, anchorOf, boundsOf,
     return true;
   }
 
-  function setMenu(on) {
-    menuOpen = on;
-    const m = el.querySelector('.oc-menu'), c = el.querySelector('.oc-caret');
-    if (m) m.hidden = !on;
-    if (c) c.setAttribute('aria-expanded', String(on));
-  }
-
   function wire() {
     el.querySelector('.oc-x').addEventListener('click', () => close());
-    const more = el.querySelector('.oc-more');
-    if (more) more.addEventListener('click', () => { const id = cur && cur.id; if (id) { ctx.tip.hide(); ctx.openDrawer(id); } });
+    el.querySelector('.oc-more').addEventListener('click', () => { const id = cur && cur.id; if (id) { ctx.tip.hide(); ctx.openDetails(id); close(); } });
     el.querySelectorAll('[data-sub]').forEach(b => b.addEventListener('click', () => open(b.dataset.sub)));
-    const caret = el.querySelector('.oc-caret');
-    if (caret) caret.addEventListener('click', () => { setMenu(!menuOpen); if (menuOpen) { const first = el.querySelector('.oc-menu .oc-item:not(.off)'); if (first) first.focus({ preventScroll: true }); } });
-    el.querySelectorAll('a[data-kind]').forEach(a => a.addEventListener('click', () => { saveChoice(storage, a.dataset.kind); setMenu(false); lastHtml = ''; setTimeout(() => render(), 0); }));
-    el.querySelectorAll('[data-copy]').forEach(b => b.addEventListener('click', async () => {
-      const ok = await ctx.copyText(b.dataset.text), span = b.querySelector('span');
-      if (!ok) { span.textContent = msg('dw.copyFail'); return; }
-      copied = { what: b.dataset.copy, at: Date.now() };
-      b.querySelector('svg').outerHTML = icon('check');
-      span.textContent = msg('dw.copied');
-      el.dataset.copied = b.dataset.text;                                // (read by the QA)
-      setTimeout(() => { setMenu(false); lastHtml = ''; if (cur) render(); }, 1200);
-    }));
+    menu.wire(el);
   }
 
   function place() {
@@ -153,7 +111,7 @@ export function createAgentCard({ root, ctx, storage = null, anchorOf, boundsOf,
     if (!resolve(id)) return false;
     const same = cur && cur.id === id;
     cur = { id, row: row || (cur && same ? cur.row : null) || null };
-    if (!same) { menuOpen = false; copied = { what: '', at: 0 }; placeAt = { x: NaN, y: NaN, side: '' }; }
+    if (!same) { menu.reset(); placeAt = { x: NaN, y: NaN, side: '' }; }
     el.hidden = false;
     render(true);
     place();
@@ -164,7 +122,7 @@ export function createAgentCard({ root, ctx, storage = null, anchorOf, boundsOf,
   function close() {
     if (!cur) return false;
     const row = cur.row, hadFocus = el.contains(document.activeElement);
-    cur = null; menuOpen = false; lastHtml = '';
+    cur = null; menu.reset(); lastHtml = '';
     el.hidden = true;
     el.innerHTML = '';
     onSelect(null);
@@ -175,19 +133,16 @@ export function createAgentCard({ root, ctx, storage = null, anchorOf, boundsOf,
   function refresh() {
     if (!cur) return;
     if (!resolve(cur.id)) { close(); return; }
-    if (menuOpen) return;                                                // not under a menu that is open
+    if (menu.isOpen) return;                                             // not under a menu that is open
     if (render()) place();
   }
 
   const onKey = e => {
     if (e.key !== 'Escape' || !cur) return;
-    if (menuOpen) { setMenu(false); const c = el.querySelector('.oc-caret'); if (c) c.focus({ preventScroll: true }); e.stopPropagation(); return; }
-    close();
+    if (!menu.escape()) close();
     e.stopPropagation();
   };
-  const onDown = e => { if (menuOpen && !e.target.closest('.oc-open')) setMenu(false); };
   document.addEventListener('keydown', onKey, true);
-  document.addEventListener('pointerdown', onDown, true);
 
   return {
     open, close, refresh, place,
@@ -198,7 +153,7 @@ export function createAgentCard({ root, ctx, storage = null, anchorOf, boundsOf,
       if (!cur || el.hidden) return { open: false };
       const r = el.getBoundingClientRect(), main = el.querySelector('.oc-go');
       return {
-        open: true, id: cur.id, away: el.classList.contains('away'), side: el.dataset.side || '', tail: el.dataset.tail || '', state: el.dataset.state || '', menuOpen,
+        open: true, id: cur.id, away: el.classList.contains('away'), side: el.dataset.side || '', tail: el.dataset.tail || '', state: el.dataset.state || '', menuOpen: menu.isOpen,
         rect: { x: r.left, y: r.top, w: r.width, h: r.height }, title: (el.querySelector('.oc-title') || {}).textContent || '', world: (el.querySelector('.oc-world') || {}).textContent || '',
         mainHref: main ? main.getAttribute('href') : null, mainKind: main ? main.dataset.kind : null, mainText: main ? main.textContent.trim() : '',
         items: [...el.querySelectorAll('.oc-menu .oc-item')].map(i => ({ kind: i.dataset.kind || (i.dataset.copy ? 'copy-' + i.dataset.copy : ''), href: i.getAttribute('href'), text: i.textContent.trim(), off: i.classList.contains('off'), copyText: i.dataset.text || null })),
@@ -209,6 +164,6 @@ export function createAgentCard({ root, ctx, storage = null, anchorOf, boundsOf,
         scroll: (() => { const s = el.querySelector('.oc-scroll'); return s ? { top: s.scrollTop, height: s.scrollHeight, client: s.clientHeight } : null; })(),
       };
     },
-    destroy() { close(); el.remove(); document.removeEventListener('keydown', onKey, true); document.removeEventListener('pointerdown', onDown, true); },
+    destroy() { close(); el.remove(); document.removeEventListener('keydown', onKey, true); },
   };
 }

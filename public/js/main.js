@@ -2,6 +2,7 @@ import { t as msg, locale, fmtPct } from './i18n.js';
 import { CATS, STATUS, verbOf, actText, evName, evText, catColor, fmtDur, fmtShort, fmtClock, fmtTok, fmtUsd, pct, esc, icon } from './util.js';
 import { createPano } from './pano.js';
 import { createPixelOffice } from './pixel/index.js';
+import { createOpenMenu } from './pixel/open-menu.js';
 import { fromQuery } from './pixel/settings.js';
 import { createSettingsPanel } from './settings-panel.js';
 import { createAkis } from './akis.js';
@@ -139,6 +140,7 @@ export function evTipHtml(ev, agent) {
 const ctx = {
   store, tip, evTipHtml, statusPill, activityHtml, subRow, drawSpark, clockDur, counts,
   openDrawer: id => openDrawer(id),
+  openDetails: id => openDrawer(id),          // the details of a chat: a card at the side (the drawer element), nothing slides and nothing is dimmed
   closedAgent, copyText,                      // the card of the Office view shows closed chats like the drawer does and copies like it
   // extras: latest cost summary ({progress, scannedAt, totals}) and view switching
   cost: null,
@@ -392,8 +394,9 @@ function watchTransitions() {
 
 // ---------------------------------------------------------------- drawer
 
+// The details are a glass card at the right edge, in the style of the Atlas page's card: it fades in, nothing slides and nothing is dimmed, and the page
+// behind stays usable. It closes with its cross or Esc, and a click on another chat shows that chat in it.
 const drawer = document.getElementById('drawer');
-const scrim = document.getElementById('scrim');
 let drawerId = null;
 let drawerTimer = null;
 
@@ -405,19 +408,17 @@ function openDrawer(id) {
   drawer.dataset.id = id;
   renderDrawer(true);
   drawer.classList.add('on');
-  scrim.classList.add('on');
   drawer.setAttribute('aria-hidden', 'false');
 }
 function closeDrawer() {
   drawerId = null;
+  drawerMenu.reset();
   drawer.classList.remove('on');
-  scrim.classList.remove('on');
   drawer.setAttribute('aria-hidden', 'true');
 }
-scrim.addEventListener('click', closeDrawer);
 function scheduleDrawer() {
   if (drawerTimer) return;
-  drawerTimer = setTimeout(() => { drawerTimer = null; if (drawerId) renderDrawer(false); }, 700);
+  drawerTimer = setTimeout(() => { drawerTimer = null; if (drawerId && !drawerMenu.isOpen) renderDrawer(false); }, 700);      // not under an open menu
 }
 
 function statusPill(a, t) {
@@ -524,14 +525,11 @@ function renderDrawer(first) {
   drawSpark(drawer.querySelector('#dw-spark'), a.spark || [], a.color);
 }
 
-// ---- the two buttons of a chat's details: open it in VS Code (the extension's own link) and copy its session id
-let copied = { id: '', at: 0 };
+// ---- the Open button of a chat's details (open-menu.js: VS Code, Claude desktop, Terminal, copy the command line, copy the session id)
+const drawerMenu = createOpenMenu({ ctx, storage: (() => { try { return window.localStorage; } catch { return null; } })(), rerender: () => { if (drawerId) renderDrawer(false); } });
 function dwActions(a) {
-  if (a.kind !== 'main') return '';
-  const done = copied.id === a.id && Date.now() - copied.at < 1600;
-  return `<div class="dw-actions">` +
-    `<a id="dw-vscode" class="act-btn primary" href="vscode://anthropic.claude-code/open?session=${encodeURIComponent(a.id)}" title="${esc(msg('dw.openVscodeTip'))}">${icon('external')}<span>${esc(msg('dw.openVscode'))}</span></a>` +
-    `<button type="button" id="dw-copy" class="act-btn" data-id="${esc(a.id)}">${icon(done ? 'check' : 'copy')}<span aria-live="polite">${esc(msg(done ? 'dw.copied' : 'dw.copyId'))}</span></button></div>`;
+  const open = drawerMenu.html(a, !!a.closed);
+  return open ? `<div class="dw-actions">${open}</div>` : '';
 }
 async function copyText(text) {
   try { await navigator.clipboard.writeText(text); return true; } catch { /* blocked or unavailable: try the old way */ }
@@ -544,20 +542,7 @@ async function copyText(text) {
     return ok;
   } catch { return false; }
 }
-function wireActions() {
-  const b = drawer.querySelector('#dw-copy');
-  if (!b) return;
-  b.addEventListener('click', async () => {
-    const id = b.dataset.id, ok = await copyText(id);
-    const span = b.querySelector('span');
-    if (!ok) { span.textContent = msg('dw.copyFail'); return; }
-    copied = { id, at: Date.now() };
-    drawer.dataset.copied = id;                                       // (read by the QA)
-    b.querySelector('svg').outerHTML = icon('check');
-    span.textContent = msg('dw.copied');
-    setTimeout(() => { if (drawerId === id) renderDrawer(false); }, 1700);
-  });
-}
+function wireActions() { drawerMenu.wire(drawer); }
 
 // ---- a chat that is closed: what the server read from the end of its transcript (no events, no context gauge, no cost: nothing live to show)
 function closedAgent(c) {
@@ -644,7 +629,7 @@ export function drawSpark(cv, data, color, opts = {}) {
 
 addEventListener('keydown', e => {
   if (e.target.matches('input, textarea')) return;
-  if (e.key === 'Escape') closeDrawer();
+  if (e.key === 'Escape' && !drawerMenu.escape()) closeDrawer();
   if (e.ctrlKey || e.metaKey || e.altKey) return;
   if (e.key === '1') setView('pano');
   if (e.key === '2') setView('ofis');

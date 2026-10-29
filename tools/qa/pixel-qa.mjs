@@ -763,11 +763,11 @@ if (want('card')) {
     await mouseAway();
     const c1 = await card(), fA = await P(`p.agentCss(${JSON.stringify(A.agent.id)})`);
     const look = await ev(`(() => {
-      const c = document.querySelector('.of-card'), cs = getComputedStyle(c), sc = document.querySelector('#scrim'), d = document.querySelector('#drawer');
+      const c = document.querySelector('.of-card'), cs = getComputedStyle(c), d = document.querySelector('#drawer');
       const corner = (x, y) => { const e = document.elementFromPoint(x, y); return e ? (e.closest('.of-stage') ? 'stage' : e.className.toString().slice(0, 20) || e.tagName) : 'none'; };
       const r = document.querySelector('#view-ofis .of-area').getBoundingClientRect();
       return JSON.stringify({ bg: cs.backgroundColor, blur: cs.backdropFilter || cs.webkitBackdropFilter, border: cs.borderTopColor + ' ' + cs.borderTopWidth, radius: cs.borderTopLeftRadius,
-        scrim: sc.classList.contains('on'), drawer: d.classList.contains('on'), drawerOpen: d.getBoundingClientRect().left < innerWidth - 1 && d.classList.contains('on'),
+        scrim: !!document.querySelector('#scrim'), drawer: d.classList.contains('on'),
         corners: [corner(r.left + 4, r.top + 4), corner(r.right - 4, r.top + 4), corner(r.left + 4, r.bottom - 4)], role: c.getAttribute('role'), label: c.getAttribute('aria-label') });
     })()`).then(JSON.parse);
     const ringOn = await P('p.effects.rings');
@@ -833,7 +833,7 @@ if (want('card')) {
     const afterOther = await card();
     const closeOk = menuAgain && afterEsc1.open && !afterEsc1.menuOpen && !afterEsc2.open && reopened.open && !afterX.open && !afterEmpty.open && afterOther.open && afterOther.id === other.agent.id;
 
-    // 5. a subagent chip switches to the subagent's card, which opens its parent chat; "All details" still opens the side panel (the drawer)
+    // 5. a subagent chip switches to the subagent's card, which opens its parent chat; "All details" opens the side card (the drawer element, styled as a glass card)
     let subOk = false, subInfo = 'no subagent chip';
     const parents = new Set(S.agents.filter(a => a.kind === 'sub').map(a => a.id.split(':')[0]));
     const withSubs = spots.find(q => parents.has(q.agent.id));
@@ -853,8 +853,22 @@ if (want('card')) {
     const more = await ev(`(() => { const b = document.querySelector('.of-card .oc-more').getBoundingClientRect(); return { x: b.left + b.width / 2, y: b.top + b.height / 2 }; })()`);
     await S.page.mouse.click(more.x, more.y); await sleep(700);
     const drawerOn = await ev(`JSON.stringify({ on: document.querySelector('#drawer').classList.contains('on'), id: document.querySelector('#drawer').dataset.id })`).then(JSON.parse);
-    await ev(`document.querySelector('#scrim').click()`); await sleep(500);
-    const moreOk = drawerOn.on && !!drawerOn.id;
+    // the details card: a glass card at the right edge, no slide (no transform), no scrim, nothing full-screen dimming the scene
+    const dcard = await ev(`(() => {
+      const d = document.querySelector('#drawer'), r = d.getBoundingClientRect(), cs = getComputedStyle(d), c = document.querySelector('.of-card');
+      const dim = [...document.querySelectorAll('body *')].filter(e => {
+        if (d.contains(e) || e === d) return false;
+        const k = getComputedStyle(e), b = e.getBoundingClientRect();
+        return k.position === 'fixed' && b.width >= innerWidth - 2 && b.height >= innerHeight - 2 && k.backgroundColor !== 'rgba(0, 0, 0, 0)' && k.visibility !== 'hidden' && parseFloat(k.opacity) > 0;
+      }).length;
+      return JSON.stringify({ x: r.left, y: r.top, w: r.width, vw: innerWidth, bg: cs.backgroundColor, blur: cs.backdropFilter || cs.webkitBackdropFilter, radius: cs.borderTopLeftRadius,
+        transform: cs.transform, scrim: !!document.querySelector('#scrim'), dim, cardGone: !c || c.hidden, open: !!d.querySelector('.oc-go'), head: !!d.querySelector('.dw-head') });
+    })()`).then(JSON.parse);
+    await ev(`document.querySelector('#dw-close').click()`); await sleep(400);
+    const drawerOff = await ev(`getComputedStyle(document.querySelector('#drawer')).visibility`);
+    const detailsOk = dcard.w <= 431 && dcard.x + dcard.w <= dcard.vw - 10 && dcard.y >= 60 && /rgba\(9, 12, 28, 0\.8\)/.test(dcard.bg) && /blur\(10px\)/.test(dcard.blur) && dcard.radius === '18px'
+      && (dcard.transform === 'none' || dcard.transform === 'matrix(1, 0, 0, 1, 0, 0)') && !dcard.scrim && dcard.dim === 0 && dcard.cardGone && dcard.open && dcard.head && drawerOff === 'hidden';
+    const moreOk = drawerOn.on && !!drawerOn.id && detailsOk;
     await P('p.freeze(false)');
 
     // 6. remembered after a reload; a chat that closes while its card is open closes the card
@@ -873,7 +887,7 @@ if (want('card')) {
       `style: background ${look.bg}, blur ${look.blur}, border ${look.border}, radius ${look.radius}, role ${look.role}; no scrim ${!look.scrim}, no drawer ${!look.drawer}, the corners of the scene are still the scene (${look.corners.join(',')}); selection ring ${ringOn} drawn (${rings0} before, ${ringsOff} after closing); ` +
       `pan: the agent moved ${moved.toFixed(0)} px and the card ${followed ? 'went with it' : 'DID NOT follow'}; zoom ${zoom0 + 1}: inside ${inside(c3.rect, area, 0)}, not covering ${!hits(c3.rect, fA3)}; ` +
       `menu: ${menu1.menuOpen} open, still open after 2.2 s ${menu2.menuOpen}, items [${(menu1.items || []).map(i => i.kind).join(', ')}], choosing Terminal stored "${stored}" and the main button reads "${c4.mainText}" (${c4.mainHref === termHref}); after a reload the main button is ${afterReload.mainKind}; ` +
-      `Esc closes the menu then the card (${afterEsc1.open && !afterEsc1.menuOpen}, ${!afterEsc2.open}), cross ${!afterX.open}, empty ground ${!afterEmpty.open}, another agent moves it ${afterOther.open && afterOther.id === other.agent.id}; subagent: ${subInfo}; "All details" opens the side panel ${moreOk}; errors ${S.page.errors.length}`);
+      `Esc closes the menu then the card (${afterEsc1.open && !afterEsc1.menuOpen}, ${!afterEsc2.open}), cross ${!afterX.open}, empty ground ${!afterEmpty.open}, another agent moves it ${afterOther.open && afterOther.id === other.agent.id}; subagent: ${subInfo}; "All details" opens the side card (${dcard.w.toFixed(0)} px glass card at the right edge, no slide, no scrim, nothing dimming the scene ${detailsOk}; the floating card closes ${dcard.cardGone}; opened ${drawerOn.on}) ${moreOk}; errors ${S.page.errors.length}`);
   } finally { await S.done(); }
 }
 
