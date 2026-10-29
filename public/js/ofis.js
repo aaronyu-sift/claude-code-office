@@ -3,6 +3,7 @@
 // The scene is drawn with three.js. Signs, name tags and balloons live in an HTML layer so they stay crisp.
 import * as THREE from 'three';
 import { RoundedBoxGeometry } from 'three/addons/geometries/RoundedBoxGeometry.js';
+import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { catColor, hash, esc, icon, fmtShort } from './util.js';
 import { t as msg } from './i18n.js';
 import { createEnv } from './ofis-env.js';
@@ -53,6 +54,7 @@ const THEMES = [
   { wall: '#a9c98f', floor: '#8f9fb0' }, // sage + gray
 ];
 const VACANT_THEME = { wall: '#cdd1d8', floor: '#9aa5b3' };    // an office nobody uses: quiet grey
+const VACANT_DESKS = 3;                                        // bare desks in a vacant office (the chief's two come on top)
 const SKINS = ['#f3cfb0', '#e7b590', '#cf9670', '#b07650', '#86573a', '#f7dcc6'];
 const HAIRS = ['#2b211c', '#4c3528', '#7d5130', '#c08f4f', '#1c1d24', '#8a8f9c', '#a8432f', '#e0c890'];
 const PANTS = ['#35405a', '#3e5a86', '#4a4f5c', '#5c4a3e', '#2f3440'];
@@ -546,6 +548,7 @@ export function createOfis(root, ctx) {
     const oldRooms = world.rooms, oldHalls = world.halls || [], oldEntry = world.entryX;
     world.rooms = new Map();
     world.vacant = [];
+    world.vacantSigns = [];
     for (const L of extraLabels) dropLabel(L);
     extraLabels.length = 0;
     extraFrame.length = 0;
@@ -594,7 +597,10 @@ export function createOfis(root, ctx) {
     B.box((bx0 + bx1) / 2, -0.012, (bz0 + bz1) / 2, bx1 - bx0 + 0.06, 0.02, bz1 - bz0 + 0.06, '#b9b1a1');
 
     items.forEach(it => {
-      const room = buildRoom(B, g, it);
+      const n0 = B.i.length / 3, f0 = floorJobs.length;
+      const room = it.vacant ? buildVacant(B, g, it) : buildRoom(B, g, it);
+      room.tris = B.i.length / 3 - n0;                        // verification only: the triangles of the office (its floor is added below)
+      for (let k = f0; k < floorJobs.length; k++) floorJobs[k].room = room;
       if (it.vacant) { world.vacant.push(room); return; }
       const prev = oldRooms.get(it.id);
       if (prev) room.doorOpen = prev.doorOpen;
@@ -602,14 +608,25 @@ export function createOfis(root, ctx) {
     });
     world.plan = { rows: P.rowCount, perRow: P.perRow, size: P.cells.length };
     buildHalls(B, g, items, areas);
+    addVacantSigns(g);
 
     if (POLISH) {
       const occ = PL.makeOcc(B.p, B.i);
       PL.bakeBatchAO(B, occ);
+      const quiet = [];                                       // the vacant floors (a coarser grid) share one mesh
       for (const j of floorJobs) {
-        const fm = new THREE.Mesh(PL.floorMesh(j.X, j.Z, j.W, j.D, j.hex, occ), MAT.stat);
+        const fg = PL.floorMesh(j.X, j.Z, j.W, j.D, j.hex, occ, 0.012, j.quiet ? 0.6 : 0.3);
+        if (j.room) j.room.tris += fg.index.count / 3;
+        if (j.quiet) { quiet.push(fg); continue; }
+        const fm = new THREE.Mesh(fg, MAT.stat);
         fm.receiveShadow = true; fm.userData.own = true;
         g.add(fm);
+      }
+      if (quiet.length) {
+        const fm = new THREE.Mesh(mergeGeometries(quiet), MAT.stat);
+        fm.receiveShadow = true; fm.userData.own = true;
+        g.add(fm);
+        quiet.forEach(q => q.dispose());
       }
     }
     const stat = new THREE.Mesh(B.build(), MAT.stat);
@@ -702,19 +719,21 @@ export function createOfis(root, ctx) {
     // every office of the building, vacant ones included, in slot order: the stable layout's state (tools/qa/office3d-qa.mjs)
     office() {
       const all = [...world.rooms.values(), ...(world.vacant || [])].sort((a, b) => a.slot - b.slot);
-      return { ...world.plan, minRooms: MIN_ROOMS_NOW, halls: (world.halls || []).map(h => ({ z0: h.z0, z1: h.z1, lane: h.lane, open: h.open })), slots: all.map(r => ({ slot: r.slot, id: r.vacant ? null : r.id, vacant: r.vacant, cls: r.cls, cap: r.cap, X: r.X, Z: r.Z, W: r.W, D: r.D, door: r.door, hall: r.hall })) };
+      return { ...world.plan, minRooms: MIN_ROOMS_NOW, halls: (world.halls || []).map(h => ({ z0: h.z0, z1: h.z1, lane: h.lane, open: h.open })), slots: all.map(r => ({ slot: r.slot, id: r.vacant ? null : r.id, vacant: r.vacant, tris: r.tris, cls: r.cls, cap: r.cap, X: r.X, Z: r.Z, W: r.W, D: r.D, door: r.door, hall: r.hall })) };
     },
   };
 
   // Room shell: carpet, back walls (full height), front walls (low cutaway) and the door facing the hall.
   // door === 'back' → glass door in the back-right wall; 'front' → opening in the low front wall.
-  function buildShell(B, g, X, Z, W, D, th, door) {
+  // quiet: a vacant office. Same walls, floor and door, but nothing is a mesh of its own: the closed door is part of the batch and the floor
+  // joins the other vacant floors in one mesh (a coarser mesh: nobody walks on it).
+  function buildShell(B, g, X, Z, W, D, th, door, quiet = false) {
     const T = WALL_T, H = WALL_H;
     const wall = th.wall, wain = shade(wall, -0.13), rail = shade(wall, 0.5), cap = shade(wall, -0.55), base = shade(wall, -0.38);
     const trim = '#f3efe6';
     const b = (x, y, z, w, hh, d, col, ry) => B.box(X + x, y, Z + z, w, hh, d, col, ry);
 
-    if (POLISH) floorJobs.push({ X, Z, W, D, hex: th.floor });       // drawn after the furniture exists (occlusion), with vertex colours
+    if (POLISH) floorJobs.push({ X, Z, W, D, hex: th.floor, quiet });       // drawn after the furniture exists (occlusion), with vertex colours
     else {
       const fg = new THREE.PlaneGeometry(W, D).rotateX(-Math.PI / 2);
       const fuv = fg.attributes.uv;
@@ -754,13 +773,18 @@ export function createOfis(root, ctx) {
       b(dr + 0.03, DOOR_H / 2, -T / 2, 0.06, DOOR_H + 0.06, T + 0.07, trim);
       b(dx, DOOR_H + 0.03, -T / 2, DOOR_W + 0.12, 0.06, T + 0.07, trim);
       b(dx, 0.006, -T / 2, DOOR_W, 0.012, T, '#8b8f98');
-      // glass door leaf (hinged on the left, opens inward)
-      pivot = new THREE.Group();
-      pivot.position.set(X + dl + 0.02, 0.01, Z - T / 2);
-      const leaf = new THREE.Mesh(doorGeo, MAT.stat); leaf.castShadow = true;
-      const glass = new THREE.Mesh(glassGeo, MAT.glass); glass.renderOrder = 2;
-      pivot.add(leaf, glass);
-      g.add(pivot);
+      if (quiet) {                                                    // a shut door of boxes: a frame and its glass
+        b(dx, DOOR_H / 2 + 0.01, -T / 2, DOOR_W - 0.04, DOOR_H - 0.03, 0.05, '#f2f4f7');
+        b(dx, DOOR_H / 2 + 0.07, -T / 2 + 0.03, DOOR_W - 0.18, DOOR_H - 0.3, 0.02, '#c4e9f5');
+      } else {
+        // glass door leaf (hinged on the left, opens inward)
+        pivot = new THREE.Group();
+        pivot.position.set(X + dl + 0.02, 0.01, Z - T / 2);
+        const leaf = new THREE.Mesh(doorGeo, MAT.stat); leaf.castShadow = true;
+        const glass = new THREE.Mesh(glassGeo, MAT.glass); glass.renderOrder = 2;
+        pivot.add(leaf, glass);
+        g.add(pivot);
+      }
     } else seg(-T, W);
     b((W - T) / 2, H + 0.025, -T / 2, W + T + 0.03, 0.05, T + 0.03, cap);
 
@@ -781,10 +805,81 @@ export function createOfis(root, ctx) {
     return { pivot, cap, dx, signX0: 0.3, signX1: door === 'back' ? dl - 0.3 : W - 0.75 };
   }
 
+  // A vacant office: the walls, floor, door and sign are the office's own (same places, so nothing moves when a chat takes the slot), the
+  // contents are a few bare pieces of the one batch (desks without monitors or chairs, a plant, a sofa) and nothing is a mesh of its own:
+  // no door leaf, no sign mesh (addVacantSigns), no pick boxes of desks, overlay, beam or rings (nobody sleeps or waits here). A chat in the
+  // slot gets buildRoom's full office. Only its two outer walls block the pointer.
+  function buildVacant(B, g, it) {
+    const X = it.X, Z = it.Z, W = it.W, D = ROOM_D, T = WALL_T, H = WALL_H;
+    const th = VACANT_THEME;
+    const b = (x, y, z, w, hh, d, col, ry) => B.box(X + x, y, Z + z, w, hh, d, col, ry);
+    const shell = buildShell(B, g, X, Z, W, D, th, it.door, true);
+    const room = { id: it.id, cls: it.cls, cap: CAP[it.cls], X, Z, W, D, door: it.door, hall: it.hall, slot: it.slot, vacant: true };
+    const desk = (x, z, dep, len) => {                      // a top and its two end panels
+      b(x, 0.6, z, dep, 0.05, len, WOOD);
+      b(x - 0.02, 0.29, z - len / 2 + 0.05, dep - 0.1, 0.58, 0.04, WOOD_D);
+      b(x - 0.02, 0.29, z + len / 2 - 0.05, dep - 0.1, 0.58, 0.04, WOOD_D);
+    };
+    const cz = D / 2;
+    desk(0.95, cz - 0.58, 0.9, 1.17);
+    desk(0.95, cz + 0.58, 0.9, 1.17);
+    for (let k = 0; k < VACANT_DESKS; k++) desk(CHEF_W + 0.55, ROWS_Z[k], 0.66, 1.24);
+    if (!B.model('plant', X + 0.42, 0, Z + 0.42, { h: 1.0, pal: PAL.potFloor, pk: 'floor', ry: 0 })) {
+      B.put(GEO.pot, X + 0.42, 0.19, Z + 0.42, 0.36, 0.38, 0.36, '#c8704a');
+      B.put(GEO.ico, X + 0.42, 0.98, Z + 0.42, 0.66, 0.58, 0.66, '#4c9a4f');
+    }
+    const lx0 = CHEF_W + COLS[it.cls] * COL_W + 0.3, lx1 = W - 0.3, lw = lx1 - lx0;     // the lounge corner of buildRoom: one sofa on its rug
+    if (lw >= 1.5) {
+      const lz = 3.9, sofa = shade(th.wall, -0.28), sx = lx0 + 0.42;
+      b((lx0 + lx1) / 2, 0.018, lz, Math.min(lw - 0.1, 3.4), 0.012, 2.6, '#efe6d2');
+      b(sx, 0.26, lz, 0.72, 0.26, 1.8, sofa);
+      b(sx - 0.28, 0.56, lz, 0.18, 0.52, 1.8, sofa);
+    }
+    // the sign: its frame and body are batch boxes, its face is an instance of the shared plate (addVacantSigns)
+    const sg0 = shell.signX0, sg1 = shell.signX1;
+    const sw = Math.min(sg1 - sg0, 5.4);
+    const scx = sg0 + Math.min(sw / 2 + 0.2, (sg1 - sg0) / 2);
+    b(scx, SIGN_Y, 0.012, sw + 0.1, SIGN_H + 0.1, 0.024, shell.cap);
+    b(scx, SIGN_Y, 0.055, sw, SIGN_H, 0.06, '#1b1f28');
+    world.vacantSigns.push({ x: X + scx, y: SIGN_Y, z: Z + 0.0865, w: sw });
+    hitBox(g, X - T / 2, H / 2, Z + (D - T) / 2, T, H, D + T).userData.pick = { t: 'block' };
+    hitBox(g, X + (W - T) / 2, H / 2, Z - T / 2, W + T, H, T).userData.pick = { t: 'block' };
+    return room;
+  }
+
+  // The faces of the vacant signs: one grey "Vacant" plate painted once per build, drawn as one instanced mesh (one draw call) per sign width.
+  function addVacantSigns(g) {
+    const byW = new Map();
+    for (const s of world.vacantSigns) {
+      const k = s.w.toFixed(2);
+      if (!byW.has(k)) byW.set(k, []);
+      byW.get(k).push(s);
+    }
+    for (const list of byW.values()) {
+      const w = list[0].w, cv = document.createElement('canvas');
+      cv.height = SIGN_PX;
+      cv.width = Math.min(2048, Math.round(SIGN_PX * w / SIGN_H));
+      paintPlaque(cv, { name: msg('of.vacant'), title: '', color: '#8a93a3', status: '' });
+      const g2 = cv.getContext('2d');                      // a veil over it: quiet next to the signs of the chats
+      g2.fillStyle = 'rgba(70,76,88,.5)';
+      g2.fillRect(0, 0, cv.width, cv.height);
+      const tex = new THREE.CanvasTexture(cv);
+      tex.colorSpace = THREE.SRGBColorSpace;
+      tex.anisotropy = aniso;
+      const geo = new THREE.PlaneGeometry(w, SIGN_H), mat = new THREE.MeshBasicMaterial({ map: tex });
+      const im = new THREE.InstancedMesh(geo, mat, list.length);
+      list.forEach((s, i) => im.setMatrixAt(i, _m.makeTranslation(s.x, s.y, s.z)));
+      im.instanceMatrix.needsUpdate = true;
+      im.frustumCulled = false;
+      im.userData.dispose = () => { geo.dispose(); mat.dispose(); tex.dispose(); im.dispose(); };
+      g.add(im);
+    }
+  }
+
   function buildRoom(B, g, it) {
     const X = it.X, Z = it.Z, W = it.W, D = ROOM_D, T = WALL_T, H = WALL_H;
     const a = store.agents.get(it.id);
-    const th = it.vacant ? VACANT_THEME : THEMES[themeOf.get((a && a.project) || it.id) ?? (hash(it.id) % THEMES.length)];
+    const th = THEMES[themeOf.get((a && a.project) || it.id) ?? (hash(it.id) % THEMES.length)];
     const r = rng(hash(it.id));
     const b = (x, y, z, w, hh, d, col, ry) => B.box(X + x, y, Z + z, w, hh, d, col, ry);
     const rb = (x, y, z, w, hh, d, rr, col, ry) => B.rbox(X + x, y, Z + z, w, hh, d, rr, col, ry);
@@ -793,7 +888,7 @@ export function createOfis(root, ctx) {
     const shell = buildShell(B, g, X, Z, W, D, th, it.door);
     const cap = shell.cap;
     const room = {
-      id: it.id, cls: it.cls, cap: CAP[it.cls], X, Z, W, D, door: it.door, hall: it.hall, slot: it.slot, vacant: !!it.vacant,
+      id: it.id, cls: it.cls, cap: CAP[it.cls], X, Z, W, D, door: it.door, hall: it.hall, slot: it.slot, vacant: false,
       chefSeat: new THREE.Vector3(X + 1.95, 0, Z + D / 2),
       doorX: X + shell.dx, doorPt: new THREE.Vector3(X + shell.dx, 0, it.door === 'back' ? Z : Z + D),
       doorPivot: shell.pivot,
@@ -937,8 +1032,7 @@ export function createOfis(root, ctx) {
     const sg0 = shell.signX0, sg1 = shell.signX1;
     const sw = Math.min(sg1 - sg0, 5.4), sh = SIGN_H;
     const scx = sg0 + Math.min(sw / 2 + 0.2, (sg1 - sg0) / 2);
-    if (it.vacant) makeVacantSign(g, X + scx, SIGN_Y, Z, sw, sh);
-    else makeSign(g, room, X + scx, SIGN_Y, Z, sw, sh);
+    makeSign(g, room, X + scx, SIGN_Y, Z, sw, sh);
     b(scx, SIGN_Y, 0.012, sw + 0.1, sh + 0.1, 0.024, cap);
     const poster = x => {
       const bg = POSTERS[(r() * POSTERS.length) | 0], fg = POSTERS[(r() * POSTERS.length) | 0];
@@ -1039,15 +1133,8 @@ export function createOfis(root, ctx) {
             rb(sx + 0.25, 0.78, z, 0.09, 0.58, 0.48, 0.04, CHAIR);
           }
         }
-        if (!it.vacant) hitBox(g, X + ax + 0.75, 0.5, Z + z, 1.2, 1.0, 1.3).userData.pick = { t: 'slot', room: it.id, slot };
+        hitBox(g, X + ax + 0.75, 0.5, Z + z, 1.2, 1.0, 1.3).userData.pick = { t: 'slot', room: it.id, slot };
       }
-    }
-
-    // a vacant office stops here: no overlay, beam or rings (nobody sleeps or waits in it), and only its walls block the pointer
-    if (it.vacant) {
-      hitBox(g, X - T / 2, H / 2, Z + (D - T) / 2, T, H, D + T).userData.pick = { t: 'block' };
-      hitBox(g, X + (W - T) / 2, H / 2, Z - T / 2, W + T, H, T).userData.pick = { t: 'block' };
-      return room;
     }
 
     // dark overlay (sleeping room), yellow light beam and rings (your turn)
@@ -1251,26 +1338,6 @@ export function createOfis(root, ctx) {
   }
 
   // ---------------------------------------------------------- room sign: wall-mounted acrylic plaque
-
-  // A vacant office has a quiet grey sign, painted once: nothing to click, no your-turn lamp.
-  function makeVacantSign(g, x, y, z, w, h) {
-    const cv = document.createElement('canvas');
-    cv.height = SIGN_PX;
-    cv.width = Math.min(2048, Math.round(SIGN_PX * w / h));
-    const tex = new THREE.CanvasTexture(cv);
-    tex.colorSpace = THREE.SRGBColorSpace;
-    tex.anisotropy = aniso;
-    paintPlaque(cv, { name: msg('of.vacant'), title: '', color: '#8a93a3', status: '' });
-    const g2 = cv.getContext('2d');                      // a veil over it: quiet next to the signs of the chats
-    g2.fillStyle = 'rgba(70,76,88,.5)';
-    g2.fillRect(0, 0, cv.width, cv.height);
-    const face = new THREE.MeshBasicMaterial({ map: tex });
-    const mesh = new THREE.Mesh(new THREE.BoxGeometry(w, h, 0.06), [MAT.signSide, MAT.signSide, MAT.signSide, MAT.signSide, face, MAT.signSide]);
-    mesh.position.set(x, y, z + 0.055);
-    mesh.userData.own = true;
-    mesh.userData.dispose = () => { face.dispose(); tex.dispose(); };
-    g.add(mesh);
-  }
 
   function makeSign(g, room, x, y, z, w, h) {
     const cv = document.createElement('canvas');
