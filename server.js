@@ -9,6 +9,7 @@ const http = require('http');
 const { createChatBridge } = require('./chatbridge');
 const { createRecent } = require('./recent');
 const { createSessionCheck } = require('./procident');
+const { createProgress } = require('./progress-file');
 const fs = require('fs');
 const path = require('path');
 const os = require('os');
@@ -30,6 +31,7 @@ let COLORS_FILE = null;
 let INLINE_COLORS = {};
 let CSWAP_URL = null;
 let CHAT = null;   // optional read-only bridge from the agentchat database
+let PROGRESS_FILE = null;   // the task tracker's snapshot of each chat's progress (progress-file.js, docs/progress.md)
 let COST_OPTS = {};   // pricesFile, discount, extraLogs for the cost worker
 let RECENT_OPTS = { days: 14, max: 50, budgetMs: 150 };   // recently closed sessions (recent.js); days 0 turns them off
 let DEMO = false;
@@ -54,6 +56,7 @@ function configure(o) {
   CSWAP_URL = o.cswapUrl || null;
   const chatDb = o.chatDb || process.env.CCO_CHAT_DB;
   CHAT = chatDb ? createChatBridge(path.resolve(expandHome(chatDb))) : null;
+  PROGRESS_FILE = path.resolve(expandHome(o.progressFile || process.env.OFFICE_PROGRESS_FILE || path.join(CLAUDE_DIR, 'office-progress.json')));
   COST_OPTS = {
     pricesFile: o.costPrices ? path.resolve(expandHome(o.costPrices)) : null,
     discount: Number(o.costDiscount) || 0,
@@ -565,6 +568,10 @@ function refreshClosed(justClosed = []) {
   publishClosed(list);
 }
 
+// ---------------------------------------------------------------- task progress (progress-file.js)
+
+let progress = null;               // the reader of the tracker's snapshot file, made by start()
+
 // ---------------------------------------------------------------- summaries
 
 function statusOf(a, t) {
@@ -636,6 +643,7 @@ function summarize(a, t) {
     started: a.kind === 'main' ? (s.startedAt || a.started) : a.started, updated: a.updated,
     version: s.version || '', entry: s.kind || '', remote: !!s.bridgeSessionId,
     subs: subs.map(x => x.id), subsWorking, usd: usdOf(a),
+    progress: a.kind === 'main' && progress ? progress.of(a.id) : null,      // keyed by the session id, which is the main agent's id
   };
 }
 
@@ -721,6 +729,7 @@ function tick() {
     if (demo) demo.step(now());
     else { const justClosed = refreshSessions(); locateAndRead(); discoverSubs(); refreshClosed(justClosed); }
     if (CHAT) CHAT.step(agents, pushEvent, now());
+    if (progress) progress.step();
   } catch (e) { console.error('tick', e); }
   const t = now();
   const forceAll = Math.floor(t / 60e3) !== minuteMark;
@@ -794,6 +803,7 @@ function handler(req, res, next) {
     const { files, ...rest } = s;
     return json(res, { ...rest, ...costPayload() });
   }
+  if (url.pathname === '/api/progress') return json(res, { chats: progress ? progress.all() : {} });          // every entry of the tracker's snapshot, as read
   if (url.pathname === '/api/cswap') return cswap(body => json(res, body || '{"accounts":[]}'));
   // Optional private decorations live in public/local/ (git-ignored) and are never served in demo mode.
   if (DEMO && url.pathname.startsWith('/local/')) { res.writeHead(404); return res.end(); }
@@ -831,6 +841,7 @@ function start() {
     startCostWorker();
     if (RECENT_OPTS.days > 0) recent = createRecent({ projDir: PROJ_DIR, read: readClosed, tail: CLOSED_TAIL, ...RECENT_OPTS });
   }
+  progress = createProgress({ file: DEMO ? null : PROGRESS_FILE });
   tick();
   setInterval(tick, 1000).unref();
   setInterval(() => { for (const res of clients) { try { res.write(': ping\n\n'); } catch { clients.delete(res); } } }, 20e3).unref();
@@ -842,6 +853,7 @@ function start() {
  *   costPrices (Vertex price table file), costDiscount (0.168 = 16.8%), costExtraLogs ([{ file, key }]),
  *   closedDays (14; 0 = no shelf of closed sessions), closedMax (50), closedBudgetMs (150: what one scan may spend reading transcripts),
  *   closedEveryMs (30000: how often the list is looked at again),
+ *   progressFile (<claudeDir>/office-progress.json, or $OFFICE_PROGRESS_FILE: the task tracker's snapshot of each chat's progress, docs/progress.md),
  *   site: { name, home, links: [{ label, href }] }  – shown in the header when mounted into another site
  * Returns { handler(req, res, next), start(), listen(port, host, cb) }.
  */
@@ -889,6 +901,7 @@ function cli(argv) {
   --chat-db <file>    agentchat SQLite database to show (read-only; or set CCO_CHAT_DB)
   --closed-days <n>   How far back closed sessions are listed on the shelf (default 14; 0 = off)
   --closed-max <n>    How many closed sessions at most (default 50)
+  --progress-file <f> Task progress snapshot to show (default <claude dir>/office-progress.json or $OFFICE_PROGRESS_FILE)
 `);
     return;
   }
@@ -900,6 +913,7 @@ function cli(argv) {
   if (val('chat-db')) opts.chatDb = val('chat-db');
   if (val('closed-days')) opts.closedDays = val('closed-days');
   if (val('closed-max')) opts.closedMax = val('closed-max');
+  if (val('progress-file')) opts.progressFile = val('progress-file');
   const port = Number(val('port') || process.env.CCO_PORT || files.port) || 7321;
   const office = createOffice(opts);
   office.listen(port, HOST, url => {
