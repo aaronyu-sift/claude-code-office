@@ -21,6 +21,10 @@
   --r: 18px;
   --r-sm: 12px;
   --shadow: 0 1px 0 rgba(255, 255, 255, .025) inset, 0 10px 30px -18px rgba(0, 0, 0, .7);
+  /* Motion: the rules and the reasons are in docs/motion.md; public/js/motion.js has the same numbers for scripts and the canvas. */
+  --m-hover: 150ms; --m-fast: 200ms; --m-base: 300ms; --m-slow: 450ms; --m-camera: 800ms;
+  --ease-out: cubic-bezier(0.05, 0.7, 0.1, 1); --ease-in: cubic-bezier(0.3, 0, 1, 1); --ease-in-out: cubic-bezier(0.2, 0, 0, 1); --ease-spring: cubic-bezier(0.34, 1.3, 0.64, 1);
+  --slide: 14px;
   --font: "Segoe UI Variable Text", "Segoe UI", Inter, system-ui, -apple-system, sans-serif;
   --font-d: "Segoe UI Variable Display", "Segoe UI", Inter, system-ui, sans-serif;
   --mono: "Cascadia Mono", "Cascadia Code", "JetBrains Mono", Consolas, monospace;
@@ -60,11 +64,21 @@ kbd { font: 10px/1 var(--mono); color: var(--faint); border: 1px solid var(--lin
   position: relative;
   z-index: 5;
 }
+/* In the Office view the page is the map: the bar floats over it as a glass card (the style of the cards of the Setup Atlas page) and the your-turn strip
+   is not shown, because the scene already marks every waiting chat above its agent. --top-h (main.js sets it from the bottom edge of the bar) is where the
+   controls of the map start. */
+body[data-page="ofis"] .top {
+  position: absolute; top: 12px; left: 14px; right: 14px; padding: 8px 14px; border-radius: 18px;
+  background: rgba(9, 12, 28, .80); backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px);
+  border: 1px solid rgba(196, 208, 255, .32); box-shadow: 0 18px 50px -18px rgba(0, 0, 0, .65);
+}
+body[data-page="ofis"] .top .seg { background: rgba(143, 176, 255, .08); }
+body[data-page="ofis"] .attention { display: none; }
 .brand { display: flex; align-items: center; gap: 9px; font: 600 15px/1 var(--font-d); letter-spacing: .1px; color: var(--text); }
 .brand svg { width: 22px; height: 22px; color: var(--accent); }
 
 .seg { display: inline-flex; background: var(--panel); border-radius: 12px; padding: 3px; gap: 2px; }
-.seg button { border: 0; background: transparent; padding: 6px 14px; border-radius: 9px; cursor: pointer; color: var(--muted); font-weight: 500; display: inline-flex; align-items: center; transition: color .15s, background .15s; }
+.seg button { border: 0; background: transparent; padding: 6px 14px; border-radius: 9px; cursor: pointer; color: var(--muted); font-weight: 500; display: inline-flex; align-items: center; transition: color var(--m-hover) var(--ease-out), background var(--m-hover) var(--ease-out); }
 .seg button:hover { color: var(--text); }
 .seg button[aria-selected="true"], .seg button.on { background: var(--panel-3); color: var(--text); }
 .seg button[aria-selected="true"] kbd { color: var(--muted); }
@@ -105,7 +119,7 @@ kbd { font: 10px/1 var(--mono); color: var(--faint); border: 1px solid var(--lin
 .acct .bar i { position: absolute; inset: 0 auto 0 0; border-radius: 2px; opacity: .85; }
 .acct:not(.on) .bar i { opacity: .5; }
 
-.icon-btn { width: 32px; height: 32px; display: grid; place-items: center; border-radius: 10px; border: 0; background: transparent; cursor: pointer; color: var(--faint); transition: color .15s, background .15s; }
+.icon-btn { width: 32px; height: 32px; display: grid; place-items: center; border-radius: 10px; border: 0; background: transparent; cursor: pointer; color: var(--faint); transition: color var(--m-hover) var(--ease-out), background var(--m-hover) var(--ease-out); }
 .icon-btn:hover { color: var(--text); background: var(--panel-2); }
 .icon-btn.on { color: var(--warn); }
 .lang-btn { font: 600 11px/1 var(--font); letter-spacing: .5px; }
@@ -135,7 +149,7 @@ kbd { font: 10px/1 var(--mono); color: var(--faint); border: 1px solid var(--lin
 .attention .lbl .dot { background: var(--warn); box-shadow: 0 0 0 4px rgba(250, 178, 25, .16); }
 .chip {
   display: inline-flex; align-items: center; gap: 8px; padding: 5px 12px 5px 10px; border-radius: 999px;
-  background: rgba(14, 16, 21, .55); border: 0; cursor: pointer; white-space: nowrap; max-width: min(380px, 100%); min-width: 0; transition: background .15s;
+  background: rgba(14, 16, 21, .55); border: 0; cursor: pointer; white-space: nowrap; max-width: min(380px, 100%); min-width: 0; transition: background var(--m-hover) var(--ease-out);
 }
 .chip:hover { background: rgba(14, 16, 21, .85); }
 .chip .sw { width: 7px; height: 7px; border-radius: 50%; flex: none; }
@@ -163,7 +177,7 @@ main { flex: 1; min-height: 0; position: relative; }
 .tile .sub { color: var(--muted); font-size: 12.5px; margin-top: 4px; }
 .tile .sub b { color: var(--text-2); font-weight: 600; }
 .tile canvas { display: block; width: 100%; height: 30px; margin-top: 10px; }
-.tile.link { cursor: pointer; transition: background .15s; }
+.tile.link { cursor: pointer; transition: background var(--m-hover) var(--ease-out); }
 .tile.link:hover { background: var(--panel-2); }
 .tile .go { float: right; color: var(--faint); font-size: 12px; }
 .mixbar { display: flex; height: 8px; border-radius: 4px; overflow: hidden; gap: 2px; margin: 12px 0 12px; background: var(--panel-3); }
@@ -179,7 +193,7 @@ main { flex: 1; min-height: 0; position: relative; }
 .card {
   position: relative; background: var(--panel); border-radius: var(--r); box-shadow: var(--shadow);
   padding: 16px 20px 16px; display: flex; flex-direction: column; gap: 12px; cursor: pointer;
-  transition: background .2s, box-shadow .2s;
+  transition: background var(--m-hover) var(--ease-out), box-shadow var(--m-hover) var(--ease-out);
   overflow: hidden;
 }
 .card:hover { background: var(--panel-2); }
@@ -221,7 +235,7 @@ main { flex: 1; min-height: 0; position: relative; }
 
 .strip { position: relative; }
 .strip canvas { display: block; width: 100%; height: 22px; }
-.strip .ax { position: absolute; left: 0; right: 0; top: 100%; display: flex; justify-content: space-between; font-size: 10.5px; line-height: 1; color: var(--faint); margin-top: 1px; opacity: 0; transition: opacity .2s; pointer-events: none; }
+.strip .ax { position: absolute; left: 0; right: 0; top: 100%; display: flex; justify-content: space-between; font-size: 10.5px; line-height: 1; color: var(--faint); margin-top: 1px; opacity: 0; transition: opacity var(--m-fast) var(--ease-out); pointer-events: none; }
 .card:hover .strip .ax { opacity: 1; }
 
 .stats { display: flex; gap: 6px 16px; flex-wrap: wrap; color: var(--muted); font-size: 12.5px; align-items: center; }
@@ -247,7 +261,7 @@ main { flex: 1; min-height: 0; position: relative; }
 
 .section-h { display: flex; align-items: center; gap: 10px; color: var(--muted); font: 500 12.5px var(--font); margin-top: 6px; }
 .sleepers { display: flex; flex-wrap: wrap; gap: 8px; }
-.sleeper { display: inline-flex; gap: 8px; align-items: center; padding: 7px 14px; border-radius: 999px; border: 0; background: var(--panel); color: var(--muted); cursor: pointer; max-width: 100%; transition: background .15s, color .15s; }
+.sleeper { display: inline-flex; gap: 8px; align-items: center; padding: 7px 14px; border-radius: 999px; border: 0; background: var(--panel); color: var(--muted); cursor: pointer; max-width: 100%; transition: background var(--m-hover) var(--ease-out), color var(--m-hover) var(--ease-out); }
 .sleeper > span:nth-child(3) { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .sleeper:hover { color: var(--text-2); background: var(--panel-2); }
 .sleeper .sq { border-radius: 50%; width: 7px; height: 7px; }
@@ -272,8 +286,8 @@ main { flex: 1; min-height: 0; position: relative; }
 
 .toggle { display: inline-flex; align-items: center; gap: 8px; cursor: pointer; color: var(--text-2); user-select: none; font-size: 12.5px; }
 .toggle input { position: absolute; opacity: 0; width: 1px; height: 1px; }
-.toggle span { width: 28px; height: 16px; border-radius: 999px; background: var(--panel-3); position: relative; transition: background .2s; }
-.toggle span::after { content: ""; position: absolute; left: 3px; top: 3px; width: 10px; height: 10px; border-radius: 50%; background: var(--muted); transition: transform .2s, background .2s; }
+.toggle span { width: 28px; height: 16px; border-radius: 999px; background: var(--panel-3); position: relative; transition: background var(--m-hover) var(--ease-out); }
+.toggle span::after { content: ""; position: absolute; left: 3px; top: 3px; width: 10px; height: 10px; border-radius: 50%; background: var(--muted); transition: transform var(--m-hover) var(--ease-out), background var(--m-hover) var(--ease-out); }
 .toggle input:checked + span { background: rgba(144, 133, 233, .32); }
 .toggle input:checked + span::after { transform: translateX(12px); background: #cfc9ff; }
 .toggle input:focus-visible + span { outline: 2px solid rgba(144, 133, 233, .55); outline-offset: 2px; }
@@ -287,10 +301,11 @@ main { flex: 1; min-height: 0; position: relative; }
   position: fixed; top: 76px; right: 14px; bottom: 14px; width: min(430px, calc(100vw - 28px)); z-index: 21; overflow-y: auto; overscroll-behavior: contain;
   background: rgba(9, 12, 28, .8); backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px); border: 1px solid rgba(196, 208, 255, .32); border-radius: 18px;
   box-shadow: 0 18px 50px -18px rgba(0, 0, 0, .65); scrollbar-width: thin; scrollbar-color: rgba(143, 176, 255, .35) transparent;
-  opacity: 0; visibility: hidden; pointer-events: none; transition: opacity .15s, visibility 0s .15s;
+  opacity: 0; visibility: hidden; pointer-events: none; translate: var(--slide) 0;
+  transition: opacity var(--m-fast) var(--ease-in), translate var(--m-fast) var(--ease-in), visibility 0s linear var(--m-fast);
 }
-.drawer.on { opacity: 1; visibility: visible; pointer-events: auto; transition: opacity .15s; }
-.drawer .oc-menu { bottom: auto; top: calc(100% + 8px); }   /* the Open menu of the floating card opens upward; at the top of the details card it opens downward */
+.drawer.on { opacity: 1; visibility: visible; pointer-events: auto; translate: 0 0; transition: opacity var(--m-base) var(--ease-out), translate var(--m-base) var(--ease-out); }
+.drawer .oc-menu { bottom: auto; top: calc(100% + 8px); --pop: -6px; }   /* the Open menu of the floating card opens upward; at the top of the details card it opens downward */
 .dw-head { position: sticky; top: 0; background: linear-gradient(180deg, var(--panel) 88%, rgba(12, 16, 36, 0)); padding: 16px 18px 12px; z-index: 2; }
 .dw-row { display: flex; align-items: center; gap: 10px; min-width: 0; }
 .dw-row .sw { width: 10px; height: 10px; border-radius: 50%; flex: none; }
@@ -334,7 +349,7 @@ main { flex: 1; min-height: 0; position: relative; }
 .lrow.empty-row { color: var(--muted); display: block; }
 .x-btn { margin-left: auto; flex: none; }
 .spark { display: block; width: 100%; height: 56px; }
-.ghost-btn { align-self: flex-start; border: 0; background: var(--panel-2); color: var(--text-2); border-radius: 999px; padding: 6px 14px; font-size: 12.5px; cursor: pointer; margin-top: 8px; transition: background .15s; }
+.ghost-btn { align-self: flex-start; border: 0; background: var(--panel-2); color: var(--text-2); border-radius: 999px; padding: 6px 14px; font-size: 12.5px; cursor: pointer; margin-top: 8px; transition: background var(--m-hover) var(--ease-out); }
 .ghost-btn:hover { background: var(--panel-3); color: var(--text); }
 
 /* ---------------------------------------------------------------- tooltip */
@@ -342,7 +357,7 @@ main { flex: 1; min-height: 0; position: relative; }
 .tip {
   position: fixed; z-index: 40; pointer-events: none; max-width: 360px; padding: 10px 13px; border-radius: 13px;
   background: rgba(27, 31, 39, .98); box-shadow: 0 0 0 1px rgba(255, 255, 255, .06), 0 16px 40px -12px rgba(0, 0, 0, .7);
-  font-size: 12.5px; opacity: 0; transform: translateY(4px); transition: opacity .12s, transform .12s;
+  font-size: 12.5px; opacity: 0; transform: translateY(4px); transition: opacity var(--m-fast) var(--ease-out), transform var(--m-fast) var(--ease-out);
 }
 .tip.on { opacity: 1; transform: none; }
 .tip .h { display: flex; gap: 7px; align-items: center; font-weight: 600; margin-bottom: 3px; }
@@ -363,14 +378,14 @@ main { flex: 1; min-height: 0; position: relative; }
 .mly-note { margin: 4px 0 0; color: var(--muted); font-size: 12.5px; max-width: 720px; }
 .mly-scan { margin-left: auto; color: var(--faint); font-size: 12px; display: flex; align-items: center; gap: 10px; white-space: nowrap; }
 .mly-scan .track { width: 120px; height: 4px; border-radius: 2px; background: var(--panel-3); overflow: hidden; }
-.mly-scan .track i { display: block; height: 100%; background: var(--total); border-radius: 2px; transition: width .4s; }
+.mly-scan .track i { display: block; height: 100%; background: var(--total); border-radius: 2px; transition: width var(--m-slow) var(--ease-in-out); }
 .mly-scan b { color: var(--text-2); font-weight: 600; }
 .mly-tiles { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 14px; }
 .mly-tiles .tile .big { font-size: 26px; }
 .mly-tiles .tile.hero-t .big { font-size: 30px; }
 .mly-filter { display: flex; align-items: center; gap: 12px; color: var(--muted); font-size: 12.5px; flex-wrap: wrap; }
 .mly-grid { display: grid; grid-template-columns: minmax(0, 1.75fr) minmax(0, 1fr); gap: 14px; align-items: start; }
-.mcard { background: var(--panel); border-radius: var(--r); padding: 18px 20px 16px; box-shadow: var(--shadow); min-width: 0; transition: opacity .2s; }
+.mcard { background: var(--panel); border-radius: var(--r); padding: 18px 20px 16px; box-shadow: var(--shadow); min-width: 0; transition: opacity var(--m-fast) var(--ease-out); }
 .mcard.stale { opacity: .6; }
 .mcard > header { display: flex; align-items: baseline; gap: 10px; margin-bottom: 12px; flex-wrap: wrap; }
 .mcard h3 { margin: 0; font: 600 14px var(--font-d); }
@@ -560,6 +575,8 @@ main { flex: 1; min-height: 0; position: relative; }
   box-shadow: 0 18px 50px -18px rgba(0, 0, 0, .65); user-select: text; -webkit-user-select: text; cursor: default;
 }
 .of-card[hidden] { display: none; }
+.of-card[data-motion="out"], .of-shelf[data-motion="out"], .of-shelf-tab[data-motion="out"] { pointer-events: none; }
+.of-card.glide { transition: transform var(--m-base) var(--ease-in-out); }          /* a card that moves from one agent to another glides; while the view is panned or zoomed it follows at once */
 .of-card.away { visibility: hidden; pointer-events: none; }
 .of-card::before { content: ""; display: none; position: absolute; width: 12px; height: 12px; background: rgba(12, 16, 36, .96); border: 1px solid rgba(196, 208, 255, .32); transform: rotate(45deg); }
 .of-card[data-tail="left"]::before { display: block; left: -7px; top: calc(var(--tail) - 6px); border-right: 0; border-top: 0; }
@@ -603,7 +620,7 @@ main { flex: 1; min-height: 0; position: relative; }
 .oc-more-n { align-self: center; color: #a9b3d6; font: 12px var(--mono); }
 .oc-actions { display: flex; align-items: center; gap: 8px; flex: none; margin-top: 12px; padding-top: 10px; border-top: 1px solid rgba(150, 165, 255, .22); }
 .oc-open { position: relative; display: inline-flex; }
-.oc-go, .oc-caret, .oc-more { display: inline-flex; align-items: center; gap: 7px; min-height: 34px; padding: 4px 14px; font: inherit; font-size: 13.5px; color: #eaeeff; text-decoration: none; white-space: nowrap; cursor: pointer; border: 1px solid rgba(196, 208, 255, .32); background: rgba(10, 14, 32, .55); transition: border-color .2s, background .2s; }
+.oc-go, .oc-caret, .oc-more { display: inline-flex; align-items: center; gap: 7px; min-height: 34px; padding: 4px 14px; font: inherit; font-size: 13.5px; color: #eaeeff; text-decoration: none; white-space: nowrap; cursor: pointer; border: 1px solid rgba(196, 208, 255, .32); background: rgba(10, 14, 32, .55); transition: border-color var(--m-hover) var(--ease-out), background var(--m-hover) var(--ease-out); }
 .oc-go { border-radius: 999px 0 0 999px; border-color: #8fb0ff; background: rgba(143, 176, 255, .22); font-weight: 600; }
 .oc-go .ic { width: 14px; height: 14px; }
 .oc-caret { margin-left: -1px; padding: 4px 10px; border-radius: 0 999px 999px 0; }
@@ -611,6 +628,8 @@ main { flex: 1; min-height: 0; position: relative; }
 .oc-more { margin-left: auto; border-radius: 999px; }
 .oc-menu { position: absolute; left: 0; bottom: calc(100% + 8px); z-index: 3; min-width: 268px; margin: 0; padding: 6px; list-style: none; border-radius: 14px; background: rgba(9, 12, 28, .97); border: 1px solid rgba(196, 208, 255, .32); box-shadow: 0 18px 40px -14px rgba(0, 0, 0, .7); }
 .oc-menu[hidden] { display: none; }
+.oc-menu:not([hidden]) { animation: m-pop var(--m-fast) var(--ease-out); }
+@keyframes m-pop { from { opacity: 0; translate: 0 var(--pop, 6px); } }
 .oc-item { display: flex; align-items: center; gap: 9px; width: 100%; padding: 7px 9px; border: 0; border-radius: 9px; background: none; color: #eaeeff; font: inherit; font-size: 13.5px; text-align: left; text-decoration: none; cursor: pointer; }
 .oc-item:hover:not(.off), .oc-item:focus-visible { background: rgba(143, 176, 255, .12); }
 .oc-item .ic { flex: none; width: 14px; height: 14px; color: #8fb0ff; }
@@ -618,7 +637,7 @@ main { flex: 1; min-height: 0; position: relative; }
 .oc-sep { height: 1px; margin: 5px 4px; background: rgba(150, 165, 255, .22); }
 .oc-hint { margin: 4px 4px 2px; padding: 6px 8px 2px; border-top: 1px solid rgba(150, 165, 255, .22); color: #a9b3d6; font-size: 12px; line-height: 1.4; }
 
-.of-hud { position: absolute; left: 16px; top: 14px; right: 70px; pointer-events: none; }
+.of-hud { position: absolute; left: 16px; top: calc(var(--top-h, 72px) + 4px); right: 70px; pointer-events: none; }
 .of-sum {
   display: inline-flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; padding: 7px 13px;
   border-radius: 12px; background: color-mix(in srgb, var(--panel) 88%, transparent);
@@ -632,21 +651,21 @@ main { flex: 1; min-height: 0; position: relative; }
 .of-area { position: relative; flex: 1 1 auto; min-width: 0; height: 100%; overflow: hidden; }
 /* The right-hand column: the shelf card (the style of the cards of the Setup Atlas page: dark glass, hairline border, mono chip, round buttons) with the zoom
    buttons right under it. The Office is dark whatever the system theme is, so the colours here are fixed. With no card (the shelf is empty or folded) the
-   column is only the buttons, and they float in the bottom-right corner of the view over the scene, which then spans the full width. */
+   column is only the buttons, and they float in the bottom-right corner of the view. Both float over the scene, which spans the whole view. */
 .of-side, .of-shelf-tab {
   --sh-ink: #eaeeff; --sh-muted: #a9b3d6; --sh-accent: #8fb0ff; --sh-line: rgba(150, 165, 255, .22); --sh-hair: rgba(196, 208, 255, .32);
   --sh-mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace; color-scheme: dark;
 }
 .of-side { position: absolute; right: 16px; bottom: 16px; z-index: 4; display: flex; flex-direction: column; align-items: flex-end; gap: 10px; min-height: 0; pointer-events: none; }
 .of-side > * { pointer-events: auto; }
-.view-ofis[data-shelf="open"] .of-side { position: static; flex: 0 0 auto; width: 340px; height: 100%; padding: 14px 16px 14px 14px; align-items: stretch; }
+.view-ofis[data-shelf="open"] .of-side { top: calc(var(--top-h, 72px) + 4px); right: 0; bottom: 0; width: 340px; padding: 0 16px 16px 14px; align-items: stretch; }
 .of-ctl { display: flex; gap: 6px; align-self: flex-end; flex: none; }
 .of-ctl button, .sh-hide, .sh-more-btn, .of-shelf-tab {
   border: 1px solid var(--sh-hair); background: var(--sh-btn, rgba(10, 14, 32, .55)); color: var(--sh-ink); cursor: pointer;
-  transition: border-color .2s, background .2s;
+  transition: border-color var(--m-hover) var(--ease-out), background var(--m-hover) var(--ease-out);
 }
 .of-ctl button:hover, .sh-hide:hover, .sh-more-btn:hover, .of-shelf-tab:hover { border-color: var(--sh-accent); background: rgba(30, 40, 84, .7); }
-.view-ofis:not([data-shelf="open"]) .of-side, .of-shelf-tab { --sh-btn: rgba(9, 12, 28, .80); }          /* over the scene, not over the dark page: more opaque, so the glyphs stay readable on the grass */
+.of-side, .of-shelf-tab { --sh-btn: rgba(9, 12, 28, .80); }          /* always over the scene: opaque enough that the glyphs stay readable on the grass */
 .of-ctl button:disabled { opacity: .45; cursor: default; }
 .of-ctl button:disabled:hover { border-color: var(--sh-hair); background: var(--sh-btn, rgba(10, 14, 32, .55)); }
 .of-ctl button { width: 34px; height: 34px; display: grid; place-items: center; padding: 0; border-radius: 50%; backdrop-filter: blur(6px); -webkit-backdrop-filter: blur(6px); font: 500 17px/1 var(--font); }
@@ -675,11 +694,11 @@ main { flex: 1; min-height: 0; position: relative; }
 .sh-more { flex: none; display: flex; flex-direction: column; align-items: flex-start; gap: 8px; margin-top: 10px; padding-top: 10px; border-top: 1px solid var(--sh-line); color: var(--sh-muted); font-size: 13px; line-height: 1.4; }
 .sh-more[hidden] { display: none; }
 .sh-more-btn { min-height: 30px; padding: 2px 14px; border-radius: 999px; font: 500 13px/1.4 var(--font); }
-.of-shelf-tab { position: absolute; top: 14px; right: 16px; z-index: 3; padding: 1px 12px; border-radius: 999px; backdrop-filter: blur(6px); -webkit-backdrop-filter: blur(6px); color: var(--sh-accent); font: 600 12px/1.6 var(--sh-mono); letter-spacing: .08em; text-transform: uppercase; }
+.of-shelf-tab { position: absolute; top: calc(var(--top-h, 72px) + 4px); right: 16px; z-index: 3; padding: 1px 12px; border-radius: 999px; backdrop-filter: blur(6px); -webkit-backdrop-filter: blur(6px); color: var(--sh-accent); font: 600 12px/1.6 var(--sh-mono); letter-spacing: .08em; text-transform: uppercase; }
 .of-shelf-tab[hidden] { display: none; }
 .view-ofis[data-shelf="collapsed"] .of-hud { right: 140px; }           /* room for the tab at the corner */
 @media (max-width: 760px) {
-  .view-ofis[data-shelf="open"] .of-side { position: absolute; top: 0; right: 0; bottom: 0; z-index: 6; width: min(340px, 100%); padding: 8px 8px 8px 0; pointer-events: none; --sh-btn: rgba(9, 12, 28, .80); }
+  .view-ofis[data-shelf="open"] .of-side { z-index: 6; width: min(340px, 100%); padding: 0 8px 8px 0; }
 }
 .of-empty { position: absolute; inset: 0; display: grid; place-items: center; color: var(--muted); pointer-events: none; }
 .of-empty[hidden] { display: none; }
@@ -713,13 +732,16 @@ main { flex: 1; min-height: 0; position: relative; }
 .px-l.px-sub.done { color: var(--ok); }
 
 @media (max-width: 640px) {
-  .of-hud { left: 8px; top: 8px; right: 52px; }
+  .of-hud { left: 8px; top: calc(var(--top-h, 72px) + 4px); right: 52px; }
   .of-sum { font-size: 12px; padding: 6px 10px; }
   .of-side { right: 8px; bottom: 8px; }
   .of-ctl button { width: 30px; height: 30px; }
 }
 @media (prefers-reduced-motion: reduce) {
   .of-bal.wait, .of-bal.think i { animation: none; }
+  .oc-menu:not([hidden]) { animation: none; }
+  .drawer { translate: 0 0; }
+  .of-card.glide { transition: none; }
 }
 
 /* site bar — shown only when mounted inside another site (createOffice({ site })).
@@ -730,7 +752,7 @@ main { flex: 1; min-height: 0; position: relative; }
 .sitebar__name { flex: none; margin-right: 14px; padding: 6px 0; font: 600 15px/1 var(--font-d); letter-spacing: .1px; color: var(--text); text-decoration: none; white-space: nowrap; }
 .sitebar__links { display: flex; gap: 2px; min-width: 0; overflow-x: auto; scrollbar-width: none; }
 .sitebar__links::-webkit-scrollbar { display: none; }
-.sitebar__links a { flex: none; display: flex; align-items: center; height: 32px; padding: 0 12px; border-radius: 10px; font: 500 13.5px/1 var(--font); color: var(--muted); text-decoration: none; white-space: nowrap; transition: color .15s, background .15s; }
+.sitebar__links a { flex: none; display: flex; align-items: center; height: 32px; padding: 0 12px; border-radius: 10px; font: 500 13.5px/1 var(--font); color: var(--muted); text-decoration: none; white-space: nowrap; transition: color var(--m-hover) var(--ease-out), background var(--m-hover) var(--ease-out); }
 .sitebar__links a:hover { color: var(--text); background: var(--panel); }
 .sitebar__links a[aria-current="page"] { color: var(--text); background: var(--panel-3); }
 /* header while mounted: the brand shouldn't repeat the site bar, so main.js shows the section name instead */

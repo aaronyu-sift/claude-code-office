@@ -209,11 +209,19 @@ for (const seg of document.querySelectorAll('.proj-seg')) seg.addEventListener('
   syncProjSeg();
 });
 
+// --top-h: where the controls of the map start (the bottom edge of the bar, which floats over the map in the Office view)
+const topBar = document.querySelector('.top');
+const syncTopH = () => document.documentElement.style.setProperty('--top-h', Math.round(topBar.getBoundingClientRect().bottom) + 'px');
+new ResizeObserver(syncTopH).observe(topBar);
+syncTopH();
+
 function setView(name) {
   if (!views[name]) name = 'pano';
   if (current === name) return;
   if (current) { views[current].hide(); document.getElementById('view-' + current).hidden = true; }
   current = name;
+  document.body.dataset.page = name;                                  // the Office view floats the bar over the map (app.css)
+  syncTopH();
   document.getElementById('view-' + name).hidden = false;
   views[name].show();
   syncProjSeg();

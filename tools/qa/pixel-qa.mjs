@@ -337,9 +337,9 @@ if (want('time')) {
     const noSky = await P("typeof p.skyAt === 'undefined' && !document.querySelector('.of-sky')");
     const nightStage = rows.find(r => r.min === 22 * 60), sameLabel = rows.every(r => r.label === noon.label), noErr = rows.every(r => r.errors === 0 && r.figures === ids.length);
     const req = worst.filter(w => REQUIRED.includes(w.r.min)).map(w => `${hhmm(w.r.min)} ${w.r.phase}: lowest ${w.min.toFixed(2)}, mean ${w.mean.toFixed(2)}, lit ${['window', 'lamp', 'monitor'].map(k => `${k} ${w.r.fx.lights[k] || 0}`).join(' ')}`);
-    check('11-time', start.fixed && start.clock === '12:00' && lowRows.length === 0 && unlit.length === 0 && lit.length === 0 && stages.size >= 4 && stageLum(nightStage) < 0.6 * stageLum(noon) && noSky && sameLabel && noErr,
+    check('11-time', start.fixed && start.clock === '12:00' && lowRows.length === 0 && unlit.length === 0 && lit.length === 0 && stages.size >= 4 && stageLum(nightStage) < 0.75 * stageLum(noon) && noSky && sameLabel && noErr,
       `${ids.length} agents, month ${start.month}; luminance of every agent's silhouette as a share of its noon value, at ${order.length} times (the six required and every hour): lowest of all ${lowest.min.toFixed(2)} at ${hhmm(lowest.r.min)} (floor 0.60), times below the floor ${lowRows.length}; ` +
-      `${req.join('; ')}; after dark (${dark.length} of those times) windows, lamps and monitors all lit at ${dark.length - unlit.length}; in daylight (${day.length} times) lights drawn at ${lit.length}; the ground colour behind the scene (there is no sky, sun, moon or stars) at the six times: ${stages.size} different values (no sky element: ${noSky}), 22:00 is ${(stageLum(nightStage) / stageLum(noon) * 100).toFixed(0)} percent as bright as noon; label colours identical at every time: ${sameLabel} (${noon.label}); errors ${S.page.errors.length}; ?time=12:00 start: fixed ${start.fixed}, ticker ${start.ticking}`);
+      `${req.join('; ')}; after dark (${dark.length} of those times) windows, lamps and monitors all lit at ${dark.length - unlit.length}; in daylight (${day.length} times) lights drawn at ${lit.length}; the ground colour behind the scene (there is no sky, sun, moon or stars) at the six times: ${stages.size} different values (no sky element: ${noSky}), 22:00 is ${(stageLum(nightStage) / stageLum(noon) * 100).toFixed(0)} percent as bright as noon (limit 75: the night tint of the ground is a quarter to a third dark); label colours identical at every time: ${sameLabel} (${noon.label}); errors ${S.page.errors.length}; ?time=12:00 start: fixed ${start.fixed}, ticker ${start.ticking}`);
   } finally { await S.done(); }
 
   // the clock is the browser's local clock: two emulated time zones show their own hour, and nothing re-tints except at a minute boundary
@@ -497,7 +497,7 @@ if (want('shelf')) {
     const labels = (await P('p.labelRects()')).filter(l => l.shown).map(l => ({ x: A.left + l.x, y: A.top + l.y, w: l.w, h: l.h }));
     const overLabels = labels.filter(l => hit(l, sh.rect)).length;
     const overTargets = (await P(`p.figures().map(id => p.agentCss(id))`)).filter(f => f && hit({ x: A.left + f.x - 12, y: A.top + f.y - 12, w: 24, h: 24 }, sh.rect)).length;
-    const sceneClear = A.right <= sh.rect.x + 1 && canvasR.right <= sh.rect.x + 1 && A.width + sh.rect.w <= (await ev('innerWidth')) + 1;
+    const sceneClear = A.width >= (await ev('innerWidth')) - 1 && canvasR.width >= (await ev('innerWidth')) - 1 && sh.rect.x + sh.rect.w <= (await ev('innerWidth')) + 1 && await ev(`(() => { const r = document.querySelector('.of-shelf').getBoundingClientRect(), e = document.elementFromPoint(r.left + r.width / 2, r.top + 40); return !!e && !!e.closest('.of-shelf'); })()`);          // the scene spans the whole view and the card floats over it
     // the card is the first thing in the right-hand column and the zoom buttons come right after it, outside the scene area
     const columnOk = await ev(`(() => { const h = document.querySelector('.of-shelf'), c = document.querySelector('.of-ctl'); return h.parentElement.classList.contains('of-side') && h.nextElementSibling === c && !document.querySelector('.of-area').contains(c) && c.getBoundingClientRect().top >= h.getBoundingClientRect().bottom - 0.5; })()`);
     const z0 = await P('p.zoom'), pan0 = await P('p.pan');
@@ -533,10 +533,10 @@ if (want('shelf')) {
       S.ready && orderOk && namesOk && !whenBad.length && !figBad.length && !!longName && sh.count === `${expected.length} chats` &&
       !waitingOnShelf.length && waitingInRooms.length === waiting.length && waiting.length > 0 && asleepOnShelf.length === asleep.length && !asleepInRooms.length && asleep.length > 0 &&
       sceneClear && columnOk && overLabels === 0 && overTargets === 0 && sh.scroll.height > sh.scroll.client && sh.scroll.overflowY === 'auto' && scrolled.scroll.top > 0 && sceneStill &&
-      folded.mode === 'collapsed' && !folded.tabHidden && /^Shelf · \d+$/.test(folded.tab) && foldedStore === 'closed' && foldedArea > A.width + 200 &&
+      folded.mode === 'collapsed' && !folded.tabHidden && /^Shelf · \d+$/.test(folded.tab) && foldedStore === 'closed' && Math.abs(foldedArea - A.width) < 1 &&
       unfolded.mode === 'open' && unfolded.tabHidden && unfoldedStore === 'open' &&
       api1 === api2 && reloaded.rows.map(r => r.id).join() === idsBefore,
-      `${live.length} live + ${S.fx.closed.length} closed sessions: shelf "${sh.title}", ${sh.count} (${sh.rows.filter(r => r.kind === 'closed').length} closed, ${sh.rows.filter(r => r.kind === 'dormant').length} asleep); order newest first as expected ${orderOk}; full chat names ${namesOk} (longest ${Math.max(...sh.rows.map(r => r.name.length))} chars, emoji name included); times: ${sh.rows.slice(0, 4).map(r => `"${r.when}"`).join(', ')} … within tolerance of the fixture ages (off ${whenBad.length}); figures drawn in every row (${sh.rows.length - figBad.length}/${sh.rows.length}, ${sh.rows[0].figure.w}x${sh.rows[0].figure.h} px); waiting (${waiting.length}): on the shelf ${waitingOnShelf.length}, in rooms ${waitingInRooms.length}; asleep (${asleep.length}): on the shelf ${asleepOnShelf.length}, in rooms ${asleepInRooms.length}; lane x ${sh.rect.x.toFixed(0)}..${(sh.rect.x + sh.rect.w).toFixed(0)}, scene ends at ${A.right.toFixed(0)} (canvas ${canvasR.right.toFixed(0)}), the zoom buttons right under the card in the same column ${columnOk}, overlap with ${labels.length} shown labels ${overLabels}, with figure targets ${overTargets}; own scroll: content ${sh.scroll.height} px in ${sh.scroll.client} px (${sh.scroll.overflowY}), wheel on the lane moved it to ${scrolled.scroll.top.toFixed(0)} and left the scene's zoom and pan alone ${sceneStill}; fold: ${folded.mode} (tab "${folded.tab}", saved "${foldedStore}", scene ${foldedArea.toFixed(0)} px wide against ${A.width.toFixed(0)}), unfold: ${unfolded.mode} (saved "${unfoldedStore}"); the server's list twice identical ${api1 === api2}; the shelf after a reload identical ${reloaded.rows.map(r => r.id).join() === idsBefore}`);
+      `${live.length} live + ${S.fx.closed.length} closed sessions: shelf "${sh.title}", ${sh.count} (${sh.rows.filter(r => r.kind === 'closed').length} closed, ${sh.rows.filter(r => r.kind === 'dormant').length} asleep); order newest first as expected ${orderOk}; full chat names ${namesOk} (longest ${Math.max(...sh.rows.map(r => r.name.length))} chars, emoji name included); times: ${sh.rows.slice(0, 4).map(r => `"${r.when}"`).join(', ')} … within tolerance of the fixture ages (off ${whenBad.length}); figures drawn in every row (${sh.rows.length - figBad.length}/${sh.rows.length}, ${sh.rows[0].figure.w}x${sh.rows[0].figure.h} px); waiting (${waiting.length}): on the shelf ${waitingOnShelf.length}, in rooms ${waitingInRooms.length}; asleep (${asleep.length}): on the shelf ${asleepOnShelf.length}, in rooms ${asleepInRooms.length}; card x ${sh.rect.x.toFixed(0)}..${(sh.rect.x + sh.rect.w).toFixed(0)} floating over a scene ${A.width.toFixed(0)} px wide (canvas ${canvasR.width.toFixed(0)}, the whole view: ${sceneClear}), the zoom buttons right under the card in the same column ${columnOk}, overlap with ${labels.length} shown labels ${overLabels}, with figure targets ${overTargets}; own scroll: content ${sh.scroll.height} px in ${sh.scroll.client} px (${sh.scroll.overflowY}), wheel on the lane moved it to ${scrolled.scroll.top.toFixed(0)} and left the scene's zoom and pan alone ${sceneStill}; fold: ${folded.mode} (tab "${folded.tab}", saved "${foldedStore}", scene ${foldedArea.toFixed(0)} px wide against ${A.width.toFixed(0)}), unfold: ${unfolded.mode} (saved "${unfoldedStore}"); the server's list twice identical ${api1 === api2}; the shelf after a reload identical ${reloaded.rows.map(r => r.id).join() === idsBefore}`);
 
     // ---- the card, from a shelf entry and from a figure in a room
     const card = () => P('p.card');
@@ -619,9 +619,9 @@ if (want('shelf-style')) {
   const geoOf = ev => ev(`(() => {
     const r = e => { const b = e.getBoundingClientRect(); return { x: b.left, y: b.top, w: b.width, h: b.height, r: b.right, b: b.bottom }; };
     const view = document.querySelector('#view-ofis'), side = view.querySelector('.of-side'), host = view.querySelector('.of-shelf'), list = view.querySelector('.sh-list'), area = view.querySelector('.of-area');
-    const btns = [...view.querySelectorAll('.of-ctl button')], lr = r(list), foot = view.querySelector('.sh-more');
+    const btns = [...view.querySelectorAll('.of-ctl button')], lr = r(list), foot = view.querySelector('.sh-more'), bar = r(document.querySelector('.top'));
     return JSON.stringify({
-      listB: lr.b, foot: foot.hidden || host.hidden ? null : r(foot),
+      listB: lr.b, bar, barPos: getComputedStyle(document.querySelector('.top')).position, foot: foot.hidden || host.hidden ? null : r(foot),
       mode: view.dataset.shelf, view: r(view), area: r(area), canvas: r(view.querySelector('.of-main')), side: r(side), host: host.hidden ? null : r(host),
       btns: btns.map(r), inArea: btns.some(b => area.contains(b)), reachable: btns.map(b => { const q = b.getBoundingClientRect(), e = document.elementFromPoint(q.left + q.width / 2, q.top + q.height / 2); return e === b || b.contains(e); }),
       rows: host.hidden ? [] : [...list.children].map(li => r(li)).filter(b => b.b > lr.y && b.y < lr.b).map(b => ({ x: b.x, w: b.w, y: Math.max(b.y, lr.y), h: Math.min(b.b, lr.b) - Math.max(b.y, lr.y) })),   // the part of each row that is on show (the rest is scrolled out and clipped)
@@ -654,11 +654,11 @@ if (want('shelf-style')) {
       eq(tag + ' card radius', [st.card.borderTopLeftRadius, st.card.borderBottomRightRadius], ['18px', '18px']); eq(tag + ' card padding', [st.card.paddingTop, st.card.paddingLeft], ['14px', '16px']);
       eq(tag + ' chip', [st.chip.color, st.chip.fontWeight, st.chip.fontSize, st.chip.textTransform, st.chip.letterSpacing, st.chip.borderTopColor, st.chip.borderTopLeftRadius, st.chip.paddingLeft], ['rgb(143, 176, 255)', '600', '12px', 'uppercase', '0.96px', 'rgba(150, 165, 255, 0.22)', '999px', '10px']);
       if (!/ui-monospace/.test(st.chip.fontFamily) || !/ui-monospace/.test(st.when.fontFamily)) bad.push(tag + ' mono font ' + st.chip.fontFamily);
-      eq(tag + ' hide button', [st.hide.borderTopLeftRadius, st.hide.width, st.hide.height, st.hide.borderTopColor, st.hide.backgroundColor], ['50%', '28px', '28px', 'rgba(196, 208, 255, 0.32)', 'rgba(10, 14, 32, 0.55)']);
+      eq(tag + ' hide button', [st.hide.borderTopLeftRadius, st.hide.width, st.hide.height, st.hide.borderTopColor, st.hide.backgroundColor], ['50%', '28px', '28px', 'rgba(196, 208, 255, 0.32)', 'rgba(9, 12, 28, 0.8)']);
       eq(tag + ' row', [st.row.borderTopLeftRadius, st.row.paddingTop, st.row.paddingLeft], ['10px', '6px', '8px']);
       eq(tag + ' name', [st.name.fontSize, st.name.fontWeight, st.name.color], ['14px', '600', 'rgb(234, 238, 255)']); eq(tag + ' meta', [st.meta.fontSize, st.meta.color], ['13px', 'rgb(169, 179, 214)']); eq(tag + ' time', st.when.fontSize, '12px');
-      eq(tag + ' footer button', [st.more.borderTopLeftRadius, st.more.borderTopColor, st.more.backgroundColor, st.more.color], ['999px', 'rgba(196, 208, 255, 0.32)', 'rgba(10, 14, 32, 0.55)', 'rgb(234, 238, 255)']);
-      eq(tag + ' zoom button', [st.zoom.borderTopLeftRadius, st.zoom.borderTopWidth, st.zoom.borderTopColor, st.zoom.backgroundColor], ['50%', '1px', 'rgba(196, 208, 255, 0.32)', 'rgba(10, 14, 32, 0.55)']);
+      eq(tag + ' footer button', [st.more.borderTopLeftRadius, st.more.borderTopColor, st.more.backgroundColor, st.more.color], ['999px', 'rgba(196, 208, 255, 0.32)', 'rgba(9, 12, 28, 0.8)', 'rgb(234, 238, 255)']);
+      eq(tag + ' zoom button', [st.zoom.borderTopLeftRadius, st.zoom.borderTopWidth, st.zoom.borderTopColor, st.zoom.backgroundColor], ['50%', '1px', 'rgba(196, 208, 255, 0.32)', 'rgba(9, 12, 28, 0.8)']);
     };
     const dark = await readStyles(); checkStyles(dark, 'dark');
     await S.page.send('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-color-scheme', value: 'light' }] });
@@ -698,10 +698,16 @@ if (want('shelf-style')) {
       if (!g.reachable.every(Boolean)) bad.push(`${L}: a zoom button is covered by something (hit test)`);
       if (!vOk) bad.push(`${L}: the card or a zoom button leaves the window`);
       if (g.names.some(n => n.clipped)) bad.push(`${L}: a chat name is cut off`);
-      if (w >= 761) {            // a column beside the scene: the scene ends where the column starts, so nothing of the scene lies under the buttons or the card
-        if (!(g.area.r <= g.side.x + 0.5 && g.canvas.r <= g.side.x + 0.5)) bad.push(`${L}: the scene (to ${g.area.r.toFixed(0)}) reaches into the column (from ${g.side.x.toFixed(0)})`);
-        if (labs.some(l => hit(l, btnsRect) || hit(l, g.host)) || figs.some(f => hit(f, btnsRect) || hit(f, g.host))) bad.push(`${L}: a label or an agent lies under the card or the buttons`);
-        if (g.view.w - g.area.w < 300) bad.push(`${L}: the column is only ${(g.view.w - g.area.w).toFixed(0)} px wide`);
+      if (w >= 761) {            // the card floats over the scene, which spans the whole view; "fit" frames the offices in the free part, so no label or agent lies under the card, the buttons or the bar
+        if (Math.abs(g.area.w - g.view.w) > 1 || Math.abs(g.canvas.w - g.view.w) > 1) bad.push(`${L}: the scene is ${g.area.w.toFixed(0)} px wide in a ${g.view.w.toFixed(0)} px view (it must span all of it, the card floats over it)`);
+        // an agent is never under the card, the buttons or the bar; a label (up to 115 px tall) may reach under the bar, because the world must cover the view and
+        // the offices cannot be moved down where the world ends (a window much wider than the world is tall)
+        const under = (o, what) => [['the card', g.host], ['the buttons', btnsRect], ['the bar', g.bar]].filter(([n, r]) => r && hit(o, r) && !(n === 'the bar' && what === 'label')).map(([n]) => n).join(' and ');
+        // labels (about 200 px wide, centred on their agent) can only be kept from under the card where the offices fit beside it at the lowest zoom: a window of 1500 px or more
+        const hits = [...(w >= 1500 ? labs.map(l => ({ what: 'label', o: l })) : []), ...figs.map(f => ({ what: 'agent', o: f }))].filter(({ o, what }) => under(o, what));
+        if (hits.length) bad.push(`${L}: ${hits.length} label or agent lies under the card, the buttons or the bar: ${hits.slice(0, 3).map(({ what, o }) => `${what} at ${o.x.toFixed(0)},${o.y.toFixed(0)} ${o.w.toFixed(0)}x${o.h.toFixed(0)} under ${under(o, what)}`).join('; ')}`);
+        if (g.side.r - g.side.x < 300) bad.push(`${L}: the column of the card is only ${(g.side.r - g.side.x).toFixed(0)} px wide`);
+        if (g.barPos !== 'absolute' || g.view.y > 0.5 || g.bar.x < 0 || g.bar.r > g.view.w) bad.push(`${L}: the bar (${g.barPos}) does not float over a scene that starts at the top of the page (view top ${g.view.y.toFixed(0)})`);
       }
       rowsOut.push(`${w}: open, card ${g.host ? `${g.host.w.toFixed(0)}x${g.host.h.toFixed(0)}` : '-'}, buttons ${btnsRect.w.toFixed(0)}x${btnsRect.h.toFixed(0)} ${(btnsRect.y - (g.host ? g.host.b : 0)).toFixed(0)} px under it, ${g.rows.length} rows on show, scene ${g.area.w.toFixed(0)} wide`);
       // folded: no card, the buttons float in the corner and the scene is as wide as the view
@@ -1095,6 +1101,143 @@ if (want('card')) {
 }
 
 // ---- 12. seasons: every outdoor id resolves, the pictures differ, the automatic season follows the date and the hemisphere
+// ---- 21-motion: the rules of docs/motion.md hold on the page. The CSS tokens equal public/js/motion.js; the card beside an agent comes out of its agent and leaves by the
+// rules; a click on the interface (a card, the shelf, a menu) moves nothing on the map; the details card and the shelf card follow the same rules; reduced motion removes the
+// travel; and app.css has no literal duration left in a transition.
+if (want('motion')) {
+  const { DUR, EASE } = await import('../../public/js/motion.js');
+  const S = await scenario(10, { tag: 'motion', query: '?time=12:00', fixture: { closed: 12 } });
+  try {
+    const P = e => S.page.evaluate(px(e)), ev = e => S.page.evaluate(e);
+    const bad = [];
+    const eq = (what, got, want_) => { if (JSON.stringify(got) !== JSON.stringify(want_)) bad.push(`${what}: ${JSON.stringify(got)} instead of ${JSON.stringify(want_)}`); };
+    const norm = s => String(s).replace(/\s+/g, '');
+    // a link of the card must never be followed in the QA browser
+    await ev(`document.addEventListener('click', e => { if (e.target.closest && e.target.closest('.of-card a')) e.preventDefault(); }, true)`);
+
+    // 1. the tokens: the CSS variables equal motion.js, and no transition in app.css has a literal duration
+    const tokens = await ev(`(() => { const c = getComputedStyle(document.documentElement); return JSON.stringify(Object.fromEntries(['--m-hover', '--m-fast', '--m-base', '--m-slow', '--m-camera', '--ease-out', '--ease-in', '--ease-in-out', '--ease-spring', '--slide'].map(k => [k, c.getPropertyValue(k).trim()]))); })()`).then(JSON.parse);
+    for (const k of ['hover', 'fast', 'base', 'slow', 'camera']) eq('token --m-' + k, tokens['--m-' + k], DUR[k] + 'ms');
+    for (const [c, j] of [['out', 'out'], ['in', 'in'], ['in-out', 'inOut'], ['spring', 'spring']]) eq('token --ease-' + c, norm(tokens['--ease-' + c]), norm(EASE[j]));
+    const css = readFileSync(join(ROOT, 'public/app.css'), 'utf8').split('\n');
+    const literal = css.filter(l => /transition:/.test(l) && !/transition: none/.test(l) && /[\s:,](?!0s[\s;,])\.?\d+(\.\d+)?m?s[\s;,]/.test(l.replace(/var\([^)]*\)/g, '')));
+    if (literal.length) bad.push(`${literal.length} transition lines in app.css with a literal duration: ${literal[0].trim().slice(0, 90)}`);
+
+    // helpers
+    const area = await ev(`document.querySelector('#view-ofis .of-area').getBoundingClientRect().toJSON()`);
+    const free = (x, y) => ev(`(()=>{const e=document.elementFromPoint(${x},${y}); return !!e && !e.closest('.px-l, .of-ctl, .of-hud, .of-shelf, .of-card, header, #attention')})()`);
+    const roomed = S.agents.filter(a => a.kind === 'main' && a.status !== 'dormant');
+    const spots = [];
+    await P('p.freeze(true)');
+    for (const a of roomed) {
+      const f = await P(`p.agentCss(${JSON.stringify(a.id)})`);
+      if (!f || f.x < 60 || f.y < 130 || f.x > area.width - 400 || f.y > area.height - 60) continue;
+      if (await free(area.left + f.x, area.top + f.y)) spots.push({ agent: a, x: area.left + f.x, y: area.top + f.y });
+    }
+    if (spots.length < 2) throw new Error('fewer than two figures can be clicked without a label, the bar, the shelf or a control over them');
+    const [A, B] = spots;
+    const view = async () => JSON.stringify({ pan: await P('p.pan'), zoom: await P('p.zoom') });
+    const anims = sel => ev(`(() => { const e = document.querySelector(${JSON.stringify(sel)}); if (!e) return '[]'; return JSON.stringify(e.getAnimations().map(a => ({ name: a.animationName || 'waapi', duration: a.effect.getTiming().duration, easing: a.effect.getTiming().easing, kf: a.effect.getKeyframes().map(k => ({ opacity: k.opacity, translate: k.translate })) }))); })()`).then(JSON.parse);
+    const style = (sel, props) => ev(`(() => { const e = document.querySelector(${JSON.stringify(sel)}), c = getComputedStyle(e); return JSON.stringify(Object.fromEntries(${JSON.stringify(props)}.map(p => [p, c[p]]))); })()`).then(JSON.parse);
+    // wait until the animations of the cards and the shelf are over (a headless browser with a busy main thread starts them late)
+    const settle = async () => { await sleep(120); for (let i = 0; i < 30; i++) { const n = await ev(`document.getAnimations().filter(a => (a.playState === 'running' || a.pending) && a.effect && a.effect.target && a.effect.target.closest && a.effect.target.closest('.of-card, .of-shelf, .of-shelf-tab, #drawer')).length`); if (!n) return; await sleep(100); } };
+    const v0 = await view();
+
+    // 2. a click on an agent: the card comes out of the agent (fade and a short travel from the agent's side, base, ease-out); the map does not move
+    await S.page.mouse.click(A.x, A.y);
+    const inA = (await anims('.of-card')).find(a => a.name === 'waapi');
+    const side = await ev(`document.querySelector('.of-card').dataset.side`);
+    if (!inA) bad.push('the card has no enter animation');
+    else {
+      eq('card enter duration', inA.duration, DUR.base); eq('card enter easing', norm(inA.easing), norm(EASE.out));
+      const [from, to] = inA.kf, dx = parseFloat(String(from.translate).split(' ')[0]) || 0, dy = parseFloat(String(from.translate).split(' ')[1]) || 0;
+      eq('card enter fade', [Number(from.opacity), Number(to.opacity)], [0, 1]);
+      if (!(Math.hypot(dx, dy) > 0 && Math.hypot(dx, dy) <= 24)) bad.push(`card enter travel ${Math.hypot(dx, dy)} px (must be 1 to 24)`);
+      const comes = { right: dx < 0, left: dx > 0, below: dy < 0, above: dy > 0, dock: dy > 0 }[side];
+      if (!comes) bad.push(`the card on the ${side} of its agent travels from (${dx}, ${dy}), not out of the agent`);
+    }
+    await settle();
+    eq('map after the card opened', await view(), v0);
+    const rest = await style('.of-card', ['opacity', 'translate']);
+    eq('card at rest', [rest.opacity, rest.translate === 'none' || rest.translate === '0px' || rest.translate === '0px 0px'], ['1', true]);
+
+    // 3. it glides to another agent (a transition on its position, base, in-out), the map still does not move
+    const cardRect = await ev(`document.querySelector('.of-card').getBoundingClientRect().toJSON()`);
+    const B2 = spots.find(q => q !== A && !(q.x > cardRect.left - 14 && q.x < cardRect.right + 14 && q.y > cardRect.top - 14 && q.y < cardRect.bottom + 14)) || B;
+    await S.page.mouse.click(B2.x, B2.y);
+    const gl = await style('.of-card', ['transitionDuration', 'transitionProperty']);
+    const glide = await ev(`document.querySelector('.of-card').classList.contains('glide')`);
+    eq('card glide', [glide, gl.transitionDuration, gl.transitionProperty], [true, DUR.base / 1000 + 's', 'transform']);
+    await settle();
+    eq('map after the card moved to another agent', await view(), v0);
+
+    // 4. the Open menu pops in; Esc, then the cross: the card leaves (fast, ease-in, a short travel back) and is hidden afterwards; the map does not move
+    await ev(`document.querySelector('.of-card .oc-caret').click()`);
+    const menu = await style('.of-card .oc-menu', ['animationName', 'animationDuration']);
+    eq('menu pop', [menu.animationName, menu.animationDuration], ['m-pop', DUR.fast / 1000 + 's']);
+    await ev(`document.querySelector('.of-card .oc-x').click()`);
+    const outA = (await anims('.of-card')).find(a => a.name === 'waapi');
+    if (!outA) bad.push('the card has no leave animation');
+    else {
+      eq('card leave duration', outA.duration, DUR.fast); eq('card leave easing', norm(outA.easing), norm(EASE.in));
+      if (!(outA.duration < DUR.base)) bad.push('leaving is not quicker than arriving');
+    }
+    const clicksThrough = await ev(`document.querySelector('.of-card').dataset.motion`);
+    eq('a leaving card takes no clicks (data-motion)', clicksThrough, 'out');
+    await settle();
+    eq('card hidden after it left', await ev(`document.querySelector('.of-card').hidden`), true);
+    eq('map after the card closed', await view(), v0);
+
+    // 5. the details card: closed, it waits 14 px to the right; open it by "All details": fade and travel in over base; closing leaves over fast; the map does not move
+    const dClosed = await style('#drawer', ['translate', 'visibility', 'transitionDuration']);
+    eq('details card closed', [dClosed.translate, dClosed.visibility], ['14px', 'hidden']);
+    await S.page.mouse.click(A.x, A.y); await settle();
+    await ev(`document.querySelector('.of-card .oc-more').click()`);
+    await sleep(80);
+    const dOpen = await style('#drawer', ['transitionDuration', 'transitionTimingFunction']);
+    eq('details card enter', [dOpen.transitionDuration.split(',')[0], norm(dOpen.transitionTimingFunction).startsWith(norm(EASE.out))], [DUR.base / 1000 + 's', true]);
+    await settle();
+    const dRest = await style('#drawer', ['translate', 'opacity', 'visibility']);
+    eq('details card at rest', [dRest.opacity, dRest.visibility, dRest.translate === 'none' || dRest.translate === '0px' || dRest.translate === '0px 0px'], ['1', 'visible', true]);
+    eq('map after the details card opened', await view(), v0);
+    await ev(`document.querySelector('#dw-close').click()`);
+    const dLeave = await style('#drawer', ['transitionDuration']);
+    eq('details card leave', dLeave.transitionDuration.split(',')[0], DUR.fast / 1000 + 's');
+    await settle();
+    eq('details card hidden after it left', await ev(`getComputedStyle(document.querySelector('#drawer')).visibility`), 'hidden');
+    eq('map after the details card closed', await view(), v0);
+
+    // 6. the shelf card goes out to the right edge and comes back; folding and unfolding never move the map
+    await ev(`document.querySelector('.sh-hide').click()`);
+    const shOut = (await anims('.of-shelf')).find(a => a.name === 'waapi');
+    if (!shOut) bad.push('the shelf card has no leave animation'); else { eq('shelf leave', [shOut.duration, norm(shOut.easing)], [DUR.fast, norm(EASE.in)]); }
+    await settle();
+    eq('shelf card hidden after it left', await ev(`document.querySelector('.of-shelf').hidden`), true);
+    eq('map after the shelf folded', await view(), v0);
+    await ev(`document.querySelector('.of-shelf-tab').click()`);
+    const shIn = (await anims('.of-shelf')).find(a => a.name === 'waapi');
+    if (!shIn) bad.push('the shelf card has no enter animation'); else { eq('shelf enter', [shIn.duration, norm(shIn.easing), Number(shIn.kf[0].opacity), Number(shIn.kf[1].opacity)], [DUR.base, norm(EASE.out), 0, 1]); }
+    await settle();
+    eq('map after the shelf unfolded', await view(), v0);
+
+    // 7. less motion on request: the card fades in over the short duration and travels nowhere; the menu does not pop
+    await S.page.send('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-reduced-motion', value: 'reduce' }] });
+    await sleep(200);
+    await S.page.mouse.click(A.x, A.y);
+    const inR = (await anims('.of-card')).find(a => a.name === 'waapi');
+    if (!inR) bad.push('reduced motion: the card has no fade'); else eq('reduced motion card', [inR.duration, inR.kf.every(k => String(k.translate).split(' ').every(x => parseFloat(x) === 0))], [DUR.hover, true]);
+    await ev(`document.querySelector('.of-card .oc-caret').click()`);
+    eq('reduced motion menu', (await style('.of-card .oc-menu', ['animationName'])).animationName, 'none');
+    await ev(`document.querySelector('.of-card .oc-x').click()`);
+    await S.page.send('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-reduced-motion', value: 'no-preference' }] });
+    await P('p.freeze(false)');
+
+    check('21-motion', bad.length === 0 && S.page.errors.length === 0,
+      bad.length ? `FAILED: ${bad.join('; ')}` :
+      `tokens ${Object.entries(tokens).map(([k, v]) => `${k.slice(2)} ${v.replace(/\s+/g, '')}`).join(', ')} equal motion.js; no literal duration in a transition of app.css; the card comes out of its agent (${side} side): fade 0 to 1 over ${inA.duration} ms, ${inA.easing}, travel ${inA.kf[0].translate}; glides to another agent over ${DUR.base} ms; leaves over ${outA.duration} ms with ${outA.easing} and takes no clicks while it leaves; the menu pops over ${DUR.fast} ms; the details card waits 14 px to the right when closed, arrives over ${DUR.base} ms and leaves over ${DUR.fast} ms; the shelf card leaves over ${shOut.duration} ms and comes back over ${shIn.duration} ms; the pan and zoom of the map were identical (${v0}) after every one of these; reduced motion: ${inR.duration} ms fade with no travel and no menu pop; errors ${S.page.errors.length}`);
+  } finally { await S.done(); }
+}
+
 if (want('seasons')) {
   const man = JSON.parse(readFileSync(ROOT + 'public/pixel/manifest.json', 'utf8')), has = id => !!man.sprites[id];
   const S = await baseScenario(10, { tag: 'seasons', proj, query: '?time=12:00' });                    // no season given: the page decides
@@ -1105,7 +1248,7 @@ if (want('seasons')) {
     for (const sea of ['spring', 'summer', 'autumn', 'winter']) {
       await S.page.goto(`${base}?season=${sea}&time=12:00#ofis`, 800);
       await waitReady(S.page, 10);
-      const info = await P(`({ season: p.season, seasonal: p.seasonal, attr: document.querySelector('#view-ofis').dataset.season, figures: p.figures().length, ids: [...p.layout.outdoor.items, ...p.layout.outdoor.tiles].map(i => i.id), from: p.settingsFrom.season, hash: p.stillHash() })`);
+      const info = await P(`({ season: p.season, seasonal: p.seasonal, attr: document.querySelector('#view-ofis').dataset.season, figures: p.figures().length, ids: [...p.layout.outdoor.items, ...p.layout.outdoor.tiles, ...p.layout.outer.tiles].map(i => i.id), from: p.settingsFrom.season, hash: p.stillHash() })`);
       const resolved = info.ids.map(id => [id, spriteFor(id, sea, has)]);
       rows.push({ sea, ...info, unresolved: resolved.filter(([, r]) => r !== null && !has(r)).length, expect: resolved.filter(([id, r]) => r && r !== id).length, errors: S.page.errors.length });
     }
@@ -1121,7 +1264,7 @@ if (want('seasons')) {
     const ok = rows.every(r => r.season === r.sea && r.attr === r.sea && r.from === 'url' && r.figures >= 10 && r.unresolved === 0 && r.seasonal.variants === r.expect && r.errors === 0 && (r.sea === 'summer' ? r.expect <= 2 : r.expect >= 40))
       && hashes.size === 4 && auto.every(a => a.got === a.want && a.from === 'default');
     check('12-seasons', ok,
-      `?season=spring|summer|autumn|winter: ${rows.map(r => `${r.sea} ${r.seasonal.variants} of ${r.expect} expected seasonal sprites in the garden (${r.ids.length} outdoor pieces and ground tiles, unresolved ${r.unresolved}, picture ${r.hash.toString(16)})`).join('; ')}; four different pictures: ${hashes.size === 4}; ` +
+      `?season=spring|summer|autumn|winter: ${rows.map(r => `${r.sea} ${r.seasonal.variants} of ${r.expect} expected seasonal sprites in the garden and the landscape tiles (${r.ids.length} outdoor pieces and ground tiles, unresolved ${r.unresolved}, picture ${r.hash.toString(16)})`).join('; ')}; four different pictures: ${hashes.size === 4}; ` +
       `automatic season by date: ${auto.map(a => `${a.hemi} ${a.d} ${a.got}`).join(', ')} (every one as expected: ${auto.every(a => a.got === a.want)}); outdoor sprite ids with a seasonal variant in the manifest: ${Object.keys(man.sprites).filter(id => id.includes('@')).length}; console errors ${S.page.errors.length}`);
   } finally { await S.done(); }
 }

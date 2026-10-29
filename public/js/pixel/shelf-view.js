@@ -1,12 +1,13 @@
-// The shelf of the Office view: a card in the right-hand column (`.of-side`, beside the scene and never over it, with the zoom buttons right under it)
+// The shelf of the Office view: a glass card at the right edge (`.of-side`, floating over the scene, with the zoom buttons right under it)
 // with one row per chat that has no room (shelf.js decides which): a small sleeping or leaning pixel figure, the full chat name, the project and
 // "closed 12m ago". It scrolls on its own, a click opens the details panel (`open(id, rowElement)`), and it can be folded away (a tab at the edge of the
-// scene brings it back). Only the newest few chats get a row (the setting `shelf`, capEntries in shelf.js); a footer in the card says how many are left out
+// scene brings it back); it comes in from the right edge and goes out again by the motion rules (docs/motion.md). Only the newest few chats get a row (the setting `shelf`, capEntries in shelf.js); a footer in the card says how many are left out
 // and adds ten more rows to the view for this visit. Rows are kept by id, so a refresh keeps the scroll position and the focus; the times are refreshed
 // every 20 s while the view is on screen, and nothing runs otherwise.
 import { workerId, APPEARANCES } from './ids.js';
 import { hashStr } from './layout.js';
 import { poseOf, capEntries, DEFAULT_CAP } from './shelf.js';
+import { setShown } from '../motion.js';
 
 const KEY = 'ajan-ofisi.shelf';          // 'open' or 'closed': the visitor's last choice (without one, the lane starts folded in a window narrower than NARROW)
 const REFRESH_MS = 20e3;
@@ -41,8 +42,8 @@ export function createShelfView({ root, area, msg, fmtShort, now, open, storage 
 
   function paint() {
     const n = entries.length, left = n - shown.length;
-    host.hidden = !n || collapsed;
-    tab.hidden = !n || !collapsed;
+    setShown(host, !!n && !collapsed, { from: 'right', to: 'right' });                 // motion rules: docs/motion.md
+    setShown(tab, !!n && collapsed, { from: 'right', to: 'right' });
     root.dataset.shelf = !n ? 'none' : collapsed ? 'collapsed' : 'open';
     host.querySelector('.sh-title').textContent = msg('shelf.title');
     count.textContent = countText(shown.length);                                    // the rows on show; the tab keeps the total

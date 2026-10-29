@@ -6,6 +6,7 @@ import { t as msg } from '../i18n.js';
 import { esc, fmtShort, fmtClock, catColor, CATS, icon } from '../util.js';
 import { createOpenMenu } from './open-menu.js';
 import { placeCard } from './cardplace.js';
+import { enter, leave, comesFrom, DUR } from '../motion.js';
 
 const SUB_MAX = 6;
 // the clock texts inside a card are kept by the page's ticker; a re-render for them alone would only close the menu and move the scroll
@@ -107,14 +108,24 @@ export function createAgentCard({ root, ctx, storage = null, anchorOf, boundsOf,
     el.dataset.tail = p.tail ? p.tail.side : 'none';
   }
 
+  // moving to another agent: the card glides there (a transition on its position, only for this move; a pan or zoom moves it at once)
+  let glideTimer = 0;
+  function glide() {
+    el.classList.add('glide');
+    clearTimeout(glideTimer);
+    glideTimer = setTimeout(() => el.classList.remove('glide'), DUR.base + 60);
+  }
   function open(id, row = null) {
     if (!resolve(id)) return false;
     const same = cur && cur.id === id;
+    const fresh = el.hidden || el.dataset.motion === 'out';              // not on screen, or on its way out: it comes in (motion rules: docs/motion.md)
     cur = { id, row: row || (cur && same ? cur.row : null) || null };
     if (!same) { menu.reset(); placeAt = { x: NaN, y: NaN, side: '' }; }
     el.hidden = false;
+    if (!fresh && !same) glide();
     render(true);
     place();
+    if (fresh) enter(el, { from: comesFrom(el.dataset.side) });         // it comes out of its agent: nothing on the map moves
     onSelect(id);
     if (!same) el.focus({ preventScroll: true });
     return true;
@@ -122,9 +133,9 @@ export function createAgentCard({ root, ctx, storage = null, anchorOf, boundsOf,
   function close() {
     if (!cur) return false;
     const row = cur.row, hadFocus = el.contains(document.activeElement);
+    const side = el.dataset.side;
     cur = null; menu.reset(); lastHtml = '';
-    el.hidden = true;
-    el.innerHTML = '';
+    leave(el, { to: comesFrom(side) }).then(() => { if (!cur) el.innerHTML = ''; });
     onSelect(null);
     if (hadFocus && row && row.isConnected) row.focus({ preventScroll: true });
     return true;

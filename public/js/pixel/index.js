@@ -248,8 +248,8 @@ export function createPixelOffice(root, ctx, opts = {}) {
     return own ? shelfRow(own) : null;
   }
   const boundsOf = kind => {
-    const b = root.getBoundingClientRect(), a = rel(area.getBoundingClientRect());
-    return kind === 'shelf' ? { x0: 0, y0: 0, x1: b.width, y1: b.height } : { x0: a.x, y0: a.y, x1: a.x + a.w, y1: a.y + a.h };
+    const b = root.getBoundingClientRect(), a = rel(area.getBoundingClientRect()), c = covered();
+    return kind === 'shelf' ? { x0: 0, y0: a.y + c.top, x1: b.width, y1: b.height } : { x0: a.x, y0: a.y + c.top, x1: a.x + a.w - c.right, y1: a.y + a.h };
   };
   const card = createAgentCard({ root, ctx, storage, anchorOf, boundsOf, onSelect: id => { if (scene) { scene.setSelected(id); redraw(false); } } });
   const openAgent = id => { ctx.tip.hide(); card.open(id); };
@@ -439,11 +439,22 @@ export function createPixelOffice(root, ctx, opts = {}) {
       b.setAttribute('aria-disabled', String(off));
     }
   }
+  // What floats over the scene (CSS px, from the top and from the right of the area): the page's bar and the shelf card. The scene spans the whole
+  // area behind them; "fit" frames the offices in what is left, and the agent card is placed there too.
+  const LABEL_ROOM = 56;                                              // CSS px kept free above the offices for the labels of the top row of agents
+  function covered() {
+    const a = area.getBoundingClientRect(), top = parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--top-h'));
+    const shelfEl = root.querySelector('.of-shelf');
+    const right = shelfEl && !shelfEl.hidden && root.dataset.shelf === 'open' ? Math.max(0, a.right - shelfEl.getBoundingClientRect().left + 8) : 0;
+    return { top: Number.isFinite(top) ? Math.max(0, Math.min(top - a.top + 4, a.height * 0.4)) : 0, right: right > a.width * 0.45 ? 0 : right };
+  }
   function fit(draw = true) {
     if (!scene || !scene.layout) return;
-    const b = scene.fitBox;
-    view.zoom = Math.max(fitZoom(b.x1 - b.x0, b.y1 - b.y0, view.w, view.h, 6 * view.dpr), zoomFloor());
-    [view.panX, view.panY] = centerPan(b, view.zoom, view.w, view.h);
+    const b = scene.fitBox, c = covered(), top = (c.top + (c.top ? LABEL_ROOM : 0)) * view.dpr, right = c.right * view.dpr;          // the labels stand above the agents, so the offices start a little lower than the bar's edge
+    const w = Math.max(1, view.w - right), h = Math.max(1, view.h - top);
+    view.zoom = Math.max(fitZoom(b.x1 - b.x0, b.y1 - b.y0, w, h, 6 * view.dpr), zoomFloor());
+    [view.panX, view.panY] = centerPan(b, view.zoom, w, h);
+    view.panY += top;
     clampView();
     if (draw) redraw();
   }
@@ -469,6 +480,12 @@ export function createPixelOffice(root, ctx, opts = {}) {
     redraw();
   }
   new ResizeObserver(() => { if (visible) resize(); }).observe(area);
+  let shelfMode = root.dataset.shelf || 'none';
+  new MutationObserver(() => {                                         // the shelf card shows up for the first time: frame the offices in the free part; folding or unfolding it never moves the map
+    const m = root.dataset.shelf || 'none', first = shelfMode === 'none' && m === 'open';
+    shelfMode = m;
+    if (first && visible && autoFit) fit();
+  }).observe(root, { attributes: true, attributeFilter: ['data-shelf'] });
 
   // ---------------------------------------------------------- picking, hover, click
   const toVirtual = (cx, cy) => [(cx * view.dpr - view.panX) / view.zoom, (cy * view.dpr - view.panY) / view.zoom];
