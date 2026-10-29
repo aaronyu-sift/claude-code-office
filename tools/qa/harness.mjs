@@ -34,12 +34,12 @@ export async function waitReady(page, expectFigures, ms = 20000) {
   return false;
 }
 
-// opts: { tag, dpr, reducedMotion, fixture, query ('?time=22:00'), proj ('iso' | 'front', added to the query), season (added to the query unless 'auto' or already in it), width, height, timezone ('Asia/Tokyo': the browser's local clock) }
+// opts: { tag, dpr, reducedMotion, lang (the browser's language, default en-US so that no run opens the language list), fixture, query ('?time=22:00'), proj ('iso' | 'front', added to the query), season (added to the query unless 'auto' or already in it), width, height, timezone ('Asia/Tokyo': the browser's local clock) }
 export async function scenario(n, opts = {}) {
   const dir = join(tmpdir(), `cco-qa-${process.pid}-${n}${opts.tag || ''}`);
   const fx = await makeFixture({ dir, n, ...(opts.fixture || {}) });
   const srv = await startServer(dir);
-  const page = await launchChrome({ width: opts.width || VIEW.w, height: opts.height || VIEW.h, dpr: opts.dpr || 1, reducedMotion: !!opts.reducedMotion });
+  const page = await launchChrome({ width: opts.width || VIEW.w, height: opts.height || VIEW.h, dpr: opts.dpr || 1, reducedMotion: !!opts.reducedMotion, lang: opts.lang || 'en-US' });
   const done = async () => { await page.close(); srv.stop(); fx.cleanup(); };
   try {
     if (opts.timezone) await page.send('Emulation.setTimezoneOverride', { timezoneId: opts.timezone });

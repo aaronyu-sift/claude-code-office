@@ -10,11 +10,11 @@ const CHROME = process.env.CHROME_BIN || [
 ].find(p => existsSync(p));
 export const sleep = ms => new Promise(r => setTimeout(r, ms));
 
-export async function launchChrome({ width = 1500, height = 900, dpr = 1, reducedMotion = false } = {}) {
+export async function launchChrome({ width = 1500, height = 900, dpr = 1, reducedMotion = false, lang = 'en-US' } = {}) {
   if (!CHROME) throw new Error('no Chrome found; set CHROME_BIN');
   const profile = mkdtempSync(join(tmpdir(), 'cco-qa-chrome.'));
   const proc = spawn(CHROME, [
-    '--headless=new', `--user-data-dir=${profile}`, '--remote-debugging-port=0', '--no-first-run', '--no-default-browser-check',
+    '--headless=new', `--user-data-dir=${profile}`, '--remote-debugging-port=0', '--no-first-run', '--no-default-browser-check', `--lang=${lang}`, `--accept-lang=${lang}`,
     '--use-gl=angle', '--use-angle=swiftshader', '--enable-unsafe-swiftshader', '--hide-scrollbars', `--window-size=${width},${height}`, 'about:blank',
   ], { stdio: 'ignore' });
   const kill = () => { try { proc.kill('SIGKILL'); } catch { /* gone */ } };

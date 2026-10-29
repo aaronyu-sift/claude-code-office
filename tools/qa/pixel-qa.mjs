@@ -13,6 +13,7 @@ import { tmpdir } from 'node:os';
 import { spriteFor, addDays } from '../../public/js/pixel/season.js';
 import { weatherFor, rainbowFor } from '../../public/js/pixel/weather.js';
 import { contactSheet } from './contact-sheet.mjs';
+import { LANGUAGES } from '../../public/js/lang/index.js';
 
 const args = process.argv.slice(2);
 const val = f => { const i = args.indexOf('--' + f); return i >= 0 ? args[i + 1] : undefined; };
@@ -271,7 +272,7 @@ if (want('idle')) {
       if ((await S.page.evaluate(px('p.stats.frames'))) === 0) break;
       settled++;
     }
-    await S.page.evaluate(px('p.resetStats()'));
+    await S.page.evaluate(px('p.freeze(true), p.resetStats()'));                        // live data is frozen for the window: a server tick (every 10 to 30 s even when nothing changed) draws one frame on purpose
     await sleep(4000);
     const st = await S.page.evaluate(px('({stats: p.stats, active: p.active, pending: p.pending})'));
     check('07-idle', S.ready && st.stats.frames === 0 && st.stats.callbacks === 0 && !st.pending && st.active.length === 0,
@@ -400,6 +401,57 @@ if (want('projection')) {
   } finally { await S.done(); }
 }
 
+// ---- UI language: a supported system language is used as it is; an unsupported one opens the language list (each language in its own language),
+// which Esc cannot close; the choice is saved and beats the system language; the header button opens the same list and Esc closes it
+if (want('language')) {
+  const names = LANGUAGES.map(l => `${l.name}|${l.code}`), titles = LANGUAGES.map(l => `${l.chooseTitle}|${l.code}`);
+  const msgs = Object.fromEntries(LANGUAGES.map(l => [l.code, l.messages]));
+  const read = page => page.evaluate(`(() => { const d = document.querySelector('#lang-dlg'); return JSON.stringify({
+    nav: navigator.languages.join(), html: document.documentElement.lang, stored: localStorage.getItem('cco.lang'), dialog: !!d, modal: !!(d && d.open && d.matches(':modal')),
+    options: d ? [...d.querySelectorAll('.lang-opt')].map(b => b.textContent + '|' + b.lang + (b.getAttribute('aria-current') ? '*' : '')) : [],
+    titles: d ? [...d.querySelectorAll('h2 span')].map(s => s.textContent + '|' + s.lang) : [], close: !!(d && d.querySelector('.lang-close')),
+    tab: document.querySelector('[data-view="ofis"]').textContent, btn: document.querySelector('#lang').textContent }); })()`).then(JSON.parse).catch(() => ({ options: [], titles: [], failed: true }));
+  const until = async (page, ok, ms = 15000) => { let st = {}; for (const t0 = Date.now(); Date.now() - t0 < ms; await sleep(250)) { st = await read(page); if (!st.failed && ok(st)) { await sleep(200); return read(page); } } return st; };
+  const escape = async page => { for (let i = 0; i < 2; i++) for (const type of ['keyDown', 'keyUp']) await page.send('Input.dispatchKeyEvent', { type, key: 'Escape', code: 'Escape', windowsVirtualKeyCode: 27 }); await sleep(300); };
+  const click = async (page, sel) => {
+    const r = await page.evaluate(`(() => { const e = document.querySelector(${JSON.stringify(sel)}); if (!e) return null; const b = e.getBoundingClientRect(); return { x: b.left + b.width / 2, y: b.top + b.height / 2 }; })()`);
+    if (!r) return false;                                                                            // nothing to click: the check then fails with its numbers
+    for (const type of ['mousePressed', 'mouseReleased']) await page.send('Input.dispatchMouseEvent', { type, x: r.x, y: r.y, button: 'left', clickCount: 1 });
+    return true;
+  };
+  const run = async (lang, tag, steps) => { const S = await scenario(4, { tag, query: '?time=12:00', lang }); try { return { out: await steps(S), errors: S.page.errors.length }; } finally { await S.done(); } };
+
+  // a browser in German: not supported
+  const de = await run('de-DE', 'langde', async S => {
+    const url = `http://127.0.0.1:${S.srv.port}/?time=12:00#ofis`;
+    const a0 = await read(S.page);
+    await escape(S.page); const a1 = await read(S.page);
+    await click(S.page, '.lang-opt[lang="tr"]');
+    const a2 = await until(S.page, s => s.html === 'tr' && !s.dialog);
+    await S.page.goto(url, 800); const a3 = await until(S.page, s => s.html === 'tr');
+    await click(S.page, '#lang'); const a4 = await until(S.page, s => s.dialog);
+    await escape(S.page); const a5 = await read(S.page);
+    await click(S.page, '#lang'); await until(S.page, s => s.dialog);
+    await click(S.page, '.lang-opt[lang="en"]');
+    const a6 = await until(S.page, s => s.html === 'en' && !s.dialog);
+    await S.page.goto(url, 800); const a7 = await until(S.page, s => s.html === 'en');
+    return { a0, a1, a2, a3, a4, a5, a6, a7 };
+  });
+  const tr = await run('tr-TR', 'langtr', async S => ({ b: await read(S.page) }));
+  const en = await run('en-GB', 'langen', async S => ({ c: await read(S.page) }));
+  const { a0, a1, a2, a3, a4, a5, a6, a7 } = de.out, { b } = tr.out, { c } = en.out;
+  const marked = code => LANGUAGES.map(l => `${l.name}|${l.code}${l.code === code ? '*' : ''}`).join();
+  check('ux-language',
+    a0.nav === 'de-DE' && a0.dialog && a0.modal && a0.html === 'en' && a0.stored === null && a0.options.join() === names.join() && a0.titles.join() === titles.join() && !a0.close && a0.tab === msgs.en['tab.ofis'] &&
+    a1.dialog && a1.modal && a1.stored === null &&
+    a2.html === 'tr' && a2.stored === 'tr' && !a2.dialog && a2.tab === msgs.tr['tab.ofis'] && a2.btn === 'TR' && a3.html === 'tr' && !a3.dialog &&
+    a4.dialog && a4.modal && a4.close && a4.options.join() === marked('tr') && !a5.dialog && a5.html === 'tr' &&
+    a6.html === 'en' && a6.stored === 'en' && !a6.dialog && a6.btn === 'EN' && a7.html === 'en' && !a7.dialog && a7.stored === 'en' &&
+    b.nav === 'tr-TR' && b.html === 'tr' && !b.dialog && b.stored === null && b.tab === msgs.tr['tab.ofis'] && b.btn === 'TR' &&
+    c.nav === 'en-GB' && c.html === 'en' && !c.dialog && c.stored === null && c.tab === msgs.en['tab.ofis'] && c.btn === 'EN' && de.errors + tr.errors + en.errors === 0,
+    `browser in ${a0.nav}, nothing saved: list open ${a0.dialog} (modal ${a0.modal}), page shows ${a0.html}, options [${a0.options.join(', ')}], headings [${a0.titles.join(', ')}], Close button ${a0.close}; after two Esc presses still open ${a1.dialog && a1.modal}; click ${LANGUAGES[1].name}: page ${a2.html}, saved "${a2.stored}", tab "${a2.tab}", header button ${a2.btn}, list closed ${!a2.dialog}; reload: ${a3.html}, list ${a3.dialog ? 'open' : 'closed'}; header button: list open ${a4.dialog}, Close button ${a4.close}, current marked [${a4.options.join(', ')}]; Esc closes it ${!a5.dialog}; choose ${LANGUAGES[0].name}: page ${a6.html}, saved "${a6.stored}", reload in German with a saved choice: ${a7.html}, list ${a7.dialog ? 'open' : 'closed'}; browser in ${b.nav}: page ${b.html}, list ${b.dialog ? 'open' : 'closed'}, saved ${b.stored === null ? 'nothing' : '"' + b.stored + '"'}; browser in ${c.nav}: page ${c.html}, list ${c.dialog ? 'open' : 'closed'}, saved ${c.stored === null ? 'nothing' : '"' + c.stored + '"'}; console errors ${de.errors + tr.errors + en.errors}`);
+}
+
 // ---- 12. seasons: every outdoor id resolves, the pictures differ, the automatic season follows the date and the hemisphere
 if (want('seasons')) {
   const man = JSON.parse(readFileSync(ROOT + 'public/pixel/manifest.json', 'utf8')), has = id => !!man.sprites[id];
@@ -480,7 +532,7 @@ if (want('weather')) {
   try {
     const P = e => D.page.evaluate(px(e));
     await sleep(2500);
-    await P('(p.resetWeatherStats(), p.resetStats())');
+    await P('(p.freeze(true), p.resetWeatherStats(), p.resetStats())');                  // live data frozen: a server tick would redraw the scene once
     await sleep(4000);
     idle = await P('({ w: p.weather, active: p.active, sceneFrames: p.frames, fps: p.frameRate().fps })');
   } finally { await D.done(); }
@@ -561,7 +613,7 @@ if (want('settings')) {
       camera: camBtn && s6.proj === 'front' && s6b.proj === 'iso',
       stored: same(s7.settings, E) && same(JSON.parse(s7.stored), E),
       reload: same(s8.settings, E) && Object.values(s8.from).every(v => v === 'stored') && s8.season === 'autumn' && s8.weather === 'snow' && s8.wcount > 0 && s8.clock === '06:30' && s8.fixed && !s8.open,
-      url: same(s9.settings, { time: '22:00', season: 'spring', weather: 'fog', hemisphere: 'north' }) && Object.values(s9.from).every(v => v === 'url') && s9.season === 'spring' && s9.weather === 'fog' && s9.clock === '22:00' && same(JSON.parse(s9.stored), E) && /\?season=spring/.test(s9n.note),
+      url: same(s9.settings, { time: '22:00', season: 'spring', weather: 'fog', hemisphere: 'north' }) && Object.values(s9.from).every(v => v === 'url') && s9.season === 'spring' && s9.weather === 'fog' && s9.clock === '22:00' && same(JSON.parse(s9.stored), E) && /\?\u2060?season=spring/.test(s9n.note),
       back: same(s10.settings, E) && s10.season === 'autumn',
       keepUrl: /season=winter/.test(s11.url) && s11.season === 'winter' && JSON.parse(s11.stored).season === 'winter',
       noErrors: S.page.errors.length === 0,
