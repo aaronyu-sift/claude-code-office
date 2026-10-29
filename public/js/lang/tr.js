@@ -271,6 +271,7 @@ export default {
     'of.badgeWait': 'SIRA SENDE',
     'of.badgeSleep': 'UYKUDA',
     'of.session': 'Oturum',
+    'of.vacant': 'Boş',
     'of.chipAsk': 'Cevap bekliyor',
     'of.chipWait': 'Sıra sende',
     'of.rooms': '{b} oda',

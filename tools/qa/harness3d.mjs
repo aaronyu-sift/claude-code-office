@@ -46,10 +46,11 @@ export async function waitReady3d(page, minFigures, ms = 30000) {
 }
 
 // opts: { tag, query ('assets=procedural&polish=off'), fixture, width, height, dpr, root (serve another copy of the repo), intercept (async (page, srv) => void,
-//         runs before the page opens) }; page.warnings collects the console warnings
+//         runs before the page opens), beforeServer (async (fixture, dir) => void, runs before the server starts: files put away there can come back later) }; page.warnings collects the console warnings
 export async function scenario3d(n, opts = {}) {
   const dir = join(tmpdir(), `cco-qa3d-${process.pid}-${n}${opts.tag || ''}`);
   const fx = await makeFixture({ dir, n, ...(opts.fixture || {}) });
+  if (opts.beforeServer) await opts.beforeServer(fx, dir);
   const srv = opts.root ? await startServerAt(opts.root, dir) : await startServer(dir, opts.serverEnv);
   const page = await launchChrome({ width: opts.width || VIEW.w, height: opts.height || VIEW.h, dpr: opts.dpr || 1, lang: 'en-US' });
   const done = async () => { await page.close(); srv.stop(); fx.cleanup(); };

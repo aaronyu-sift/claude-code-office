@@ -10,6 +10,10 @@ import { LOOP, wave } from './motion.js';
 import * as AS from './ofis-assets.js';
 import * as PL from './ofis-polish.js';
 import { makePalette, PALETTES, chooseOutfit, poseBones } from './ofis-rig.js';
+import {
+  WALL_T, ROOM_D, CHEF_W, COL_W, FRONT_M, GAP, HALL_D, HALL_OPEN_D, HALL_GAP, COLS, CAP, roomW,
+  MIN_ROWS, VACANT_CLS, minRoomsFrom, buildingPlan, classFor, nextClass, createSlots,
+} from './ofis-layout.js';
 
 // Models (ofis-assets.js has loaded them before this module runs): a piece that did not load is missing from PK and the procedural shape
 // below is drawn in its place. POLISH is the procedural polish: occlusion baked into the room batch, a noise floor, tone mapping, contact
@@ -20,25 +24,20 @@ const PAL = Object.fromEntries(Object.entries(PALETTES).map(([k, v]) => [k, make
 
 // ------------------------------------------------------------ dimensions (1 unit ≈ 1 meter)
 
-const WALL_H = 2.2, WALL_T = 0.16, LOW_H = 0.3;
+const WALL_H = 2.2, LOW_H = 0.3;
 const SIGN_H = 1.24, SIGN_Y = 1.5;       // room sign on the wall (center height)
 const SIGN_HTML_BELOW = 19;               // below this zoom, an HTML fallback sign replaces the wall text
 const SIGN_PX = 288;                      // sign texture height in pixels (for crisp text)
 const SIGN_FONT = '"Segoe UI Variable Text", "Segoe UI", system-ui, sans-serif';
 const SIGN_FONT_D = '"Segoe UI Variable Display", "Segoe UI", system-ui, sans-serif';
-const ROOM_D = 6.8, CHEF_W = 3.2, COL_W = 2.1, FRONT_M = 1.0, GAP = 1.5;
 const ROWS_Z = [1.6, 3.4, 5.2];
 const LANE_Z = 0.55;
-const COLS = [1, 2, 4];                   // room class → desk columns (3 desks per column)
-const CAP = COLS.map(c => c * 3);         // at most 12 subagents; the rest show as "+N" on the sign
 const DOOR_W = 0.9, DOOR_H = 1.72;
 const WALK = 2.2;                         // units / s
-const HALL_D = 5.0, HALL_OPEN_D = 3.6, HALL_GAP = 0.18;  // depth of the hall between two rows / of the open hall in front
 const FRAME_MS = 1000 / 30;
 const VIEW = new THREE.Vector3(1, 0.9, 1).normalize();
 const LIGHT = new THREE.Vector3(0.55, 1, 0.8).normalize();
 const YELLOW = '#fab219';
-const roomW = cls => CHEF_W + COLS[cls] * COL_W + FRONT_M;
 
 // ------------------------------------------------------------ colors
 
@@ -52,6 +51,7 @@ const THEMES = [
   { wall: '#cf7b5c', floor: '#5b8fb8' }, // terracotta + blue
   { wall: '#a9c98f', floor: '#8f9fb0' }, // sage + gray
 ];
+const VACANT_THEME = { wall: '#cdd1d8', floor: '#9aa5b3' };    // an office nobody uses: quiet grey
 const SKINS = ['#f3cfb0', '#e7b590', '#cf9670', '#b07650', '#86573a', '#f7dcc6'];
 const HAIRS = ['#2b211c', '#4c3528', '#7d5130', '#c08f4f', '#1c1d24', '#8a8f9c', '#a8432f', '#e0c890'];
 const PANTS = ['#35405a', '#3e5a86', '#4a4f5c', '#5c4a3e', '#2f3440'];
@@ -259,74 +259,10 @@ function drawScreen(g, w, h) {
   }
 }
 
-// ------------------------------------------------------------ layout: pairs of rows with a hall between them
+// ------------------------------------------------------------ layout: fixed offices (ofis-layout.js decides where everything goes)
 
-// Rows are paired and the hall between them serves both: the back row's door is in its low front wall,
-// the front row's door is the glass door in its back wall. A leftover last row has its hall in front (the building's facade).
-function vlayout(r) {
-  const rows = [], halls = [];
-  let z = 0;
-  for (let i = 0; i < r; i += 2) {
-    if (i) z += GAP;
-    rows.push({ z, door: 'front', hall: halls.length });
-    const hz = z + ROOM_D + HALL_GAP;
-    if (i + 1 < r) {
-      halls.push({ z0: hz, z1: hz + HALL_D, open: false, lane: hz + 1.75 });
-      rows.push({ z: hz + HALL_D + WALL_T, door: 'back', hall: halls.length - 1 });
-      z = hz + HALL_D + WALL_T + ROOM_D;
-    } else {
-      halls.push({ z0: hz, z1: hz + HALL_OPEN_D, open: true, lane: hz + HALL_OPEN_D * 0.55 });
-      z = hz + HALL_OPEN_D;
-    }
-  }
-  return { rows, halls, d: z };
-}
-
-// Split the rooms into r rows without reordering them (minimizing the widest row). lead0/lead1: space reserved at the start of the first/last row.
-function partition(ws, r, lead0, lead1) {
-  const n = ws.length, pre = [0];
-  for (const w of ws) pre.push(pre[pre.length - 1] + w);
-  const rowW = (i, j) => pre[j] - pre[i] + GAP * (j - i - 1);
-  const lead = (k, j) => (k === 1 ? lead0 : 0) + (k === r && j === n ? lead1 : 0);
-  const best = Array.from({ length: r + 1 }, () => new Array(n + 1).fill(Infinity));
-  const cut = Array.from({ length: r + 1 }, () => new Array(n + 1).fill(0));
-  best[0][0] = 0;
-  for (let k = 1; k <= r; k++) {
-    for (let j = k; j <= n; j++) {
-      for (let i = k - 1; i < j; i++) {
-        const v = Math.max(best[k - 1][i], rowW(i, j) + lead(k, j));
-        if (v < best[k][j]) { best[k][j] = v; cut[k][j] = i; }
-      }
-    }
-  }
-  const rows = [];
-  let j = n;
-  for (let k = r; k >= 1; k--) { const i = cut[k][j]; rows.unshift([i, j]); j = i; }
-  return { rows, w: best[r][n] };
-}
-function pack(items, lead0 = 0, lead1 = 0) {
-  const n = items.length;
-  if (!n) return null;
-  const ws = items.map(it => it.W);
-  let best = null;
-  for (let r = 1; r <= n; r++) {
-    const { rows, w } = partition(ws, r, lead0, lead1);
-    const V = vlayout(r);
-    let waste = 0;
-    rows.forEach(([i, j], k) => {
-      const ld = (k === 0 ? lead0 : 0) + (k === r - 1 ? lead1 : 0);
-      waste += w - (ws.slice(i, j).reduce((s, x) => s + x, 0) + GAP * (j - i - 1) + ld);
-    });
-    const score = w + V.d + waste * 0.35;
-    if (!best || score < best.score - 1e-6) best = { rows, w, V, score };
-  }
-  const R = best.rows.length;
-  const place = new Array(n);
-  best.rows.forEach(([i, j], k) => {
-    for (let q = i; q < j; q++) place[q] = { row: k };
-  });
-  return { place, w: best.w, d: best.V.d, V: best.V, R, rowsIdx: best.rows };
-}
+// The building is laid out for MIN_ROOMS chats from the start: rooms and halls come from buildingPlan, a chat sits in its own sticky slot,
+// and the offices nobody uses are vacant offices. See ofis-layout.js for the rules and `rebuild` below for how they are drawn.
 
 // ------------------------------------------------------------ view
 
@@ -482,6 +418,12 @@ export function createOfis(root, ctx) {
   let floorJobs = [], rebuildMs = 0;
   const world = { group: null, rooms: new Map(), pick: [], screens: [], screenMesh: null, bounds: null, sig: '' };
   const roomState = new Map();   // session id → { cls, low }
+  // sticky offices: chat → slot (see ofis-layout.js). The slots are kept in localStorage so a reload gives every chat the same office.
+  const MIN_ROOMS_NOW = minRoomsFrom(typeof location !== 'undefined' ? location.search : '');
+  const SLOTS_KEY = 'cco.office.slots';
+  const slots = createSlots({ minRooms: MIN_ROOMS_NOW, saved: (() => { try { return JSON.parse(localStorage.getItem(SLOTS_KEY)); } catch { return null; } })() });
+  let slotsSaved = '';
+  let fitKey = '';               // the building the camera was last fitted to: only a different building refits an automatic view
   const chars = new Map();       // agent id → character
   const labels = new Set();
   const signs = new Map();       // session id → sign label
@@ -587,7 +529,8 @@ export function createOfis(root, ctx) {
     world.group = null;
   }
 
-  function rebuild(list) {
+  // plan: { rows, slotOf } from syncRooms; list: the chats with a room ({ id, cls, slot }). Every slot without a chat becomes a vacant office.
+  function rebuild(list, plan) {
     const t0 = performance.now();
     floorJobs = [];
     disposeWorld();
@@ -596,8 +539,9 @@ export function createOfis(root, ctx) {
     scene.add(g);
     world.pick = [];
     world.screens = [];
-    const oldRooms = world.rooms;
+    const oldRooms = world.rooms, oldHalls = world.halls || [], oldEntry = world.entryX;
     world.rooms = new Map();
+    world.vacant = [];
     for (const L of extraLabels) dropLabel(L);
     extraLabels.length = 0;
     extraFrame.length = 0;
@@ -607,41 +551,33 @@ export function createOfis(root, ctx) {
     extraFigs.length = 0;
     extraMats.splice(0).forEach(m => m.dispose());
 
-    const items = list.map(it => ({ ...it, W: roomW(it.cls) }));
-    // optional local extra areas: 'last' = start of the last row (bottom-left front corner), 'first' = start of the first row (opens onto the hall)
-    const ex = items.length && extras ? extras.areas : [];
+    // optional local extra areas: 'last' = start of the last row of the smallest building (bottom-left front corner), 'first' = start of the first row (opens onto the hall)
+    const ex = extras ? extras.areas : [];
     const aFirst = ex.find(x => x.row === 'first'), aLast = ex.find(x => x.row === 'last');
-    const P = pack(items, aFirst ? aFirst.w + GAP : 0, aLast ? aLast.w + GAP : 0);
-    world.halls = P ? P.V.halls : [];
-    world.width = P ? P.w : 0;
+    const leads = {};
+    if (aFirst) leads[0] = aFirst.w + GAP;
+    if (aLast) leads[MIN_ROWS - 1] = aLast.w + GAP;
+    const P = buildingPlan(plan.rows, slots.perRow, leads);
+    const bySlot = new Map(list.map(it => [it.slot, it]));
+    // every office is a fixed cell: a room is as wide as its cell, the desks of its class fill the left of it and the rest is a lounge
+    const items = P.cells.map(c => {
+      const it = bySlot.get(c.slot);
+      return it ? { ...c, id: it.id, cls: it.cls } : { ...c, id: 'vacant-' + c.slot, cls: VACANT_CLS, vacant: true };
+    });
+    world.halls = P.halls;
+    world.width = P.width;
     world.entryX = world.width + 0.45;
-    world.depth = P ? P.d : 0;
+    world.depth = P.depth;
     const areas = world.areaList = [];
-    if (P) {
-      // rooms in short rows widen to fill the row; the extra space becomes a lounge corner in the room
-      P.rowsIdx.forEach(([i, j], k) => {
-        const row = P.V.rows[k];
-        let lx = 0;
-        if (k === P.R - 1 && aLast) { areas.push({ ...aLast, x: 0, z: row.z, door: row.door, hall: row.hall }); lx += aLast.w + GAP; }
-        if (k === 0 && aFirst) { areas.push({ ...aFirst, x: lx, z: row.z, door: row.door, hall: row.hall }); lx += aFirst.w + GAP; }
-        const idxs = [];
-        for (let q = i; q < j; q++) idxs.push(q);
-        const used = idxs.reduce((sum, q) => sum + items[q].W, 0) + GAP * (idxs.length - 1) + lx;
-        const extra = Math.min(4.2, (P.w - used) / idxs.length);
-        let x = lx + (P.w - used - extra * idxs.length) / 2;
-        for (const q of idxs) {
-          Object.assign(items[q], { W: items[q].W + extra, extra, X: x, Z: row.z, door: row.door, hall: row.hall });
-          x += items[q].W + GAP;
-        }
-      });
-    }
+    if (aLast) areas.push({ ...aLast, x: 0, z: P.rows[MIN_ROWS - 1].z, door: P.rows[MIN_ROWS - 1].door, hall: P.rows[MIN_ROWS - 1].hall });
+    if (aFirst) areas.push({ ...aFirst, x: 0, z: P.rows[0].z, door: P.rows[0].door, hall: P.rows[0].hall });
     assignThemes(list);
     const B = new Batch();
     const T = WALL_T;
 
     // floor slab (corridors) and the building's plinth
     const m0 = 0.7;
-    const bx0 = -T - m0, bz0 = -T - m0, bx1 = world.width + T + m0, bz1 = (P ? P.d : 0) + T + m0;
+    const bx0 = -T - m0, bz0 = -T - m0, bx1 = world.width + T + m0, bz1 = P.depth + T + m0;
     const slabGeo = new THREE.PlaneGeometry(bx1 - bx0, bz1 - bz0).rotateX(-Math.PI / 2);
     const uv = slabGeo.attributes.uv;
     for (let i = 0; i < uv.count; i++) uv.setXY(i, uv.getX(i) * (bx1 - bx0) / 1.2, uv.getY(i) * (bz1 - bz0) / 1.2);
@@ -655,10 +591,12 @@ export function createOfis(root, ctx) {
 
     items.forEach(it => {
       const room = buildRoom(B, g, it);
+      if (it.vacant) { world.vacant.push(room); return; }
       const prev = oldRooms.get(it.id);
       if (prev) room.doorOpen = prev.doorOpen;
       world.rooms.set(it.id, room);
     });
+    world.plan = { rows: P.rowCount, perRow: P.perRow, size: P.cells.length };
     buildHalls(B, g, items, areas);
 
     if (POLISH) {
@@ -697,11 +635,16 @@ export function createOfis(root, ctx) {
     g.add(sm);
 
 
-    // seat the characters in their new places
+    // seat the characters in their new places; one on its way keeps walking when its room, its hall and the entrance did not move (the building grew elsewhere)
+    const spot = (r, halls, entry) => (r ? [r.X, r.Z, r.W, r.door, r.hall, halls[r.hall] && halls[r.hall].lane, entry].join() : '');
     for (const c of [...chars.values()]) {
       const room = world.rooms.get(c.roomId);
       if (!room) { removeChar(c); continue; }
       if (c.main) { seatChef(c, room); continue; }
+      if (c.mode === 'walk' && c.path && (c.slot < 0 || (c.slot < room.cap && !room.slotChar[c.slot])) && spot(oldRooms.get(c.roomId), oldHalls, oldEntry) === spot(room, world.halls, world.entryX)) {
+        if (c.slot >= 0) room.slotChar[c.slot] = c;
+        continue;
+      }
       if (c.after === 'gone') { removeChar(c); continue; }
       if (c.slot < 0 || c.slot >= room.cap || room.slotChar[c.slot]) c.slot = room.slotChar.indexOf(null);
       if (c.slot < 0) { removeChar(c); continue; }
@@ -731,7 +674,11 @@ export function createOfis(root, ctx) {
     sun.shadow.mapSize.setScalar(rad > 34 ? 4096 : 2048);
     if (sun.shadow.map && sun.shadow.map.width !== sun.shadow.mapSize.x) { sun.shadow.map.dispose(); sun.shadow.map = null; }
     computeLimits();
-    if (autoFit) fit();
+    // only a different building refits an automatic view: a chat or a sub-agent coming and going inside the same building leaves the camera alone
+    const key = [b.x0, b.x1, b.z0, b.z1, (world.lots || []).length, (world.fitExtra || []).length].map(v => +v.toFixed(2)).join();
+    const changed = key !== fitKey;
+    fitKey = key;
+    if (autoFit && changed) fit();
   }
 
   // verification only (tools/qa/office3d-qa.mjs, the QA pictures): what the scene drew, how long a rebuild took, which models are in use, a camera on a point
@@ -745,7 +692,12 @@ export function createOfis(root, ctx) {
     figureVisible(id, on) { const c = chars.get(id); if (c) c.root.visible = !!on; },
     rebuildNow() { world.sig = ''; sync(); return this.rebuildMs; },
     view(x, y, z, zm) { autoFit = false; camA = PV.set(x, y, z).dot(R); camB = PV.dot(U); lim = { a0: -1e9, a1: 1e9, b0: -1e9, b1: 1e9 }; zoom = clamp(zm, 1, 400); applyCam(); return [camA, camB, zoom]; },
-    room(id) { const r = world.rooms.get(id); return r ? { X: r.X, Z: r.Z, W: r.W, D: r.D } : null; },
+    room(id) { const r = world.rooms.get(id) || (world.vacant || []).find(v => v.id === id); return r ? { X: r.X, Z: r.Z, W: r.W, D: r.D } : null; },
+    // every office of the building, vacant ones included, in slot order: the stable layout's state (tools/qa/office3d-qa.mjs)
+    office() {
+      const all = [...world.rooms.values(), ...(world.vacant || [])].sort((a, b) => a.slot - b.slot);
+      return { ...world.plan, minRooms: MIN_ROOMS_NOW, slots: all.map(r => ({ slot: r.slot, id: r.vacant ? null : r.id, vacant: r.vacant, cls: r.cls, cap: r.cap, X: r.X, Z: r.Z, W: r.W, D: r.D, door: r.door, hall: r.hall })) };
+    },
   };
 
   // Room shell: carpet, back walls (full height), front walls (low cutaway) and the door facing the hall.
@@ -826,7 +778,7 @@ export function createOfis(root, ctx) {
   function buildRoom(B, g, it) {
     const X = it.X, Z = it.Z, W = it.W, D = ROOM_D, T = WALL_T, H = WALL_H;
     const a = store.agents.get(it.id);
-    const th = THEMES[themeOf.get((a && a.project) || it.id) ?? (hash(it.id) % THEMES.length)];
+    const th = it.vacant ? VACANT_THEME : THEMES[themeOf.get((a && a.project) || it.id) ?? (hash(it.id) % THEMES.length)];
     const r = rng(hash(it.id));
     const b = (x, y, z, w, hh, d, col, ry) => B.box(X + x, y, Z + z, w, hh, d, col, ry);
     const rb = (x, y, z, w, hh, d, rr, col, ry) => B.rbox(X + x, y, Z + z, w, hh, d, rr, col, ry);
@@ -835,7 +787,7 @@ export function createOfis(root, ctx) {
     const shell = buildShell(B, g, X, Z, W, D, th, it.door);
     const cap = shell.cap;
     const room = {
-      id: it.id, cls: it.cls, cap: CAP[it.cls], X, Z, W, D, door: it.door, hall: it.hall,
+      id: it.id, cls: it.cls, cap: CAP[it.cls], X, Z, W, D, door: it.door, hall: it.hall, slot: it.slot, vacant: !!it.vacant,
       chefSeat: new THREE.Vector3(X + 1.95, 0, Z + D / 2),
       doorX: X + shell.dx, doorPt: new THREE.Vector3(X + shell.dx, 0, it.door === 'back' ? Z : Z + D),
       doorPivot: shell.pivot,
@@ -1080,9 +1032,15 @@ export function createOfis(root, ctx) {
             rb(sx + 0.25, 0.78, z, 0.09, 0.58, 0.48, 0.04, CHAIR);
           }
         }
-        const hit = hitBox(g, X + ax + 0.75, 0.5, Z + z, 1.2, 1.0, 1.3);
-        hit.userData.pick = { t: 'slot', room: it.id, slot };
+        if (!it.vacant) hitBox(g, X + ax + 0.75, 0.5, Z + z, 1.2, 1.0, 1.3).userData.pick = { t: 'slot', room: it.id, slot };
       }
+    }
+
+    // a vacant office stops here: no overlay, beam or rings (nobody sleeps or waits in it), and only its walls block the pointer
+    if (it.vacant) {
+      hitBox(g, X - T / 2, H / 2, Z + (D - T) / 2, T, H, D + T).userData.pick = { t: 'block' };
+      hitBox(g, X + (W - T) / 2, H / 2, Z - T / 2, W + T, H, T).userData.pick = { t: 'block' };
+      return room;
     }
 
     // dark overlay (sleeping room), yellow light beam and rings (your turn)
@@ -1300,8 +1258,13 @@ export function createOfis(root, ctx) {
     mesh.position.set(x, y, z + 0.055);
     mesh.userData.own = true;
     mesh.userData.dispose = () => { face.dispose(); tex.dispose(); };
-    mesh.userData.pick = { t: 'agent', id: room.id };
     g.add(mesh);
+    if (room.vacant) {                                  // a vacant office has a quiet grey sign, painted once: nothing to click, no your-turn lamp
+      paintPlaque(cv, { name: msg('of.vacant'), title: '', color: '#8a93a3', status: '' });
+      tex.needsUpdate = true;
+      return;
+    }
+    mesh.userData.pick = { t: 'agent', id: room.id };
     world.pick.push(mesh);
     // your-turn lamp: blinks at the sign's top-right corner
     const lamp = new THREE.Mesh(GEO.lamp, new THREE.MeshBasicMaterial({ color: YELLOW }));
@@ -2081,31 +2044,27 @@ export function createOfis(root, ctx) {
 
   function syncRooms(instant) {
     const mains = store.mains();
-    const list = [...mains.filter(a => a.status !== 'dormant'), ...mains.filter(a => a.status === 'dormant')];
     const nowMs = performance.now();
+    // the slot of every chat: a new chat takes the lowest free office, an office stays with its chat; more chats than offices append a row
+    const plan = slots.update(mains.map(m => ({ id: m.id, order: m.started || 0 })), nowMs);
+    const saved = JSON.stringify(slots.toJSON());
+    if (saved !== slotsSaved) { slotsSaved = saved; try { localStorage.setItem(SLOTS_KEY, saved); } catch { /* storage disabled */ } }
     const out = [];
-    for (const m of list) {
+    for (const m of mains) {
       let st = roomState.get(m.id);
       if (!st) roomState.set(m.id, st = { cls: null, low: 0 });
       let have = 0;
       for (const c of chars.values()) if (!c.main && c.roomId === m.id && c.after !== 'gone') have++;
       let queued = 0;
       for (const s of store.subsOf(m.id)) if (s.status === 'working' && !chars.has(s.id)) queued++;
-      const demand = have + queued;
-      const want = demand <= CAP[0] ? 0 : demand <= CAP[1] ? 1 : 2;
-      if (instant || st.cls == null) { st.cls = want; st.low = 0; }
-      else if (want > st.cls) { st.cls = want; st.low = 0; }
-      else if (want < st.cls) {
-        if (!st.low) st.low = nowMs;
-        if (nowMs - st.low > 60e3 && have <= CAP[want]) { st.cls = want; st.low = 0; }
-      } else st.low = 0;
-      out.push({ id: m.id, cls: st.cls });
+      Object.assign(st, nextClass(st, classFor(have + queued), have, nowMs, instant));
+      out.push({ id: m.id, cls: st.cls, slot: plan.slotOf.get(m.id) });
     }
     for (const id of roomState.keys()) if (!mains.some(m => m.id === id)) roomState.delete(id);
-    const sig = out.map(o => o.id + ':' + o.cls).join('|');
+    const sig = plan.rows + '|' + out.map(o => o.id + ':' + o.slot + ':' + o.cls).join('|');
     if (sig !== world.sig || !world.group) {
       world.sig = sig;
-      rebuild(out);
+      rebuild(out, plan);
     }
   }
 
@@ -2704,7 +2663,7 @@ export function createOfis(root, ctx) {
   // read-only state for verification (from the console: document.querySelector('#view-ofis').__ofis)
   root.__ofis = {
     get zoom() { return zoom; }, get size() { return [vw, vh]; }, get autoFit() { return autoFit; },
-    get rooms() { return [...world.rooms.values()].map(r => ({ id: r.id, W: +r.W.toFixed(2), X: +r.X.toFixed(2), Z: r.Z, cls: r.cls })); },
+    get rooms() { return [...world.rooms.values()].map(r => ({ id: r.id, W: +r.W.toFixed(2), X: +r.X.toFixed(2), Z: r.Z, cls: r.cls, slot: r.slot })); },
     get chars() { return chars.size; },
     project(x, y, z) { PV.set(x, y, z).project(camera); return [(PV.x + 1) / 2 * vw, (1 - PV.y) / 2 * vh]; },
     charScreen(id) { const c = chars.get(id); if (!c) return null; const p = c.root.position; return this.project(p.x, 0.8, p.z); },

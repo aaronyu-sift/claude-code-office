@@ -290,6 +290,7 @@ export default {
     'of.badgeWait': 'YOUR TURN',
     'of.badgeSleep': 'ASLEEP',
     'of.session': 'Session',
+    'of.vacant': 'Vacant',
     'of.chipAsk': 'Needs answer',
     'of.chipWait': 'Your turn',
     'of.rooms': { one: '{b} room', other: '{b} rooms' },

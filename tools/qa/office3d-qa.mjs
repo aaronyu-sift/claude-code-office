@@ -22,8 +22,10 @@ const val = f => { const i = args.indexOf('--' + f); return i >= 0 ? args[i + 1]
 const only = val('only'), shotsDir = val('shots');
 
 // ---- budgets: what the previous agent measured for 10 agents (225 draw calls, 137k triangles, with the packs and the polish) plus 10 percent;
-// the models may weigh 1.3 MB (they weigh 1.15 MB), a rebuild at 10 rooms must stay under 120 ms (it takes about 75)
-const BUDGET = { calls: 253, tris: 151000, rebuildMs: 120, modelBytes: 1.3e6 };
+// the models may weigh 1.3 MB (they weigh 1.15 MB). Since the stable layout (public/js/ofis-layout.js) every office is built with 6 desks and a
+// lounge from the start: 10 rooms take 218k triangles (was 137k with 3 desks) and a rebuild takes about 150 ms (up to 190 on a busy machine; was 75),
+// so the budgets are those plus 10 percent for the triangles and a wide margin for the time. Draw calls did not change (they stayed at 185).
+const BUDGET = { calls: 253, tris: 240000, rebuildMs: 250, modelBytes: 1.3e6 };
 const COLOUR_MIN_PX = 40;                               // pixels of the agent's colour on a figure's own pixels at zoom 150
 const NOISE = /\/local\/ofis-extras\.js/;               // the old scene probes an optional file that is absent (a 404 by design)
 
