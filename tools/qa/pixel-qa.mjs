@@ -1,7 +1,7 @@
 // QA harness of the pixel scene (docs/pixel-scene-plan.md section 7). Starts the server against a fake ~/.claude (fixture.mjs), drives
 // headless Chrome through the DevTools protocol in a throw-away profile, and prints one `CHECK <name> PASS|FAIL <detail>` line per check
 // and a final `QA PASS` or `QA FAIL`.
-//   node tools/qa/pixel-qa.mjs [--proj iso] [--shots <dir>] [--only <name>]
+//   node tools/qa/pixel-qa.mjs [--proj iso|front] [--season summer|spring|autumn|winter|auto] [--shots <dir>] [--set m4|m3|m2] [--only <name>]
 import { spawnSync } from 'node:child_process';
 import { mkdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -10,19 +10,23 @@ import { makeFixture } from './fixture.mjs';
 import { ROOT, VIEW, startServer, px, waitReady, scenario as baseScenario } from './harness.mjs';
 import { countRows } from '../sprites/content-minimums.mjs';
 import { tmpdir } from 'node:os';
+import { spriteFor, addDays } from '../../public/js/pixel/season.js';
+import { weatherFor, rainbowFor } from '../../public/js/pixel/weather.js';
+import { contactSheet } from './contact-sheet.mjs';
 
 const args = process.argv.slice(2);
 const val = f => { const i = args.indexOf('--' + f); return i >= 0 ? args[i + 1] : undefined; };
 const proj = val('proj') || 'iso';
 const shotsDir = val('shots');
-const shotSet = val('set') || 'm3';          // which pictures --shots writes: m3 (both projections at 4, 10, 20 agents, a waiting agent) or m2 (garden, room, times)
+const shotSet = val('set') || 'm3';          // which pictures --shots writes: m4 (seasons, weather, times of day), m3 (4, 10, 20 agents, a waiting agent) or m2 (garden, room, times)
 const results = [];
 function check(name, ok, detail) {
   results.push({ name, ok });
   console.log(`CHECK ${name} ${ok ? 'PASS' : 'FAIL'} ${detail}`);
 }
-// every scenario of this run uses the projection under test
-const scenario = (n, o = {}) => baseScenario(n, { proj, ...o });
+// every scenario of this run uses the projection under test and one fixed season (the date the QA runs on must not matter; `--season auto` follows the date)
+const season = val('season') || 'summer';
+const scenario = (n, o = {}) => baseScenario(n, { proj, season, ...o });
 const overlap = (a, b) => a.x < b.x + b.w && a.x + a.w > b.x && a.y < b.y + b.h && a.y + a.h > b.y;
 const NIGHT = '?time=22:00';              // the worst case for drawing: tint, glows, stars and every light on
 
@@ -396,6 +400,180 @@ if (want('projection')) {
   } finally { await S.done(); }
 }
 
+// ---- 12. seasons: every outdoor id resolves, the pictures differ, the automatic season follows the date and the hemisphere
+if (want('seasons')) {
+  const man = JSON.parse(readFileSync(ROOT + 'public/pixel/manifest.json', 'utf8')), has = id => !!man.sprites[id];
+  const S = await baseScenario(10, { tag: 'seasons', proj, query: '?time=12:00' });                    // no season given: the page decides
+  try {
+    const P = e => S.page.evaluate(px(e));
+    const base = `http://127.0.0.1:${S.srv.port}/`;
+    const rows = [];
+    for (const sea of ['spring', 'summer', 'autumn', 'winter']) {
+      await S.page.goto(`${base}?season=${sea}&time=12:00#ofis`, 800);
+      await waitReady(S.page, 10);
+      const info = await P(`({ season: p.season, seasonal: p.seasonal, attr: document.querySelector('#view-ofis').dataset.season, figures: p.figures().length, ids: [...p.layout.outdoor.items, ...p.layout.outdoor.tiles].map(i => i.id), from: p.settingsFrom.season, hash: p.stillHash() })`);
+      const resolved = info.ids.map(id => [id, spriteFor(id, sea, has)]);
+      rows.push({ sea, ...info, unresolved: resolved.filter(([, r]) => r !== null && !has(r)).length, expect: resolved.filter(([id, r]) => r && r !== id).length, errors: S.page.errors.length });
+    }
+    // the automatic season: no ?season=, so it follows the (pretended) date and the hemisphere
+    await S.page.goto(`${base}?time=12:00#ofis`, 800);
+    await waitReady(S.page, 10);
+    const dates = [['2026-01-15', 'winter', 'summer'], ['2026-04-15', 'spring', 'autumn'], ['2026-07-15', 'summer', 'winter'], ['2026-10-15', 'autumn', 'spring']], auto = [];
+    for (const hemi of ['north', 'south']) {
+      await P(`p.setSetting('hemisphere', '${hemi}')`);
+      for (const [d, n, s] of dates) auto.push({ hemi, d, got: (await P(`p.setDate('${d}')`)).season, want: hemi === 'north' ? n : s, from: (await P('p.settingsFrom')).season });
+    }
+    const hashes = new Set(rows.map(r => r.hash));
+    const ok = rows.every(r => r.season === r.sea && r.attr === r.sea && r.from === 'url' && r.figures >= 10 && r.unresolved === 0 && r.seasonal.variants === r.expect && r.errors === 0 && (r.sea === 'summer' ? r.expect <= 2 : r.expect >= 40))
+      && hashes.size === 4 && auto.every(a => a.got === a.want && a.from === 'default');
+    check('12-seasons', ok,
+      `?season=spring|summer|autumn|winter: ${rows.map(r => `${r.sea} ${r.seasonal.variants} of ${r.expect} expected seasonal sprites in the garden (${r.ids.length} outdoor pieces and ground tiles, unresolved ${r.unresolved}, picture ${r.hash.toString(16)})`).join('; ')}; four different pictures: ${hashes.size === 4}; ` +
+      `automatic season by date: ${auto.map(a => `${a.hemi} ${a.d} ${a.got}`).join(', ')} (every one as expected: ${auto.every(a => a.got === a.want)}); outdoor sprite ids with a seasonal variant in the manifest: ${Object.keys(man.sprites).filter(id => id.includes('@')).length}; console errors ${S.page.errors.length}`);
+  } finally { await S.done(); }
+}
+
+// ---- 13. weather: off costs nothing, every weather is capped and cheap, nothing runs hidden or with reduced motion, no network
+if (want('weather')) {
+  const S = await scenario(20, { tag: 'wx', query: '?time=12:00' });
+  let off, table = [], hid, netBad, same, bow, noBow, port = 0;
+  try {
+    const P = e => S.page.evaluate(px(e));
+    port = S.srv.port;
+    const sample = async secs => { await P('(p.resetWeatherStats(), p.resetStats())'); await sleep(secs * 1000); return P('({ w: p.weather, active: p.active, scene95: p.frameP95(), sceneFrames: p.frames, fps: p.frameRate().fps, pixels: p.weatherPixels() })'); };
+    off = await sample(3);                                                                     // off by default: the overlay does nothing at all
+    S.page.requests.length = 0;
+    const cases = [['rain', 'summer', 720, 'rain'], ['snow', 'summer', 720, 'snow'], ['fog', 'summer', 720, 'fog'], ['cloudy', 'summer', 720, 'cloud'],
+      ['clear', 'spring', 720, 'petal'], ['clear', 'autumn', 720, 'leaf'], ['clear', 'winter', 720, 'flake'], ['clear', 'summer', 1320, 'firefly']];
+    for (const [w, sea, min, kind] of cases) {
+      await P(`p.setSetting('season', '${sea}')`); await P(`p.setTime(${min})`); await P(`p.setSetting('weather', '${w}')`);
+      await sleep(400);
+      const r = await sample(4);
+      table.push({ label: `${w}${w === 'clear' ? ' ' + sea + (min > 1000 ? ' night' : '') : ''}`, kind, ...r });
+    }
+    // hidden: nothing is scheduled, nothing is drawn
+    await P(`p.setSetting('weather', 'rain')`); await P('p.setTime(720)');
+    await S.page.evaluate(`Object.defineProperty(document, 'hidden', { get: () => true, configurable: true }); document.dispatchEvent(new Event('visibilitychange'))`);
+    await sleep(600);
+    await P('(p.resetWeatherStats(), p.resetStats())');
+    await sleep(2500);
+    hid = await P('({ w: p.weather, stats: p.stats })');
+    await S.page.evaluate(`delete document.hidden; document.dispatchEvent(new Event('visibilitychange'))`);
+    // nothing was requested from anywhere while the weather ran
+    const reqs = [...S.page.requests];
+    netBad = reqs.filter(u => !u.startsWith(`http://127.0.0.1:${port}/`) || /weather|forecast|openweather|meteo/i.test(u));
+    // the same date and season give the same automatic weather, in the page as in the unit test; a rainbow follows rain, rarely
+    await P(`p.setSetting('weather', 'auto')`); await P(`p.setSetting('season', 'autumn')`);
+    const A = [];
+    for (const d of ['2026-10-28', '2026-10-29', '2026-11-03']) A.push({ d, a: (await P(`p.setDate('${d}')`)).weather, b: (await P(`p.setDate('${d}')`)).weather, want: weatherFor(d, 'autumn') });
+    same = A;
+    let bowDay = null, plainDay = null;
+    for (let k = 0; k < 120 && (!bowDay || !plainDay); k++) { const d = addDays('2026-03-01', k); if (rainbowFor(d, 'spring')) bowDay ||= d; else if (weatherFor(d, 'spring') === 'clear') plainDay ||= d; }
+    await P(`p.setSetting('season', 'spring')`); await P('p.setTime(720)');
+    await P(`p.setDate('${bowDay}')`); await sleep(300); bow = await P('({ w: p.weather, pixels: p.weatherPixels() })');
+    await P(`p.setDate('${plainDay}')`); await sleep(300); noBow = await P('({ w: p.weather })');
+    bow.day = bowDay; noBow.day = plainDay;
+  } finally { await S.done(); }
+
+  // all agents asleep and rain on: the overlay alone runs (at most 10 fps) and the scene is not redrawn
+  const D = await scenario(10, { tag: 'wxidle', query: '?time=12:00&weather=rain', fixture: { statuses: ['dormant'], subs: () => [] } });
+  let idle;
+  try {
+    const P = e => D.page.evaluate(px(e));
+    await sleep(2500);
+    await P('(p.resetWeatherStats(), p.resetStats())');
+    await sleep(4000);
+    idle = await P('({ w: p.weather, active: p.active, sceneFrames: p.frames, fps: p.frameRate().fps })');
+  } finally { await D.done(); }
+  // reduced motion: the weather is off whatever is set
+  const R = await scenario(10, { tag: 'wxrm', reducedMotion: true, query: '?time=12:00&weather=rain' });
+  let rm;
+  try {
+    const P = e => R.page.evaluate(px(e));
+    await sleep(1500);
+    await P('(p.resetWeatherStats(), p.resetStats())');
+    await sleep(3000);
+    rm = await P('({ w: p.weather, active: p.active, pixels: p.weatherPixels(), settings: p.settings })');
+  } finally { await R.done(); }
+
+  const live = table.filter(t => t.w.count > 0);
+  const rowOk = t => t.w.count <= 120 && t.w.count > 0 && t.w.frames > 0 && t.w.p95 <= 1 && t.scene95 <= 4 && t.w.kind === t.kind && t.active.includes('weather') && t.w.cap === 120 && t.fps <= 10.1;
+  check('13-weather',
+    off.w.frames === 0 && off.w.weather === null && off.w.count === 0 && !off.active.includes('weather') && off.pixels === 0 &&
+    table.length === 8 && table.every(rowOk) && live.length === 8 &&
+    hid.w.frames === 0 && hid.stats.callbacks === 0 &&
+    idle.w.frames >= 20 && idle.fps <= 10.1 && idle.fps >= 5 && idle.sceneFrames === 0 && idle.w.count > 0 &&
+    rm.w.reduced === true && rm.w.weather === null && rm.w.count === 0 && rm.w.frames === 0 && !rm.active.includes('weather') && rm.pixels === 0 && rm.settings.weather === 'rain' &&
+    netBad.length === 0 && same.every(x => x.a === x.b && x.a === x.want) && bow.w.rainbow === true && bow.w.weather === 'clear' && noBow.w.rainbow === false && S.page.errors.length === 0,
+    `N=20, 1500x900, noon (JavaScript time only): weather off: ${off.w.frames} overlay frames in 3 s, particles ${off.w.count}, 'weather' among the animation sources ${off.active.includes('weather')}, overlay pixels drawn ${off.pixels}, scene p95 ${off.scene95} ms per frame; ` +
+    `with weather on (4 s each): ${table.map(t => `${t.label}: ${t.w.count} particles (cap ${t.w.cap}), overlay p95 ${t.w.p95} ms (limit 1) over ${t.w.frames} frames, scene p95 ${t.scene95} ms, ${t.fps.toFixed(2)} fps`).join('; ')}; ` +
+    `hidden (2.5 s, rain on): overlay frames ${hid.w.frames}, scheduler callbacks ${hid.stats.callbacks}; all agents asleep with rain on (4 s): overlay ${idle.w.frames} frames at ${idle.fps.toFixed(2)} fps, scene redraws ${idle.sceneFrames}, ${idle.w.count} particles; ` +
+    `prefers-reduced-motion with ?weather=rain: weather shown ${rm.w.weather}, particles ${rm.w.count}, overlay frames ${rm.w.frames}, overlay pixels ${rm.pixels}, setting kept as ${rm.settings.weather}; ` +
+    `network: requests while weather ran: not to 127.0.0.1 or naming weather: ${netBad.length}${netBad[0] ? ' (' + netBad[0] + ')' : ''}; ` +
+    `automatic weather (autumn): ${same.map(x => `${x.d} ${x.a}/${x.b} (unit test ${x.want})`).join(', ')}; rainbow on ${bow.day} (clear after rain, spring): ${bow.w.rainbow}, none on ${noBow.day}: ${!noBow.w.rainbow}; console errors ${S.page.errors.length}`);
+}
+
+// ---- 14. settings popover: applied without a reload, remembered across a reload, URL overrides win
+if (want('settings')) {
+  const S = await baseScenario(4, { tag: 'settings', proj });                                // a fresh profile and no query: nothing stored, nothing overridden
+  try {
+    const ev = e => S.page.evaluate(e);
+    const base = `http://127.0.0.1:${S.srv.port}/`;
+    const st = () => ev(`(() => { const p = document.querySelector('#view-ofis').__pixel; const n = document.querySelector('#set-note'); return JSON.stringify({ settings: p.settings, from: p.settingsFrom, season: p.season, weather: p.weather.weather, wcount: p.weather.count, clock: p.time.clock, fixed: p.time.fixed, proj: p.proj, stored: localStorage.getItem('ajan-ofisi.settings'), url: location.search, origin: performance.timeOrigin, variants: p.seasonal && p.seasonal.variants, hash: p.stillHash(), note: n.hidden ? '' : n.textContent, open: !document.querySelector('#set-pop').hidden }); })()`).then(JSON.parse);
+    const sel = (id, v) => ev(`(() => { const s = document.querySelector('#${id}'); s.value = ${JSON.stringify(v)}; s.dispatchEvent(new Event('change', { bubbles: true })); return s.value; })()`);
+    const range = v => ev(`(() => { const s = document.querySelector('#set-time'); s.value = '${v}'; s.dispatchEvent(new Event('input', { bubbles: true })); })()`);
+    const click = async css => {
+      const r = await ev(`(() => { const e = document.querySelector(${JSON.stringify(css)}); const b = e.getBoundingClientRect(); const hit = document.elementFromPoint(b.left + b.width / 2, b.top + b.height / 2); return { x: b.left + b.width / 2, y: b.top + b.height / 2, ok: !!hit && (hit === e || e.contains(hit) || hit.contains(e)) }; })()`);
+      await S.page.mouse.click(r.x, r.y);
+      return r.ok;
+    };
+    const load = async q => { await S.page.goto(base + q + '#ofis', 800); await waitReady(S.page, 4); await sleep(300); return st(); };
+    const settle = async (want_, ms = 9000) => { const t0 = Date.now(); let s = await st(); while (Date.now() - t0 < ms && !want_(s)) { await sleep(150); s = await st(); } return s; };
+    await waitReady(S.page, 4);
+    const s0 = await st();
+    const opened = await click('#set-btn'); await sleep(250);
+    const s1 = await st();
+    await sel('set-season', 'winter'); await sleep(500); const s2 = await st();
+    await sel('set-weather', 'rain'); await sleep(600); const s3 = await st();
+    const fixedBtn = await click('#set-time-mode button[data-v="fixed"]'); await sleep(250);
+    await ev(`document.querySelector('#set-time').scrollIntoView()`);
+    await range(1320); await sleep(500); const s4 = await st();
+    await sel('set-hemisphere', 'south'); await sleep(300); const s5 = await st();
+    const camBtn = await click('#set-pop .proj-seg button[data-proj="front"]'); const s6 = await settle(s => s.proj === 'front');
+    await click('#set-pop .proj-seg button[data-proj="iso"]'); const s6b = await settle(s => s.proj === 'iso');
+    await sel('set-season', 'autumn'); await sel('set-weather', 'snow'); await range(390); await sleep(500); const s7 = await st();
+    const s8 = await load('');                                                                // reload, no parameters: what was chosen is still there
+    const s9 = await load('?season=spring&weather=fog&time=22:00&hemisphere=north');          // URL overrides win over what is stored, and are not stored
+    await click('#set-btn'); await sleep(250); const s9n = await st();
+    const s10 = await load('');                                                               // and the stored choice is back without them
+    await load('?season=spring');
+    await sel('set-season', 'winter'); await sleep(400); const s11 = await st();               // a change keeps an explicit parameter in step and is remembered
+    const same = (a, b) => JSON.stringify(a) === JSON.stringify(b);
+    const E = { time: '06:30', season: 'autumn', weather: 'snow', hemisphere: 'south' };
+    const noReload = [s2, s3, s4, s5].every(x => x.origin === s1.origin);
+    const C = {
+      defaults: s0.settings.time === 'auto' && s0.settings.season === 'auto' && s0.settings.weather === 'off' && s0.settings.hemisphere === 'north' && Object.values(s0.from).every(v => v === 'default') && s0.weather === null && s0.stored === null && !s0.open,
+      opened: opened && s1.open,
+      season: s2.season === 'winter' && s2.settings.season === 'winter' && s2.from.season === 'user' && /winter/.test(s2.stored) && s2.variants > 40 && s2.hash !== s1.hash,
+      weather: s3.weather === 'rain' && s3.wcount >= 100 && s3.wcount <= 120,
+      time: fixedBtn && s4.fixed && s4.clock === '22:00' && s4.settings.time === '22:00',
+      hemisphere: s5.settings.hemisphere === 'south' && s5.clock === '22:00',
+      noReload: noReload && s5.url === `?proj=${proj}`,
+      camera: camBtn && s6.proj === 'front' && s6b.proj === 'iso',
+      stored: same(s7.settings, E) && same(JSON.parse(s7.stored), E),
+      reload: same(s8.settings, E) && Object.values(s8.from).every(v => v === 'stored') && s8.season === 'autumn' && s8.weather === 'snow' && s8.wcount > 0 && s8.clock === '06:30' && s8.fixed && !s8.open,
+      url: same(s9.settings, { time: '22:00', season: 'spring', weather: 'fog', hemisphere: 'north' }) && Object.values(s9.from).every(v => v === 'url') && s9.season === 'spring' && s9.weather === 'fog' && s9.clock === '22:00' && same(JSON.parse(s9.stored), E) && /\?season=spring/.test(s9n.note),
+      back: same(s10.settings, E) && s10.season === 'autumn',
+      keepUrl: /season=winter/.test(s11.url) && s11.season === 'winter' && JSON.parse(s11.stored).season === 'winter',
+      noErrors: S.page.errors.length === 0,
+    };
+    const bad = Object.keys(C).filter(k => !C[k]), ok = bad.length === 0;
+    check('14-settings', ok,
+      `${ok ? '' : 'FAILED PARTS: ' + bad.join(', ') + '; '}fresh profile: defaults ${JSON.stringify(s0.settings)} (all from "default", weather off, nothing stored); popover opened by a click: ${s1.open}; no reload for any change (page origin unchanged ${noReload}): season select → ${s2.season} (${s2.variants} variants drawn, picture changed ${s2.hash !== s1.hash}, stored ${/winter/.test(s2.stored)}), weather select → ${s3.weather} (${s3.wcount} particles), time Fixed + slider → ${s4.clock} (fixed ${s4.fixed}), hemisphere → ${s5.settings.hemisphere}, camera buttons in the popover → ${s6.proj} then ${s6b.proj}; ` +
+      `after the last changes stored ${s7.stored}; reload with no parameters: ${JSON.stringify(s8.settings)} (all from "${[...new Set(Object.values(s8.from))]}", clock ${s8.clock}, ${s8.wcount} particles); ` +
+      `URL ?season=spring&weather=fog&time=22:00&hemisphere=north: ${JSON.stringify(s9.settings)} (from "${[...new Set(Object.values(s9.from))]}", store unchanged ${same(JSON.parse(s9.stored), E)}, popover note "${s9n.note.slice(0, 70)}"); plain reload again: ${JSON.stringify(s10.settings)}; changing the season with ?season=spring in the URL: URL now "${s11.url}", stored season ${JSON.parse(s11.stored).season}; console errors ${S.page.errors.length}`);
+  } finally { await S.done(); }
+}
+
 // ---- pictures for the review folder (--shots <dir> [--set m3|m2])
 if (shotsDir) {
   mkdirSync(shotsDir, { recursive: true });
@@ -429,6 +607,32 @@ if (shotsDir) {
         console.log('SHOT m3-before-3d-n10.png');
       } finally { await page.close(); srv.stop(); fx.cleanup(); }
     }
+  } else if (shotSet === 'm4') {
+    // M4: this projection, four agents: the four seasons clear, rain in summer, snow in winter, fog in autumn, each in the morning, the evening
+    // and at night (the date is pretended so that the light is the season's: evening is a little after sunset), plus a rainbow after rain
+    const DAY = { spring: ['2026-04-15', 19 * 60], summer: ['2026-07-15', 19 * 60 + 50], autumn: ['2026-10-15', 17 * 60 + 50], winter: ['2026-01-15', 17 * 60 + 15] };
+    const SCENES = [['spring-clear', 'spring', 'clear'], ['summer-clear', 'summer', 'clear'], ['autumn-clear', 'autumn', 'clear'], ['winter-clear', 'winter', 'clear'],
+      ['summer-rain', 'summer', 'rain'], ['winter-snow', 'winter', 'snow'], ['autumn-fog', 'autumn', 'fog']];
+    const S = await scenario(4, { tag: 'shots4', dpr: 1, query: '?time=12:00' });
+    try {
+      const P = e => S.page.evaluate(px(e));
+      for (const [name, sea, weather] of SCENES) {
+        const [date, evening] = DAY[sea];
+        await P(`p.setSetting('season', '${sea}')`); await P(`p.setSetting('weather', '${weather}')`); await P(`p.setDate('${date}')`);
+        for (const [when, min] of [['morning', 7 * 60 + 45], ['evening', evening], ['night', 22 * 60 + 30]]) {
+          await P(`p.setTime(${min})`);
+          await sleep(500);
+          await snap(S, `m4-${proj}-${name}-${when}.png`);
+        }
+      }
+      let bow = null;
+      for (let k = 0; k < 120 && !bow; k++) { const d = addDays('2026-03-01', k); if (rainbowFor(d, 'spring')) bow = d; }
+      await P(`p.setSetting('season', 'spring')`); await P(`p.setSetting('weather', 'auto')`); await P(`p.setDate('${bow}')`); await P('p.setTime(780)');
+      await sleep(500);
+      await snap(S, `m4-${proj}-rainbow-day.png`);
+      console.log('rainbow day', bow, JSON.stringify(await P('({ weather: p.weather.weather, rainbow: p.weather.rainbow })')));
+    } finally { await S.done(); }
+    console.log(`CONTACT sheet lists ${contactSheet(shotsDir)} pictures`);
   } else {
     const S10 = await scenario(10, { tag: 'shots', dpr: 2, query: '?time=12:00' });
     try {

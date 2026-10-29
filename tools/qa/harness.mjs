@@ -34,7 +34,7 @@ export async function waitReady(page, expectFigures, ms = 20000) {
   return false;
 }
 
-// opts: { tag, dpr, reducedMotion, fixture, query ('?time=22:00'), proj ('iso' | 'front', added to the query), width, height, timezone ('Asia/Tokyo': the browser's local clock) }
+// opts: { tag, dpr, reducedMotion, fixture, query ('?time=22:00'), proj ('iso' | 'front', added to the query), season (added to the query unless 'auto' or already in it), width, height, timezone ('Asia/Tokyo': the browser's local clock) }
 export async function scenario(n, opts = {}) {
   const dir = join(tmpdir(), `cco-qa-${process.pid}-${n}${opts.tag || ''}`);
   const fx = await makeFixture({ dir, n, ...(opts.fixture || {}) });
@@ -46,6 +46,7 @@ export async function scenario(n, opts = {}) {
     const agents = await apiAgents(srv.port);
     const q = new URLSearchParams(opts.query || '');
     if (opts.proj) q.set('proj', opts.proj);
+    if (opts.season && opts.season !== 'auto' && !q.has('season')) q.set('season', opts.season);       // the checks do not depend on the date they run on
     await page.goto(`http://127.0.0.1:${srv.port}/${q.size ? '?' + q : ''}#ofis`, 800);
     const ready = await waitReady(page, agents.filter(a => a.kind === 'main').length);
     return { fx, srv, page, agents, ready, done, dir };
