@@ -16,7 +16,7 @@ const S = await scenario3d(n, { tag: 'shot', query, dpr, width, height, fixture:
 try {
   if (!S.ready.ok) throw new Error('scene did not become ready: ' + JSON.stringify(S.ready.last));
   if (room != null) {
-    const main = S.agents.filter(a => a.kind === 'main')[+room];
+    const main = S.agents.filter(a => a.kind === 'main' && a.status !== 'dormant')[+room];
     const [x, y, z] = at ? at.split(',').map(Number) : [2.2, 0.6, 3.4];
     await lookAtRoom(S.page, main.id, +(zoom || 90), { x, y, z });
   } else if (flag('garden')) {

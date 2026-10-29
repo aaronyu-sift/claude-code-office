@@ -1,16 +1,20 @@
 // QA of the 3D scene's models and polish (public/js/ofis*.js): headless Chrome with software WebGL in a throw-away profile, the server against a fake
 // ~/.claude, one `CHECK <name> PASS|FAIL <detail>` line per check and a final `QA PASS` or `QA FAIL`.
-//   node tools/qa/office3d-qa.mjs [--only boot|budget|agents|fallback] [--shots <dir>] [--mutations]
+//   node tools/qa/office3d-qa.mjs [--only boot|budget|agents|fallback|stable-layout|expand] [--shots <dir>] [--mutations [--group main|fallback|stable]]
 //
 //   3d-boot      the canvas is not blank, no console error, every model file the scene asks for came back 200, nothing leaves 127.0.0.1
 //   3d-fallback  models blocked, corrupt, missing or empty: the scene still draws, every piece that fell back says so once; ?assets=procedural asks for nothing
 //   3d-budget    at 10 agents: draw calls, triangles, the size of the models and the time a rebuild takes stay inside the budget
 //   3d-agents    every agent has a figure, and its colour shows on screen (the figure's own pixels, found by drawing with and without it)
+//   3d-stable-layout  3, 7 and 10 chats open, 4 close, others come, one sleeps and wakes: no office changes its rectangle, no chat its slot, no seated
+//                figure its place, a new chat takes the lowest free slot, and the camera is not refitted while the building stays the same
+//   3d-expand    a chat whose sub-agents outgrow its 6 desks grows its room inside its cell and nothing else changes; the 11th chat appends a row
+//                (the first ten offices, their chats and the sub-agents still walking stay as they are)
 //
 // --mutations breaks the code in a copy of the repo, one line at a time, and runs the check that guards that line: every one must FAIL there
 // (a check that cannot fail guards nothing). Timing is the one thing a busy machine can bend: the rebuild time is the best of three, and a failing
 // check is worth running again on its own (--only budget) before concluding anything.
-import { cpSync, mkdtempSync, readFileSync, writeFileSync, mkdirSync, rmSync } from 'node:fs';
+import { cpSync, mkdtempSync, readFileSync, writeFileSync, mkdirSync, rmSync, renameSync, utimesSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { scenario3d, lookAt, o3, sleep, ROOT } from './harness3d.mjs';
@@ -22,8 +26,10 @@ const val = f => { const i = args.indexOf('--' + f); return i >= 0 ? args[i + 1]
 const only = val('only'), shotsDir = val('shots');
 
 // ---- budgets: what the previous agent measured for 10 agents (225 draw calls, 137k triangles, with the packs and the polish) plus 10 percent;
-// the models may weigh 1.3 MB (they weigh 1.15 MB), a rebuild at 10 rooms must stay under 120 ms (it takes about 75)
-const BUDGET = { calls: 253, tris: 151000, rebuildMs: 120, modelBytes: 1.3e6 };
+// the models may weigh 1.3 MB (they weigh 1.15 MB). Since the stable layout (public/js/ofis-layout.js) every office is built with 6 desks and a
+// lounge from the start: 10 rooms take 218k triangles (was 137k with 3 desks) and a rebuild takes about 150 ms (up to 190 on a busy machine; was 75),
+// so the budgets are those plus 10 percent for the triangles and a wide margin for the time. Draw calls did not change (they stayed at 185).
+const BUDGET = { calls: 253, tris: 240000, rebuildMs: 280, modelBytes: 1.3e6 };
 const COLOUR_MIN_PX = 40;                               // pixels of the agent's colour on a figure's own pixels at zoom 150
 const NOISE = /\/local\/ofis-extras\.js/;               // the old scene probes an optional file that is absent (a 404 by design)
 
@@ -63,7 +69,7 @@ async function runMain(ctx) {
   const S = await scenario3d(10, { tag: 'main', root: ctx.root });
   try {
     const { page, agents } = S;
-    const mains = agents.filter(a => a.kind === 'main');
+    const mains = agents.filter(a => a.kind === 'main' && a.status !== 'dormant');           // an asleep chat is on the shelf: it has no room
     const bl = await blank(page);
     const files = await models(page);
     const byUrl = new Map(files.map(f => [f.url, f]));
@@ -83,7 +89,7 @@ async function runMain(ctx) {
     const first = await page.evaluate(o3('o.rebuildMs')), best = Math.min(...rebuilds);
     const bytes = files.reduce((s, f) => s + f.bytes, 0);
     res.push(make('3d-budget', info.calls <= BUDGET.calls && info.tris <= BUDGET.tris && best <= BUDGET.rebuildMs && bytes <= BUDGET.modelBytes && files.length === KEYS.length + 1,
-      `10 agents (${S.expect} figures) at fit zoom: ${info.calls} draw calls (budget ${BUDGET.calls}), ${info.tris} triangles (${BUDGET.tris}), rebuild at ${mains.length} rooms ${rebuilds.map(r => r.toFixed(0)).join(', ')} ms, best ${best.toFixed(0)} (${BUDGET.rebuildMs}), `
+      `10 agents (${S.expect} figures) at fit zoom: ${info.calls} draw calls (budget ${BUDGET.calls}), ${info.tris} triangles (${BUDGET.tris}), rebuild of the 10 offices (${mains.length} with a chat) ${rebuilds.map(r => r.toFixed(0)).join(', ')} ms, best ${best.toFixed(0)} (${BUDGET.rebuildMs}), `
       + `${files.length} model files ${(bytes / 1e6).toFixed(2)} MB (${BUDGET.modelBytes / 1e6} MB), ${info.geos} geometries, ${info.tex} textures`));
     ctx.info = { info, rebuilds, bytes, files: files.length, first };
 
@@ -202,11 +208,17 @@ const MUTATIONS = [
   { name: 'the occlusion pass takes ten times the rays', file: 'public/js/ofis-polish.js', from: 'const NDIR = 14;', to: 'const NDIR = 140;', group: 'main', fails: '3d-budget' },
   { name: 'the agent colour is not put on the outfit', file: 'public/js/ofis-assets.js', from: 'const tint = shirt ? new THREE.Color(shirt) : null;', to: 'const tint = null;', group: 'main', fails: '3d-agents' },
   { name: 'a model path is wrong', file: 'public/js/ofis-rig.js', from: "desk: F + 'desk.glb'", to: "desk: F + 'deskk.glb'", group: 'main', fails: '3d-boot' },
+  // the stable layout: each of these breaks one rule of public/js/ofis-layout.js or of the way ofis.js draws it
+  { name: 'slots are not sticky: every chat is handed a slot again on every update', file: 'public/js/ofis-layout.js', from: 'const fresh = chats.filter(c => !slotOf.has(c.id))', to: 'const fresh = chats.filter(() => true)', group: 'stable', fails: ['3d-stable-layout', '3d-expand'] },
+  { name: 'an expansion repacks the rows: the row size follows the number of chats', file: 'public/js/ofis.js', from: 'const P = buildingPlan(plan.rows, slots.perRow, leads);', to: 'const P = buildingPlan(plan.rows, Math.max(slots.perRow, Math.ceil(list.length / 2)), leads);', group: 'stable', fails: '3d-expand' },
+  { name: 'the camera refits at every rebuild, not only when the building changed', file: 'public/js/ofis.js', from: 'const changed = key !== fitKey;', to: 'const changed = true;', group: 'stable', fails: ['3d-stable-layout', '3d-expand'] },
+  { name: 'a room is built for 3 desks: the fourth sub-agent changes it', file: 'public/js/ofis-layout.js', from: 'export const BASE_CLS = 1;', to: 'export const BASE_CLS = 0;', group: 'stable', fails: '3d-stable-layout' },
+  { name: 'a rebuild seats the sub-agents that are still walking', file: 'public/js/ofis.js', from: "if (c.mode === 'walk' && c.path && (c.slot < 0", to: "if (false && c.mode === 'walk' && c.path && (c.slot < 0", group: 'stable', fails: '3d-expand' },
 ];
 
 async function runMutations() {
   const rows = [];
-  for (const m of MUTATIONS) {
+  for (const m of MUTATIONS.filter(x => !val('group') || x.group === val('group'))) {
     const dir = mkdtempSync(join(tmpdir(), 'cco-mut-'));
     try {
       for (const f of ['server.js', 'cost-worker.js', 'demo.js', 'procident.js', 'recent.js', 'chatbridge.js', 'package.json']) cpSync(join(ROOT, f), join(dir, f));
@@ -214,14 +226,183 @@ async function runMutations() {
       const file = join(dir, m.file), text = readFileSync(file, 'utf8');
       if (!text.includes(m.from)) { rows.push({ m, caught: false, detail: 'the line to break was not found' }); continue; }
       writeFileSync(file, text.replace(m.from, m.to));
-      const res = await (m.group === 'fallback' ? runFallback : runMain)({ root: dir });
-      const r = res.find(x => x.name === m.fails);
-      rows.push({ m, caught: !!r && !r.ok, detail: r ? r.detail.slice(0, 220) : 'check did not run' });
+      const res = await ({ fallback: runFallback, stable: runStable }[m.group] || runMain)({ root: dir });
+      const want = [].concat(m.fails), got = want.map(n => res.find(x => x.name === n));
+      rows.push({ m, caught: got.every(r => r && !r.ok), detail: got.map((r, i) => (r ? `${want[i]} ${r.ok ? 'PASSED' : 'FAILED'}: ${r.detail.slice(r.ok ? 0 : r.detail.indexOf('PROBLEMS'), (r.ok ? 0 : r.detail.indexOf('PROBLEMS')) + 230)}` : `${want[i]} did not run`)).join(' || ') });
     } finally { rmSync(dir, { recursive: true, force: true }); }
     const last = rows[rows.length - 1];
     console.log(`MUTATION ${last.caught ? 'CAUGHT' : 'MISSED'} ${m.fails}: ${m.name} -> ${last.detail}`);
   }
   return rows;
+}
+
+// ---- 3d-stable-layout, 3d-expand: chats come and go while one building is watched (public/js/ofis-layout.js decides, ofis.js draws)
+// 16 sessions are on disk; the ones that are not open yet are put away before the server starts and come back one by one, so the page really sees
+// them appear. After every step the building is read again (`o.office()`: every office with its rectangle, vacant ones included) and compared
+// with the step before: no office may change its rectangle, no chat may change its slot, no seated figure may move, and a building that did not
+// change must not refit the camera (`o.fits` counts the refits a changed building caused, `s.zoom` is the view).
+const CHAT_STATUS = ['working', 'working', 'waiting', 'working', 'working', 'ask', 'working', 'waiting', 'working', 'waiting', 'working', 'dormant', 'working', 'waiting', 'working', 'working'];
+const WALK_SPEED = 2.2;                                  // units per second (WALK in ofis.js)
+const MANY = 3;                                          // the chat with nine working sub-agents: two from the start, four more within its 6 desks, three more beyond them
+const rectKey = s => [...[s.X, s.Z, s.W, s.D].map(v => +v.toFixed(3)), s.door, s.hall].join(',');            // to the millimetre
+
+async function runStable(ctx) {
+  const dirs = {};
+  const putAway = new Set([3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15]);          // every session but the first three
+  const lateSubs = [2, 3, 4, 5, 6, 7, 8];
+  const subFiles = (fx, i, k) => {
+    const a = fx.agents[i], id = a.subs[k].id.split(':')[1];
+    const d = join(dirs.dir, 'projects', `/qa/ws/${a.project}`.replace(/[^a-zA-Z0-9]/g, '-'), a.id, 'subagents');
+    return [join(d, `agent-${id}.jsonl`), join(d, `agent-${id}.meta.json`)];
+  };
+  const S = await scenario3d(16, {
+    tag: 'stable', root: ctx.root,
+    fixture: { statuses: CHAT_STATUS, subs: i => (i === MANY ? Array(9).fill('working') : i % 3 === 0 && i < 12 ? ['working'] : []) },
+    beforeServer: async (fx, dir) => {
+      dirs.dir = dir;
+      mkdirSync(join(dir, 'stash', 'subs'), { recursive: true });
+      for (const i of putAway) renameSync(join(dir, 'sessions', fx.pids[i] + '.json'), join(dir, 'stash', fx.pids[i] + '.json'));
+      for (const k of lateSubs) subFiles(fx, MANY, k).forEach((f, j) => renameSync(f, join(dir, 'stash', 'subs', `${k}.${j}`)));
+    },
+  });
+  const res = [];
+  try {
+    const { page, fx } = S;
+    const id = i => fx.agents[i].id;
+    const open = i => renameSync(join(dirs.dir, 'stash', fx.pids[i] + '.json'), join(dirs.dir, 'sessions', fx.pids[i] + '.json'));
+    const openSubs = ks => ks.forEach(k => subFiles(fx, MANY, k).forEach((f, j) => { renameSync(join(dirs.dir, 'stash', 'subs', `${k}.${j}`), f); utimesSync(f, Date.now() / 1000, Date.now() / 1000); }));
+    const wake = i => {
+      const f = join(dirs.dir, 'sessions', fx.pids[i] + '.json');
+      writeFileSync(f, JSON.stringify({ ...JSON.parse(readFileSync(f, 'utf8')), status: 'busy', statusUpdatedAt: Date.now() }));
+    };
+    const read = () => page.evaluate(o3(`({ office: o.office(), figs: o.figures().map(f => ({ id: f.id, main: f.main, mode: f.mode, x: +f.x.toFixed(3), z: +f.z.toFixed(3) })),
+      rooms: s.rooms.map(r => ({ id: r.id, slot: r.slot, cls: r.cls })), zoom: s.zoom, fits: o.fits, builds: o.builds, t: performance.now(), err: v.dataset.hata || null })`));
+    // wait until the scene shows `n` chats with a room (and a chief each), then give a rebuild a moment to finish
+    const settle = async (n, more = () => true) => {
+      for (let t = 0; t < 100; t++) {
+        const st = await read().catch(() => null);
+        if (st && st.rooms.length === n && st.figs.filter(f => f.main).length === n && more(st)) { await sleep(500); return read(); }
+        await sleep(300);
+      }
+      return read();
+    };
+    const slotOf = st => new Map(st.rooms.map(r => [r.id, r.slot]));
+    const seated = st => new Map(st.figs.filter(f => f.mode === 'seated').map(f => [f.id, f]));
+    const stats = { offices: 0, kept: 0, figs: 0 };
+    // what must stay the same between two readings; `extra`: the slots allowed to change (a room that grew: its capacity, not its place)
+    const compare = (a, b, label, { same = true, grow = [] } = {}) => {
+      const bad = [];
+      const n = Math.min(a.office.slots.length, b.office.slots.length);
+      for (let i = 0; i < n; i++) {
+        stats.offices++;
+        if (rectKey(a.office.slots[i]) !== rectKey(b.office.slots[i])) bad.push(`${label}: office ${i} changed its rectangle ${rectKey(a.office.slots[i])} -> ${rectKey(b.office.slots[i])}`);
+        if (!grow.includes(i) && a.office.slots[i].cap !== b.office.slots[i].cap) bad.push(`${label}: office ${i} changed its desks`);
+      }
+      if (JSON.stringify(a.office.halls[0]) !== JSON.stringify(b.office.halls[0])) bad.push(`${label}: the first hall (the reception) changed`);
+      const sb = slotOf(b);
+      for (const [cid, s] of slotOf(a)) if (sb.has(cid)) { stats.kept++; if (sb.get(cid) !== s) bad.push(`${label}: chat ${cid.slice(0, 6)} moved from slot ${s} to ${sb.get(cid)}`); }
+      const fb = seated(b);
+      for (const [fid, f] of seated(a)) { const g = fb.get(fid); if (g) { stats.figs++; if (g.x !== f.x || g.z !== f.z) bad.push(`${label}: figure ${fid.slice(0, 10)} moved (${f.x},${f.z}) -> (${g.x},${g.z})`); } }
+      if (same && (a.zoom !== b.zoom || a.fits !== b.fits)) bad.push(`${label}: the camera was refitted (zoom ${a.zoom} -> ${b.zoom}, refits ${a.fits} -> ${b.fits}) but the building did not change`);
+      if (b.err) bad.push(`${label}: scene error ${b.err}`);
+      return bad;
+    };
+    const vacant = st => st.office.slots.filter(s => s.vacant).length;
+    const room3 = st => st.office.slots.find(s => s.id === id(MANY));
+    const subsOf3 = st => st.figs.filter(f => f.id.startsWith(id(MANY) + ':')).length;
+    const problems = [], notes = [];
+
+    // ---- 3 chats
+    const s3 = await settle(3);
+    const first = s3.office.slots.map(rectKey);
+    if (s3.office.slots.length !== 10 || s3.office.rows !== 2 || vacant(s3) !== 7) problems.push(`3 chats: ${s3.office.slots.length} offices in ${s3.office.rows} rows, ${vacant(s3)} vacant (want 10 in 2, 7 vacant)`);
+    if (![0, 1, 2].every(i => slotOf(s3).get(id(i)) === i)) problems.push(`3 chats: slots ${[0, 1, 2].map(i => slotOf(s3).get(id(i)))} (want 0,1,2)`);
+    // ---- 7 chats
+    [3, 4, 5, 6].forEach(open);
+    const s7 = await settle(7);
+    problems.push(...compare(s3, s7, '3 -> 7 chats'));
+    if (![3, 4, 5, 6].every(i => slotOf(s7).get(id(i)) === i)) problems.push(`7 chats: new chats took slots ${[3, 4, 5, 6].map(i => slotOf(s7).get(id(i)))} (want the lowest free ones, 3,4,5,6)`);
+    // ---- 10 chats
+    [7, 8, 9].forEach(open);
+    const s10 = await settle(10);
+    problems.push(...compare(s7, s10, '7 -> 10 chats'));
+    if (s10.office.slots.length !== 10 || vacant(s10) !== 0 || s10.office.rows !== 2) problems.push(`10 chats: ${s10.office.slots.length} offices, ${vacant(s10)} vacant, ${s10.office.rows} rows (want 10, 0, 2)`);
+    // ---- four chats close: their offices turn vacant and nobody else moves
+    const closing = [1, 4, 6, 8];
+    closing.forEach(i => fx.closeSession(id(i)));
+    const s6 = await settle(6);
+    problems.push(...compare(s10, s6, '10 -> 6 chats (4 closed)'));
+    const free = s6.office.slots.filter(s => s.vacant).map(s => s.slot).join();
+    if (free !== closing.join()) problems.push(`4 closed: vacant slots ${free} (want ${closing.join()})`);
+    // ---- the next chat takes the lowest free slot
+    open(10);
+    const s7b = await settle(7);
+    problems.push(...compare(s6, s7b, '6 -> 7 chats (a new chat)'));
+    if (slotOf(s7b).get(id(10)) !== 1) problems.push(`a new chat took slot ${slotOf(s7b).get(id(10))} (want the lowest free one, 1)`);
+    // ---- an asleep chat has no room (it is on the shelf); when it wakes it takes the lowest free slot
+    open(11);
+    await sleep(2500);
+    const sAsleep = await read();
+    problems.push(...compare(s7b, sAsleep, 'a sleeping chat appears'));
+    if (sAsleep.rooms.length !== 7 || slotOf(sAsleep).has(id(11))) problems.push(`a sleeping chat has a room (${sAsleep.rooms.length} rooms)`);
+    wake(11);
+    const s8 = await settle(8);
+    problems.push(...compare(sAsleep, s8, 'a chat wakes'));
+    if (slotOf(s8).get(id(11)) !== 4) problems.push(`the chat that woke took slot ${slotOf(s8).get(id(11))} (want the lowest free one, 4)`);
+    // ---- back to ten chats: the two newcomers fill the last free offices, in the order they come
+    [12, 13].forEach(open);
+    const sTen = await settle(10);
+    problems.push(...compare(s8, sTen, '8 -> 10 chats'));
+    if (sTen.office.slots.length !== 10 || vacant(sTen) !== 0 || slotOf(sTen).get(id(12)) !== 6 || slotOf(sTen).get(id(13)) !== 8) {
+      problems.push(`10 chats again: ${sTen.office.slots.length} offices, ${vacant(sTen)} vacant, slots ${slotOf(sTen).get(id(12))},${slotOf(sTen).get(id(13))} (want 10, 0, 6, 8)`);
+    }
+    // ---- sub-agents join a chat that has desks free (2 to 6 of its 6): nothing is rebuilt and nothing moves
+    openSubs([2, 3, 4, 5]);
+    const sSub = await settle(10, st => subsOf3(st) >= 6);
+    problems.push(...compare(sTen, sSub, 'four sub-agents within the 6 desks'));
+    if (sSub.builds !== sTen.builds) problems.push(`four sub-agents within the 6 desks rebuilt the scene (${sTen.builds} -> ${sSub.builds} builds)`);
+    if (room3(sSub).cap !== 6 || subsOf3(sSub) !== 6) problems.push(`the chat has ${room3(sSub).cap} desks and ${subsOf3(sSub)} sub-agent figures (want 6 and 6)`);
+    res.push(make('3d-stable-layout', S.ready.ok && problems.length === 0,
+      `3, 7 and 10 chats came, 4 closed, 1 came, 1 slept and woke, 2 came, then 4 sub-agents joined one chat within its desks (${sSub.builds - sTen.builds} rebuilds): ${stats.offices} office rectangles compared (all ${first.length} offices exist at 3 chats: ${vacant(s3)} vacant), ${stats.kept} chat slots kept, ${stats.figs} seated figures kept their place, `
+      + `camera refits ${s3.fits} -> ${sSub.fits} at zoom ${s3.zoom.toFixed(2)} -> ${sSub.zoom.toFixed(2)}; new chats took the lowest free slots; a sleeping chat had no room and took slot ${slotOf(s8).get(id(11))} on waking`
+      + (problems.length ? '; PROBLEMS: ' + problems.slice(0, 4).join(' | ') + (problems.length > 4 ? ` (and ${problems.length - 4} more)` : '') : '')));
+
+    // ---- 3d-expand: a chat whose sub-agents outgrow its room, then the 11th chat
+    const ex = [];
+    const before = sSub, desks0 = room3(before).cap;
+    openSubs([6, 7, 8]);
+    const sGrow = await settle(10, st => room3(st).cap > desks0);
+    ex.push(...compare(before, sGrow, 'a chat with nine sub-agents', { grow: [room3(before).slot] }));
+    if (room3(sGrow).cap !== 12 || room3(sGrow).cls !== 2) ex.push(`its room has ${room3(sGrow).cap} desks in class ${room3(sGrow).cls} (want 12 and 2)`);
+    if (sGrow.office.rows !== 2) ex.push(`${sGrow.office.rows} rows (want 2: no chat was added)`);
+    const growWait = await settle(10, st => subsOf3(st) >= 9);
+    if (subsOf3(growWait) !== 9) ex.push(`${subsOf3(growWait)} figures for the nine sub-agents`);
+    // the 11th chat: a row is appended, the first ten offices stay
+    const tenSlots = slotOf(growWait);
+    open(14);
+    const s11 = await settle(11);
+    ex.push(...compare(growWait, s11, '10 -> 11 chats', { same: false }));
+    if (s11.office.rows !== 3 || s11.office.slots.length !== 15 || vacant(s11) !== 4) ex.push(`11 chats: ${s11.office.slots.length} offices in ${s11.office.rows} rows, ${vacant(s11)} vacant (want 15 in 3, 4 vacant)`);
+    if (slotOf(s11).get(id(14)) !== 10) ex.push(`the 11th chat took slot ${slotOf(s11).get(id(14))} (want 10, the first office of the new row)`);
+    for (const [cid, sl] of tenSlots) if (slotOf(s11).get(cid) !== sl) ex.push(`chat ${cid.slice(0, 6)} lost its slot ${sl}`);
+    if (s11.fits !== growWait.fits + 1 || !(s11.zoom < growWait.zoom)) ex.push(`the view did not refit once to the bigger building (refits ${growWait.fits} -> ${s11.fits}, zoom ${growWait.zoom.toFixed(2)} -> ${s11.zoom.toFixed(2)})`);
+    if (subsOf3(s11) !== 9) ex.push(`${subsOf3(s11)} figures of the nine sub-agents after the rebuild`);
+    // the sub-agents still walking in when the building grew must go on walking from where they were (a rebuild that seated them would jump them to their desks)
+    const walkers = growWait.figs.filter(f => f.mode === 'walk' && s11.figs.some(g => g.id === f.id));
+    const maxStep = WALK_SPEED * (s11.t - growWait.t) / 1000 * 1.5 + 0.6;
+    const jumped = walkers.filter(f => { const g = s11.figs.find(x => x.id === f.id); return Math.hypot(g.x - f.x, g.z - f.z) > maxStep; });
+    if (!walkers.length) ex.push('no sub-agent was walking when the 11th chat came: the walkers check had nothing to look at');
+    if (jumped.length) ex.push(`${jumped.length} of ${walkers.length} walking sub-agents jumped when the building grew`);
+    await sleep(2500);
+    const sLater = await read();
+    ex.push(...compare(s11, sLater, 'a quiet moment after the expansion'));
+    res.push(make('3d-expand', S.ready.ok && ex.length === 0,
+      `a chat went from 6 to 9 working sub-agents (it has 6 desks): its room grew ${desks0} -> ${room3(sGrow).cap} desks inside its cell (${rectKey(room3(sGrow))} unchanged), no other office, chat or seated figure changed and the view did not refit; `
+      + `the 11th chat took slot ${slotOf(s11).get(id(14))}: ${s11.office.slots.length} offices in ${s11.office.rows} rows, the first ten offices and their ${tenSlots.size} chats unchanged, ${subsOf3(s11)} sub-agent figures kept, `
+      + `${walkers.length} walkers went on walking, one refit (zoom ${growWait.zoom.toFixed(2)} -> ${s11.zoom.toFixed(2)})`
+      + (ex.length ? '; PROBLEMS: ' + ex.slice(0, 4).join(' | ') + (ex.length > 4 ? ` (and ${ex.length - 4} more)` : '') : '')));
+  } finally { await S.done(); }
+  return res;
 }
 
 // ---- main
@@ -236,6 +417,7 @@ if (args.includes('--mutations')) {
 }
 if (!only || ['boot', 'budget', 'agents'].includes(only)) for (const r of await runMain(ctx)) if (!only || r.name === '3d-' + only) show(r);
 if (!only || only === 'fallback') for (const r of await runFallback(ctx)) show(r);
+if (!only || only === 'stable-layout' || only === 'expand') for (const r of await runStable(ctx)) if (!only || r.name === '3d-' + only) show(r);
 const bad = report.filter(r => !r.ok);
 console.log(bad.length ? `QA FAIL (${bad.length} of ${report.length} checks)` : `QA PASS (${report.length} checks)`);
 process.exit(bad.length ? 1 : 0);
