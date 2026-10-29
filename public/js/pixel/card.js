@@ -7,10 +7,13 @@ import { esc, fmtShort, fmtClock, catColor, CATS, icon } from '../util.js';
 import { createOpenMenu } from './open-menu.js';
 import { placeCard } from './cardplace.js';
 import { enter, leave, comesFrom, SPRING } from '../motion.js';
+import { progressBarEl } from '../progress-bar.js';
 
 const SUB_MAX = 6;
 // the clock texts inside a card are kept by the page's ticker; a re-render for them alone would only close the menu and move the scroll
 const unticked = html => html.replace(/(<[^>]*data-since="[^"]*"[^>]*>)[^<]*/g, '$1');
+// the progress of the chat's task list, when the tracker has written one for it (progress.js): the bar made as an element, put in as a string
+const progressRow = (a, t) => { const bar = a.progress && progressBarEl(a.progress, { now: t }); return bar ? bar.outerHTML : ''; };
 
 // options: root (the Office view, the card's offset parent), ctx (store, statusPill, activityHtml, closedAgent, copyText, openDetails, tip),
 // storage, anchorOf(id, rowEl) -> { x, y, w, h, kind: 'scene' | 'shelf', prefer } in root coordinates or null when the anchor is not on screen,
@@ -50,6 +53,7 @@ export function createAgentCard({ root, ctx, storage = null, anchorOf, boundsOf,
         `<button type="button" class="oc-x" aria-label="${esc(msg('dw.close'))}" title="${esc(msg('dw.close'))}">${icon('close')}</button></div>` +
       `<h3 class="oc-title">${esc(title)}</h3>` +
       `<div class="oc-world"><i class="oc-sw" style="background:${esc(a.color)}"></i><span>${esc(project)}${task ? ' · ' + esc(task) : ''}</span></div>` +
+      progressRow(a, t) +
       (closed ? `<div class="oc-note">${esc(msg('dw.closedNote'))}</div>` : `<div class="oc-act">${ctx.activityHtml(a, t)}</div>`) +
       (facts.length ? `<dl class="oc-facts">${facts.map(([k, v]) => `<dt>${esc(k)}</dt><dd>${v}</dd>`).join('')}</dl>` : '') +
       quote(msg(sub ? 'dw.task' : 'dw.lastPrompt'), a.lastPrompt, 'p') +

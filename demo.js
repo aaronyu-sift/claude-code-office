@@ -323,5 +323,38 @@ module.exports = function createDemo({ Agent, agents, ingest, colorFor }) {
     });
   }
 
-  return { step, costSummary, closed };
+  // Task progress: what the tracker's snapshot file holds for the demo chats (docs/progress.md). Each chat works down its list, one item every
+  // PROGRESS_STEP, and stops two items short of the end so the demo never finishes; the chat that waits for the user has a blocked item, and the
+  // asleep chat has no list, so the demo shows a chat without a bar.
+  const PROGRESS_STEP = 90e3;
+  const TASKS = {
+    'nebula-web': [2, ['Audit the current checkout', 'Design the new flow', 'Build the cart page', 'Wire the payment step', 'Add the A/B hooks', 'Write the e2e tests', 'Roll out to 5 percent']],
+    'atlas-api': [3, ['Read the existing middleware', 'Token bucket limiter', 'Per-key burst rules', 'Auth before rate limit', 'Benchmark the limiter', 'Update the API docs', 'Load test', 'Write the changelog']],
+    'pixel-forge': [1, ['Grid and tile model', 'Palette tool', 'Undo and redo', 'Export to atlas', 'WebGPU shader port', 'Accessibility sweep']],
+    'docs-hub': [4, ['Inventory the pages', 'Port the layouts', 'Convert the MDX components', 'Redirect the old URLs', 'Check the search index', 'Switch the build']],
+    'orbit-mobile': [0, ['Sync queue design', 'Operation ids', 'Offline store', 'Conflict rules', 'Conflict screen', 'Simulator tests']],
+    'data-lake': [2, ['Pull the last seven runs', 'Find the backfill spike', 'Pin the snapshot id', 'Schedule off-peak', 'Write up the audit']],
+  };
+  function progress(t) {
+    const chats = {};
+    for (const [project, [from, titles]] of Object.entries(TASKS)) {
+      const id = `demo-${project}`;
+      const a = agents.get(id);
+      if (!a) continue;
+      const waiting = PROJECTS.find(p => p.project === project).mode === 'waiting';
+      const done = Math.min(titles.length - 2, from + Math.floor((t - t0) / PROGRESS_STEP));
+      const items = titles.map((title, i) => {
+        const status = i < done ? 'done' : i === done ? (waiting ? 'blocked' : 'doing') : 'todo';
+        return {
+          id: `S${i + 1}`, title, status, prio: i % 3 === 0 ? 'high' : 'med', complexity: i % 2 ? 'M' : 'S',
+          doingSince: status === 'doing' ? new Date(done > from ? t0 + (done - from) * PROGRESS_STEP : t0 - 4 * 60e3).toISOString() : null,
+          doneAt: status === 'done' ? new Date(i < from ? t0 - (from - i) * 10 * 60e3 : t0 + (i - from + 1) * PROGRESS_STEP).toISOString() : null,
+        };
+      });
+      chats[id] = { topic: PROJECTS.find(p => p.project === project).title, updatedAt: new Date(t).toISOString(), total: titles.length, done, doing: waiting ? 0 : 1, blocked: waiting ? 1 : 0, items };
+    }
+    return { version: 1, updatedAt: new Date(t).toISOString(), chats };
+  }
+
+  return { step, costSummary, closed, progress };
 };

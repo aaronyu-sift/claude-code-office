@@ -22,13 +22,13 @@ async function startServerAt(root, dir) {
 // an expression evaluated with `o` = the 3D view's QA state and `v` = its element
 export const o3 = expr => `(()=>{const v=document.querySelector('#view-ofis'), o=v.__ofis3d, s=v.__ofis; return ${expr}})()`;
 
-// The people the scene shows once it has settled: one chief per room, plus the working subagents that fit a room (3, 6 or 12 desks)
+// The people the scene shows once it has settled: one chief per room (an asleep chat is on the shelf, not in a room), plus the working subagents that fit a room (6 or 12 desks)
 export function expectedFigures(agents) {
-  const mains = agents.filter(a => a.kind === 'main');
+  const mains = agents.filter(a => a.kind === 'main' && a.status !== 'dormant');
   let n = mains.length;
   for (const m of mains) {
     const subs = agents.filter(a => a.kind === 'sub' && a.parent === m.id && a.status === 'working').length;
-    n += Math.min(subs, subs <= 3 ? 3 : subs <= 6 ? 6 : 12);
+    n += Math.min(subs, 12);
   }
   return n;
 }
@@ -46,10 +46,11 @@ export async function waitReady3d(page, minFigures, ms = 30000) {
 }
 
 // opts: { tag, query ('assets=procedural&polish=off'), fixture, width, height, dpr, root (serve another copy of the repo), intercept (async (page, srv) => void,
-//         runs before the page opens) }; page.warnings collects the console warnings
+//         runs before the page opens), beforeServer (async (fixture, dir) => void, runs before the server starts: files put away there can come back later) }; page.warnings collects the console warnings
 export async function scenario3d(n, opts = {}) {
   const dir = join(tmpdir(), `cco-qa3d-${process.pid}-${n}${opts.tag || ''}`);
   const fx = await makeFixture({ dir, n, ...(opts.fixture || {}) });
+  if (opts.beforeServer) await opts.beforeServer(fx, dir);
   const srv = opts.root ? await startServerAt(opts.root, dir) : await startServer(dir, opts.serverEnv);
   const page = await launchChrome({ width: opts.width || VIEW.w, height: opts.height || VIEW.h, dpr: opts.dpr || 1, lang: 'en-US' });
   const done = async () => { await page.close(); srv.stop(); fx.cleanup(); };
