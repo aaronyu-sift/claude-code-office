@@ -5,12 +5,13 @@
 // The scene works in virtual pixels (zoom 1). The camera is a whole-number zoom plus a pan in device pixels, so every sprite lands on
 // the pixel grid and is scaled by an integer with nearest-neighbour sampling.
 import { screenBounds } from './projection.js';
-import { drawMarker, drawBalloon, drawBeam, drawRing } from './effects.js';
-import { workerId, deskId } from './ids.js';
+import { drawMarker, drawBalloon, drawBeam, drawRing, drawBubble, drawSteam, drawButterfly, drawBird } from './effects.js';
+import { glowSprite, GLOW } from './lighting.js';
+import { workerId, deskId, isFloor } from './ids.js';
 import { depthSort } from './depth.js';
 
 const WALL_TINT = 0.45, FLOOR_TINT = 0.32;
-const BG = '#0e1320';
+const newCanvas = (w, h) => (typeof OffscreenCanvas !== 'undefined' ? new OffscreenCanvas(w, h) : Object.assign(document.createElement('canvas'), { width: w, height: h }));
 
 export function deskState(a) {
   if (!a) return 'off';
@@ -18,7 +19,7 @@ export function deskState(a) {
 }
 export function poseOf(a, t, anim) {
   switch (a.status) {
-    case 'working': return anim && Math.floor(t / 300) % 2 ? 'typeB' : 'typeA';
+    case 'working': return a.thinking ? 'think' : anim && Math.floor(t / 300) % 2 ? 'typeB' : 'typeA';
     case 'waiting': case 'ask': return 'wait';
     case 'done': return 'relax';
     default: return 'sleep';
@@ -27,12 +28,12 @@ export function poseOf(a, t, anim) {
 
 export function createScene({ atlas, proj }) {
   // what the last draw() put on screen (QA reads it through the `effects` getter)
-  const fx = { beams: 0, markers: 0, waitBalloons: 0, zzBalloons: 0, doneBalloons: 0, rings: 0 };
+  const fx = { beams: 0, markers: 0, waitBalloons: 0, zzBalloons: 0, doneBalloons: 0, rings: 0, bubbles: 0, steam: 0, butterflies: 0, birds: 0, swayed: 0, lights: {} };
   const img = atlas.image;
-  let layout = null, ground = null, gx = 0, gy = 0, bounds = { x0: 0, y0: 0, x1: 1, y1: 1 }, fitBox = bounds;
-  let entries = [], figs = [], roomById = new Map(), sortMs = 0;
+  let layout = null, groundOut = null, groundIn = null, groundOutT = null, gx = 0, gy = 0, bounds = { x0: 0, y0: 0, x1: 1, y1: 1 }, fitBox = bounds;
+  let entries = [], figs = [], roomById = new Map(), sortMs = 0, outdoorKey = '', pendingLight = null, ambientPts = { flowers: [], trees: [] };
   const actors = new Map();                     // `${roomId}:${slot}` -> { id, main, status, ap, name, since }
-  let hoverId = null;
+  let hoverId = null, quiet = false;             // quiet: draw no status effects (QA measures the light on the figures alone)
 
   // ---- sprite sources: where to take pixels from and where to put them (integers), computed once per sprite and pivot
   function src(id, facing, px, py, tint, strength) {
@@ -42,15 +43,15 @@ export function createScene({ atlas, proj }) {
     const dx = Math.round(px - s.px), dy = Math.round(py - s.py);
     if (tint) {
       const t = atlas.tinted(id, facing, tint, strength);
-      return { c: t.canvas, sx: 0, sy: 0, w: rw, h: rh, dx, dy };
+      return { c: t.canvas, sx: 0, sy: 0, w: rw, h: rh, dx, dy, anchors: atlas.anchors(id, facing) };
     }
-    return { c: img, sx: rx, sy: ry, w: rw, h: rh, dx, dy };
+    return { c: img, sx: rx, sy: ry, w: rw, h: rh, dx, dy, anchors: atlas.anchors(id, facing) };
   }
   const put = (g, s) => g.drawImage(s.c, s.sx, s.sy, s.w, s.h, s.dx, s.dy, s.w, s.h);
 
-  const centre = (it) => proj.toScreen(it.x + it.w / 2, it.y + it.d / 2, 0);
+  const centre = (it) => proj.toScreen(it.x + it.w / 2, it.y + it.d / 2, it.z || 0);
 
-  function setLayout(L) {
+  function setLayout(L, light = null) {
     layout = L;
     roomById = new Map(L.rooms.map(r => [r.id, r]));
     const b = L.bounds;
@@ -61,54 +62,74 @@ export function createScene({ atlas, proj }) {
     const fb = screenBounds(proj, bd.x0 - m, bd.y0 - m, bd.x1 + m, bd.y1 + m, 48);
     fitBox = { x0: Math.floor(fb.x0), y0: Math.floor(fb.y0) - 10, x1: Math.ceil(fb.x1), y1: Math.ceil(fb.y1) };
 
-    // ground layer
+    // ground layers: the garden (grass, street, pond) and the room floors (carpets, rugs) on two canvases, so the garden can be darker at night
     gx = bounds.x0 - 8; gy = bounds.y0 - 8;
     const gw = bounds.x1 - bounds.x0 + 16, gh = bounds.y1 - bounds.y0 + 16;
-    ground = typeof OffscreenCanvas !== 'undefined' ? new OffscreenCanvas(gw, gh) : Object.assign(document.createElement('canvas'), { width: gw, height: gh });
-    const g = ground.getContext('2d');
-    g.imageSmoothingEnabled = false;
-    g.translate(-gx, -gy);
-    const flat = [];
-    for (const t of L.outdoor.tiles) flat.push({ ...t, w: 16, d: 16, facing: 0, order: 0 });
+    const layer = () => { const c = newCanvas(gw, gh), g = c.getContext('2d'); g.imageSmoothingEnabled = false; g.translate(-gx, -gy); return [c, g]; };
+    let gOut, gIn;
+    [groundOut, gOut] = layer(); [groundIn, gIn] = layer(); groundOutT = null;
+    const outFlat = [], inFlat = [];
+    for (const t of L.outdoor.tiles) outFlat.push({ ...t, w: 16, d: 16, facing: 0, order: 0 });
+    for (const it of L.outdoor.items) if (it.layer === 'floor') outFlat.push({ ...it, tint: null, order: 2 });
     for (const r of L.rooms) {
-      for (const f of r.floor) flat.push({ ...f, tint: f.tint ? r.color : null, order: 1 });
-      for (const it of r.items) if (it.layer === 'floor') flat.push({ ...it, tint: null, order: 2 });
+      for (const f of r.floor) inFlat.push({ ...f, tint: f.tint ? r.color : null, order: 1 });
+      for (const it of r.items) if (it.layer === 'floor') inFlat.push({ ...it, tint: null, order: 2 });
     }
-    flat.sort((p, q) => p.order - q.order || (p.x + p.w - p.y) - (q.x + q.w - q.y) || p.x - q.x);
-    for (const f of flat) {
-      const [px, py] = centre(f);
-      const s = src(f.id, f.facing, px, py, f.tint, FLOOR_TINT);
-      if (s) put(g, s);
+    for (const [flat, g] of [[outFlat, gOut], [inFlat, gIn]]) {
+      flat.sort((p, q) => p.order - q.order || (p.x + p.w - p.y) - (q.x + q.w - q.y) || p.x - q.x);
+      for (const f of flat) {
+        const [px, py] = centre(f);
+        const s = src(f.id, f.facing, px, py, f.tint, FLOOR_TINT);
+        if (s) put(g, s);
+      }
     }
+    outdoorKey = '';
+    pendingLight = light;
 
     // upright sprites
     const list = [];
-    const addStatic = (it, tint) => {
+    const make = (it, tint, outdoor = false) => {
       const [px, py] = centre(it);
       const s = src(it.id, it.facing, px, py, tint, WALL_TINT);
-      if (!s) return;
+      if (!s) return null;
       const fp = { x0: it.x, y0: it.y, x1: it.x + it.w, y1: it.y + it.d };
-      list.push({ kind: 's', id: it.id, s, fp, key: proj.depthKey(fp, 0), x0: s.dx, y0: s.dy, x1: s.dx + s.w, y1: s.dy + s.h });
+      const tags = atlas.sprite(it.id, it.facing).def.tags;
+      return { kind: 's', id: it.id, facing: it.facing, s, fp, key: proj.depthKey(fp, 0), x0: s.dx, y0: s.dy, x1: s.dx + s.w, y1: s.dy + s.h, outdoor, sway: tags.includes('sway'), phase: ((it.x * 7 + it.y * 13) & 15) / 16 * 6.28 };
     };
+    const addStatic = (it, tint, outdoor = false) => { const e = make(it, tint, outdoor); if (e) list.push(e); };
+    ambientPts = { flowers: [], trees: [] };
     for (const r of L.rooms) {
       for (const it of r.items) if (it.layer === 'stand') addStatic(it, it.tint ? r.color : null);
+      const deskEntry = new Map();
       for (const slot of r.slots) {
         for (const kind of ['d', 'c']) {
           const box = kind === 'd' ? slot.desk : slot.seat;
           const [px, py] = proj.toScreen(box.x + box.w / 2, box.y + box.d / 2, 0);
           const fp = { x0: box.x, y0: box.y, x1: box.x + box.w, y1: box.y + box.d };
-          list.push({
+          const e = {
             kind, room: r, slot, cache: new Map(), px, py, fp, key: proj.depthKey(fp, 0),
             x0: Math.round(px) - 40, y0: Math.round(py) - 56, x1: Math.round(px) + 40, y1: Math.round(py) + 14,
-          });
+          };
+          if (kind === 'd') { e.kids = []; deskEntry.set(slot.index, e); }
+          list.push(e);
         }
       }
+      // props stand on the desk: drawn right after it, never sorted on their own
+      for (const pr of r.props || []) { const e = make(pr, null), parent = deskEntry.get(pr.slot); if (e && parent) parent.kids.push(e); }
     }
-    for (const it of L.outdoor.items) addStatic(it, null);
+    for (const it of L.outdoor.items) {
+      if (it.layer === 'floor') continue;
+      addStatic(it, null, true);
+      const [sx, sy] = centre(it);
+      if (/^flowerbed|^bush_d|^planter/.test(it.id) && ambientPts.flowers.length < 4) ambientPts.flowers.push([sx, sy - 8]);
+      else if (/^tree_|^pine/.test(it.id) && ambientPts.trees.length < 2) ambientPts.trees.push([sx, sy - 40]);
+    }
     const t0 = performance.now();
-    entries = depthSort(list.map(e => ({ ...e, bb: e, ref: e })), proj).map(w => w.ref);
+    entries = [];
+    for (const w of depthSort(list.map(e => ({ ...e, bb: e, ref: e })), proj)) { entries.push(w.ref); if (w.ref.kids) for (const k of w.ref.kids) entries.push(k); }
     sortMs = performance.now() - t0;
     rebuildFigures();
+    if (pendingLight) retint(pendingLight); else groundOutT = null;
   }
 
   // ---- actors (who sits where and what they do), set by index.js
@@ -143,36 +164,133 @@ export function createScene({ atlas, proj }) {
   }
 
   // ---- drawing
-  function draw(g, view, t, anim) {
+  // Re-tint for a new time of day: the garden ground is copied once with the garden tint laid over it and the shaded copies of garden sprites
+  // are dropped (they are made again on demand). Returns the time it took in ms. `light` is { roomStr, outStr, lights, phase } or null.
+  function retint(light) {
+    const t0 = performance.now();
+    atlas.clearShades();
+    for (const e of entries) e.shKey = null;
+    if (groundOut && light && light.outStr) {
+      if (!groundOutT || groundOutT.width !== groundOut.width || groundOutT.height !== groundOut.height) groundOutT = newCanvas(groundOut.width, groundOut.height);
+      const g2 = groundOutT.getContext('2d');
+      g2.globalCompositeOperation = 'copy';
+      g2.drawImage(groundOut, 0, 0);
+      g2.globalCompositeOperation = 'source-atop';
+      g2.fillStyle = light.outStr;
+      g2.fillRect(0, 0, groundOut.width, groundOut.height);
+      g2.globalCompositeOperation = 'source-over';
+    } else groundOutT = null;
+    return performance.now() - t0;
+  }
+
+  const ICON = { edit: 'pencil', shell: 'terminal', web: 'magnifier', read: 'book', think: 'brain', agent: 'team' };
+  const visible = (e, vx0, vy0, vx1, vy1) => !(e.x1 < vx0 || e.x0 > vx1 || e.y1 < vy0 || e.y0 > vy1);
+  function swayPut(g, s, t, phase) {
+    const off = Math.round(Math.sin(t / 650 + phase) * 1.2);
+    if (!off) return put(g, s);
+    const ht = Math.round(s.h * 0.6);
+    g.drawImage(s.c, s.sx, s.sy, s.w, ht, s.dx + off, s.dy, s.w, ht);
+    g.drawImage(s.c, s.sx, s.sy + ht, s.w, s.h - ht, s.dx, s.dy + ht, s.w, s.h - ht);
+    fx.swayed++;
+  }
+
+  // light: { roomStr, outStr, lights, phase } from lighting (null = plain daylight)
+  function draw(g, view, t, anim, light = null) {
     const { zoom, panX, panY, w, h } = view;
     g.setTransform(1, 0, 0, 1, 0, 0);
     g.imageSmoothingEnabled = false;
     g.globalAlpha = 1;
-    g.fillStyle = BG;
-    g.fillRect(0, 0, w, h);
-    fx.beams = fx.markers = fx.waitBalloons = fx.zzBalloons = fx.doneBalloons = fx.rings = 0;
+    g.globalCompositeOperation = 'source-over';
+    g.clearRect(0, 0, w, h);                                          // the sky is a canvas behind this one
+    fx.beams = fx.markers = fx.waitBalloons = fx.zzBalloons = fx.doneBalloons = fx.rings = fx.bubbles = fx.steam = fx.butterflies = fx.birds = fx.swayed = 0;
+    fx.lights = {};
     if (!layout) return;
     g.setTransform(zoom, 0, 0, zoom, panX, panY);
     const vx0 = -panX / zoom, vy0 = -panY / zoom, vx1 = (w - panX) / zoom, vy1 = (h - panY) / zoom;
-    g.drawImage(ground, gx, gy);
+    g.drawImage(groundOutT || groundOut, gx, gy);
+    g.drawImage(groundIn, gx, gy);
+    const outStr = light && light.outStr;
     for (let i = 0; i < entries.length; i++) {
       const e = entries[i];
-      if (e.x1 < vx0 || e.x0 > vx1 || e.y1 < vy0 || e.y0 > vy1) continue;
-      if (e.kind === 's') { put(g, e.s); continue; }
+      if (!visible(e, vx0, vy0, vx1, vy1)) continue;
+      if (e.kind === 's') {
+        let s = e.s;
+        if (e.outdoor && outStr) {                                    // garden pieces get the garden tint (cached per tint)
+          if (e.shKey !== outStr) { const sh = atlas.shaded(e.id, e.facing, outStr); e.shKey = outStr; e.sh = sh ? { c: sh.canvas, sx: 0, sy: 0, w: sh.w, h: sh.h, dx: e.s.dx, dy: e.s.dy } : e.s; }
+          s = e.sh;
+        }
+        if (anim && e.sway) swayPut(g, s, t, e.phase); else put(g, s);
+        continue;
+      }
       const a = actorOf(e);
       // the light of a waiting agent shines behind its figure and behind everything nearer, so it never washes out the sprite
       if (e.kind === 'c' && a && a.main && (a.status === 'waiting' || a.status === 'ask')) fx.beams++, drawBeam(g, Math.round(e.px), Math.round(e.py) + 2, 64, anim ? 0.5 + 0.5 * Math.sin(t / 420) : 1);
       const s = dynSrc(e, a, t, anim);
       if (s) put(g, s);
     }
+    // the tint of the time of day over the rooms and everything in them (transparent pixels stay transparent)
+    if (light && light.roomStr) {
+      g.setTransform(1, 0, 0, 1, 0, 0);
+      g.globalCompositeOperation = 'source-atop';
+      g.fillStyle = light.roomStr;
+      g.fillRect(0, 0, w, h);
+      g.globalCompositeOperation = 'source-over';
+      g.setTransform(zoom, 0, 0, zoom, panX, panY);
+    }
+    // lit windows, lamps and monitors (additive), after dark; steam and the small animals while the scene animates
+    const lights = light ? light.lights : 0;
+    if (lights > 0.02 || anim) {
+      const lit = lights > 0.02;
+      if (lit) g.globalCompositeOperation = 'lighter';
+      for (let i = 0; i < entries.length; i++) {
+        const e = entries[i];
+        if (!visible(e, vx0, vy0, vx1, vy1)) continue;
+        const s = e.kind === 's' ? e.s : e.kind === 'd' ? dynSrc(e, actorOf(e), t, anim) : null;
+        if (!s || !s.anchors) continue;
+        for (const an of s.anchors) {
+          if (an.k === 'steam') continue;
+          if (!lit) continue;
+          const G = GLOW[an.k];
+          if (!G) continue;
+          const flick = an.k === 'monitor' && anim ? 0.92 + 0.08 * Math.sin(t / 170 + (s.dx % 7)) : 1;
+          const alpha = Math.min(1, lights * G.k * (an.s == null ? 1 : an.s) * flick);
+          if (alpha <= 0.02) continue;
+          const gs = glowSprite(an.k, an.r);
+          g.globalAlpha = alpha;
+          g.drawImage(gs.canvas, Math.round(s.dx + an.x - gs.r), Math.round(s.dy + an.y - gs.r));
+          fx.lights[an.k] = (fx.lights[an.k] || 0) + 1;
+        }
+      }
+      g.globalAlpha = 1;
+      g.globalCompositeOperation = 'source-over';
+      if (anim) {
+        for (let i = 0; i < entries.length; i++) {
+          const e = entries[i];
+          if (e.kind !== 's' || !e.s.anchors || !visible(e, vx0, vy0, vx1, vy1)) continue;
+          for (const an of e.s.anchors) if (an.k === 'steam') { drawSteam(g, e.s.dx + an.x, e.s.dy + an.y, t); fx.steam++; }
+        }
+        if (!light || (lights < 0.5 && light.phase !== 'night')) {
+          ambientPts.flowers.forEach(([bx, by], i) => {
+            const x = bx + Math.round(Math.cos(t / 1300 + i * 1.7) * 16), y = by + Math.round(Math.sin(t / 900 + i * 2.3) * 8);
+            if (x < vx0 || x > vx1 || y < vy0 || y > vy1) return;
+            drawButterfly(g, x, y, t, i); fx.butterflies++;
+          });
+          ambientPts.trees.forEach(([bx, by], i) => {
+            const x = bx + Math.round(Math.cos(t / 2100 + i * 3) * 26), y = by + Math.round(Math.sin(t / 1700 + i * 2) * 10);
+            if (x < vx0 || x > vx1 || y < vy0 || y > vy1) return;
+            drawBird(g, x, y, t); fx.birds++;
+          });
+        }
+      }
+    }
     // effects
-    for (let i = 0; i < figs.length; i++) {
+    for (let i = 0; i < figs.length && !quiet; i++) {
       const f = figs[i], e = f.seat;
       const cx = Math.round(e.px), fy = Math.round(e.py);
       if (cx < vx0 - 40 || cx > vx1 + 40 || fy < vy0 || fy > vy1 + 90) continue;
       if (f.id === hoverId) { fx.rings++; drawRing(g, cx, fy + 2); }
     }
-    for (let i = 0; i < figs.length; i++) {
+    for (let i = 0; i < figs.length && !quiet; i++) {
       const f = figs[i], a = f.actor, e = f.seat;
       const cx = Math.round(e.px), fy = Math.round(e.py);
       if (cx < vx0 - 40 || cx > vx1 + 40 || fy < vy0 || fy > vy1 + 90) continue;
@@ -187,6 +305,8 @@ export function createScene({ atlas, proj }) {
         else if (a.status === 'dormant') { fx.zzBalloons++; drawBalloon(g, cx, top - 1, 'zz'); }
       } else if (a.status === 'done') { fx.doneBalloons++; drawBalloon(g, cx, headTop - 1, 'done'); }
       else if (a.status === 'stale') { fx.zzBalloons++; drawBalloon(g, cx, headTop - 1, 'zz'); }
+      // one thought bubble per working agent, icon only; at far zoom only agents that wait for you keep their bubble
+      if (a.status === 'working' && a.act && zoom >= (a.main ? 2 : 3)) { fx.bubbles++; drawBubble(g, cx + 15, headTop + 3, a.thinking ? 'brain' : ICON[a.act] || 'brain'); }
     }
     g.setTransform(1, 0, 0, 1, 0, 0);
   }
@@ -254,6 +374,8 @@ export function createScene({ atlas, proj }) {
   return {
     setLayout, setActors, draw, pick, roomAt, toVirtual, occlusion, occlusionInfo,
     setHover(id) { hoverId = id; },
+    setQuiet(on) { quiet = !!on; },
+    retint,
     get bounds() { return bounds; },
     get fitBox() { return fitBox; },
     get effects() { return { ...fx }; },

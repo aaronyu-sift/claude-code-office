@@ -543,9 +543,10 @@ main { flex: 1; min-height: 0; position: relative; }
 
 
 /* office pixel scene ------------------------------------------------------------------------------- */
-.view-ofis[data-scene="pixel"] .of-stage canvas { image-rendering: pixelated; }
+.view-ofis[data-scene="pixel"] .of-stage canvas { image-rendering: pixelated; position: absolute; inset: 0; }
+.view-ofis[data-scene="pixel"] .of-sky { pointer-events: none; }
 .px-l {
-  position: absolute; left: 0; top: 0; pointer-events: auto; cursor: pointer; width: max-content; max-width: 176px;
+  position: absolute; left: 0; top: 0; pointer-events: auto; cursor: pointer; width: max-content; max-width: 196px;
   padding: 3px 8px 4px 7px; border-radius: 7px; border-left: 3px solid var(--line-2);
   background: color-mix(in srgb, var(--bg) 84%, transparent); color: var(--text-2);
   font: 500 11.5px/1.3 var(--font); white-space: normal; overflow-wrap: anywhere;

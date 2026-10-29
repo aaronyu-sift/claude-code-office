@@ -8,6 +8,8 @@ import { layoutOffice, roomCap, hashStr } from './layout.js';
 import { APPEARANCES } from './ids.js';
 import { createScene } from './scene.js';
 import { createScheduler } from './anim.js';
+import { ambient, rgba, fmtClock, createMinuteTicker } from './time.js';
+import { drawSky } from './lighting.js';
 import { createLabelLayer, placeLabels } from './labels.js';
 import { fitZoom, stepZoom, centerPan, clampPan, zoomAbout } from './input.js';
 
@@ -29,16 +31,16 @@ export function createPixelOffice(root, ctx, opts = {}) {
   const proj = projectionByName(opts.proj || 'iso');
   root.dataset.scene = 'pixel';
   root.innerHTML =
-    '<div class="of-stage"><canvas></canvas></div><div class="of-layer"></div>' +
+    '<div class="of-stage"><canvas class="of-sky"></canvas><canvas class="of-main"></canvas></div><div class="of-layer"></div>' +
     '<div class="of-hud"><div class="of-sum"></div></div>' +
     '<div class="of-ctl">' +
     `<button type="button" data-z="in" title="${esc(msg('of.zoomIn'))}">+</button>` +
     `<button type="button" data-z="out" title="${esc(msg('of.zoomOut'))}">−</button>` +
     `<button type="button" data-z="fit" title="${esc(msg('of.fit'))}">${FIT_ICON}</button></div>` +
     '<div class="of-empty" hidden></div>';
-  const stage = root.querySelector('.of-stage'), canvas = stage.querySelector('canvas');
+  const stage = root.querySelector('.of-stage'), canvas = stage.querySelector('.of-main'), skyCanvas = stage.querySelector('.of-sky');
   const layer = root.querySelector('.of-layer'), sumEl = root.querySelector('.of-sum'), emptyEl = root.querySelector('.of-empty');
-  const g = canvas.getContext('2d', { alpha: false });
+  const g = canvas.getContext('2d', { alpha: true });                   // transparent: the sky is a canvas behind it
   const labels = createLabelLayer(layer);
 
   let atlas = null, scene = null, visible = false, loadFailed = false;
@@ -46,26 +48,54 @@ export function createPixelOffice(root, ctx, opts = {}) {
   const view = { zoom: 2, panX: 0, panY: 0, w: 1, h: 1, dpr: 1 };
   let autoFit = true, labelsDirty = true, lastBuildMs = 0;
   const frameTimes = [];                      // JS ms of the last frames (QA reads the 95th percentile)
+  const stamps = [];                          // start time of each drawn frame (QA reads the real frame rate)
   const order = new Map();                    // main id -> first-seen sequence (rooms keep their order)
   const roomState = new Map();                // main id -> { cls, low }
   const seats = new Map();                    // sub id -> { roomId, slot, doneAt }
   let expiry = 0, hoverId = null, seq = 0;
+
+  // ---------------------------------------------------------- time of day
+  // The clock is the browser's local clock, read once a minute; ?time=HH:MM (opts.time, in minutes) pins it and starts no timer.
+  // A new minute re-tints only when the light really changed (full day and full night stay the same for hours).
+  const fixedMin = opts.time == null ? null : opts.time;
+  let amb = null, light = null, lightKey = '', clockStale = false;
+  const stats = { retints: 0, retintMs: 0, lastRetintMs: 0, firstFrameMs: 0, awaitFrame: false, clockMin: -1, month: 0 };
+  const lightOf = a => ({ roomStr: a.room[3] > 0.004 ? rgba(a.room) : null, outStr: a.out[3] > 0.004 ? rgba(a.out) : null, lights: a.lights, phase: a.phase });
+  const realClock = () => { const d = new Date(); return { minute: d.getHours() * 60 + d.getMinutes(), month: d.getMonth() + 1 }; };
+  const nowClock = () => (fixedMin == null ? realClock() : { minute: fixedMin, month: realClock().month });
+  function drawSkyNow() { if (amb) drawSky(skyCanvas, amb); }
+  function applyTime(c, force = false) {
+    const a = ambient(c.minute, c.month), L = lightOf(a);
+    const key = [L.roomStr, L.outStr, L.lights, a.stars, a.top, a.bottom, a.sun && a.sun.f, a.moon && a.moon.f].join('|');
+    stats.clockMin = c.minute; stats.month = c.month;
+    if (!force && key === lightKey) return false;
+    lightKey = key; amb = a; light = L;
+    if (scene) { const ms = scene.retint(light); stats.retints++; stats.lastRetintMs = ms; stats.retintMs += ms; stats.awaitFrame = true; }
+    drawSkyNow();
+    redraw(false);
+    return true;
+  }
 
   // ---------------------------------------------------------- scheduler
   const sched = createScheduler({
     draw(t, anim) {
       if (!scene) return;
       const t0 = performance.now();
-      scene.draw(g, view, t, anim);
+      scene.draw(g, view, t, anim, light);
       if (labelsDirty) { labelsDirty = false; placeLabelsNow(); }
-      frameTimes.push(performance.now() - t0);
+      const dt = performance.now() - t0;
+      if (stats.awaitFrame) { stats.awaitFrame = false; stats.firstFrameMs = dt; }
+      frameTimes.push(dt); stamps.push(t);
       if (frameTimes.length > 400) frameTimes.shift();
+      if (stamps.length > 1000) stamps.shift();
     },
     isHidden: () => document.hidden || !visible,
     reducedMotion: () => matchMedia('(prefers-reduced-motion: reduce)').matches,
   });
   document.addEventListener('visibilitychange', () => sched.wake());
   const redraw = (withLabels = true) => { if (withLabels) labelsDirty = true; sched.requestFrame(); };
+  createMinuteTicker({ onChange: c => { if (visible) applyTime(c); else clockStale = true; }, fixed: fixedMin });
+  applyTime(nowClock(), true);
 
   // ---------------------------------------------------------- store -> rooms and seats
   function mains() {
@@ -102,7 +132,7 @@ export function createPixelOffice(root, ctx, opts = {}) {
       lastItems = items;
       const t0 = performance.now();
       layout = layoutOffice(items);
-      scene.setLayout(layout);
+      scene.setLayout(layout, light);
       lastBuildMs = performance.now() - t0;
       if (autoFit) fit(false);
       else clampView();
@@ -145,15 +175,17 @@ export function createPixelOffice(root, ctx, opts = {}) {
     for (const room of layout.rooms) {
       const m = store.agents.get(room.id);
       if (!m) continue;
-      actors.push({ roomId: room.id, slot: 0, id: room.id, main: true, status: m.status, ap: hashStr(room.id) % APPEARANCES });
+      actors.push({ roomId: room.id, slot: 0, id: room.id, main: true, status: m.status, ap: hashStr(room.id) % APPEARANCES, act: m.act && m.act.c, thinking: !!(m.act && m.act.code === 'thinking') });
     }
     for (const [id, s] of seats) {
       const a = store.agents.get(id);
-      if (a) actors.push({ roomId: s.roomId, slot: s.slot, id, main: false, status: a.status, ap: hashStr(id) % APPEARANCES });
+      if (a) actors.push({ roomId: s.roomId, slot: s.slot, id, main: false, status: a.status, ap: hashStr(id) % APPEARANCES, act: a.act && a.act.c, thinking: !!(a.act && a.act.code === 'thinking') });
     }
     scene.setActors(actors);
     sched.setActive('typing', actors.some(a => a.status === 'working'));
     sched.setActive('attention', actors.some(a => a.main && (a.status === 'waiting' || a.status === 'ask')));
+    // steam, the small animals and the swaying garden move only while somebody is awake; with everyone dormant or stale the scene is still
+    sched.setActive('ambient', actors.some(a => a.status !== 'dormant' && a.status !== 'stale'));
   }
 
   // ---------------------------------------------------------- labels
@@ -258,6 +290,7 @@ export function createPixelOffice(root, ctx, opts = {}) {
     if (w === view.w && h === view.h && dpr === view.dpr) return;
     view.w = w; view.h = h; view.dpr = dpr;
     canvas.width = w; canvas.height = h;
+    drawSkyNow();
     if (autoFit) fit(false); else clampView();
     redraw();
   }
@@ -412,7 +445,9 @@ export function createPixelOffice(root, ctx, opts = {}) {
   root.__pixel = {
     get zoom() { return view.zoom; }, get dpr() { return view.dpr; }, get size() { return [view.w, view.h]; }, get autoFit() { return autoFit; },
     get pan() { return [view.panX, view.panY]; }, get proj() { return proj.name; }, get buildMs() { return +lastBuildMs.toFixed(2); },
-    get stats() { return { ...sched.stats }; }, resetStats() { sched.resetStats(); frameTimes.length = 0; },
+    get stats() { return { ...sched.stats }; }, resetStats() { sched.resetStats(); frameTimes.length = 0; stamps.length = 0; },
+    // average frame rate between the first and the last frame since the last reset: n frames span n - 1 intervals
+    frameRate() { const n = stamps.length; return n < 2 ? { frames: n, spanMs: 0, fps: 0 } : { frames: n, spanMs: +(stamps[n - 1] - stamps[0]).toFixed(1), fps: +(((n - 1) * 1000) / (stamps[n - 1] - stamps[0])).toFixed(2) }; },
     get active() { return sched.activeSources; }, get pending() { return sched.pending; },
     get counts() { return scene ? scene.counts : null; },
     get effects() { return scene ? scene.effects : null; },
@@ -429,7 +464,8 @@ export function createPixelOffice(root, ctx, opts = {}) {
       const base = root.getBoundingClientRect(), out = [];
       for (const id of labels.ids()) {
         const L = labels.get(id), r = L.el.getBoundingClientRect(), nm = L.el.querySelector('.px-name');
-        out.push({ id, main: !!(L.extra && L.extra.main), shown: L.shown, x: r.left - base.left, y: r.top - base.top, w: r.width, h: r.height, name: nm ? nm.textContent : null, text: L.el.textContent });
+        const lines = nm ? Math.round(nm.getBoundingClientRect().height / parseFloat(getComputedStyle(nm).lineHeight)) : 0;
+        out.push({ id, main: !!(L.extra && L.extra.main), shown: L.shown, x: r.left - base.left, y: r.top - base.top, w: r.width, h: r.height, name: nm ? nm.textContent : null, lines, text: L.el.textContent });
       }
       return out;
     },
@@ -437,16 +473,72 @@ export function createPixelOffice(root, ctx, opts = {}) {
     occlusion(id) { return scene ? scene.occlusion(id) : null; },
     occlusionInfo(id) { return scene ? scene.occlusionInfo(id) : null; },
     setZoom(z) { setZoom(z, view.w / 2, view.h / 2); }, fit() { autoFit = true; fit(); },
+    // put a world point (voxels) or the middle of a room at the centre of the view, keeping the zoom (QA pictures)
+    centerOnWorld(x, y, z = 0) {
+      if (!scene) return false;
+      const [vx, vy] = scene.toVirtual(x, y, z);
+      autoFit = false;
+      view.panX = Math.round(view.w / 2 - vx * view.zoom); view.panY = Math.round(view.h / 2 - vy * view.zoom);
+      clampView();
+      redraw();
+      return true;
+    },
+    centerOnRoom(id) { const r = layout && layout.rooms.find(q => q.id === id); return r ? this.centerOnWorld(r.x + r.w / 2, r.y + r.d / 2, 12) : false; },
     redraw() { redraw(); },
     // QA only: hold the scene still (no data sync, so labels and figures stay where they are) while a test clicks around
     freeze(on) { frozen = !!on; if (!on) sync(); },
     // rebuild the layout and the static layer from scratch and return the time it took (QA)
-    rebuild() { const t0 = performance.now(); layout = layoutOffice(lastItems); scene.setLayout(layout); return +(performance.now() - t0).toFixed(2); },
+    rebuild() { const t0 = performance.now(); layout = layoutOffice(lastItems); scene.setLayout(layout, light); return +(performance.now() - t0).toFixed(2); },
+    // ---- time of day (QA): the clock the scene shows, and what a change of it costs
+    get time() { return { minute: stats.clockMin, clock: fmtClock(stats.clockMin), month: stats.month, phase: amb && amb.phase, fixed: fixedMin != null, ticking: fixedMin == null }; },
+    get ambient() { return amb; },
+    get light() { return light; },
+    get retints() { return stats.retints; },
+    get retintCost() { return { retintMs: +stats.lastRetintMs.toFixed(3), firstFrameMs: +stats.firstFrameMs.toFixed(3), totalMs: +(stats.lastRetintMs + stats.firstFrameMs).toFixed(3) }; },
+    // set the clock to a minute of the day (a number) or back to the real one (null); `force` re-tints even when the light did not change
+    setTime(min, force = true) {
+      const c = min == null ? realClock() : { minute: min, month: realClock().month };
+      const before = stats.retints;
+      applyTime(c, force);
+      return { retinted: stats.retints > before, ...this.retintCost };
+    },
+    tick() { return applyTime(nowClock()); },
+    // Draw one still frame now (no status effects, no animation) and measure, for every agent, the mean luminance (Rec. 709, 0..255) of the
+    // canvas pixels under its sprite's silhouette, as shown: tint, glow and whatever stands in front of it included. { id: { lum, pixels } }
+    agentLuminances() {
+      const out = {};
+      if (!scene) return out;
+      scene.setQuiet(true);
+      try { scene.draw(g, view, 0, false, light); } finally { scene.setQuiet(false); }
+      for (const id of scene.figureIds()) {
+        const f = scene.figureInfo(id);
+        const x0 = Math.max(0, Math.floor(f.x0 * view.zoom + view.panX)), y0 = Math.max(0, Math.floor(f.y0 * view.zoom + view.panY));
+        const x1 = Math.min(view.w, Math.ceil((f.x0 + f.w) * view.zoom + view.panX)), y1 = Math.min(view.h, Math.ceil((f.y0 + f.h) * view.zoom + view.panY));
+        if (x1 <= x0 || y1 <= y0) { out[id] = null; continue; }
+        const d = g.getImageData(x0, y0, x1 - x0, y1 - y0).data;
+        let sum = 0, n = 0;
+        for (let y = y0; y < y1; y++) for (let x = x0; x < x1; x++) {
+          const lx = Math.floor((x + 0.5 - view.panX) / view.zoom - f.x0), ly = Math.floor((y + 0.5 - view.panY) / view.zoom - f.y0);
+          if (atlas.alphaAt(f.sprite, 0, lx, ly) <= 24) continue;
+          const i = ((y - y0) * (x1 - x0) + (x - x0)) * 4;
+          if (d[i + 3] < 200) continue;
+          sum += 0.2126 * d[i] + 0.7152 * d[i + 1] + 0.0722 * d[i + 2]; n++;
+        }
+        out[id] = n ? { lum: +(sum / n).toFixed(3), pixels: n } : null;
+      }
+      return out;
+    },
+    // the colour of the sky canvas at a fraction of its height (0 = top), as [r, g, b] (QA: the sky follows the time)
+    skyAt(f) {
+      const x = Math.floor(skyCanvas.width * 0.03), y = Math.min(skyCanvas.height - 1, Math.max(0, Math.floor(skyCanvas.height * f)));
+      return [...skyCanvas.getContext('2d').getImageData(x, y, 1, 1).data].slice(0, 3);
+    },
   };
 
   return {
     show() {
       visible = true;
+      if (clockStale) { clockStale = false; applyTime(nowClock()); }
       resize();
       sync();
       sched.wake();

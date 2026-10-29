@@ -99,3 +99,54 @@ export function drawRing(g, cx, cy) {
   g.fillRect(cx - 2, cy - 7, 5, 1); g.fillRect(cx - 2, cy + 7, 5, 1);
   g.globalAlpha = 1;
 }
+
+// ---- thought bubble with an icon (what a working agent is doing): 7 x 7 icons in a white bubble with two dots toward the head -------------------
+const ICONS = {
+  pencil: ['.....#.', '....###', '...###.', '..###..', '.###...', '.##....', '#......'],
+  terminal: ['#######', '#.....#', '#.#...#', '#..#..#', '#.#.#.#', '#.....#', '#######'],
+  magnifier: ['.###...', '#...#..', '#...#..', '#...#..', '.###...', '....#..', '.....#.'],
+  book: ['.##.##.', '#..#..#', '#..#..#', '#..#..#', '#..#..#', '.##.##.', '.......'],
+  brain: ['.#####.', '#.#.#.#', '##.#.##', '#.#.#.#', '.#####.', '..###..', '.......'],
+  team: ['.#...#.', '###.###', '.#...#.', '#.#.#.#', '#.#.#.#', '.......', '.......'],
+};
+const ICON_PTS = {};
+for (const [k, rows] of Object.entries(ICONS)) { const pts = []; rows.forEach((row, y) => [...row].forEach((ch, x) => { if (ch === '#') pts.push(x, y); })); ICON_PTS[k] = pts; }
+const ICON_COLOR = { pencil: '#e0803a', terminal: '#2a64c4', magnifier: '#17806e', book: '#8a5a36', brain: '#b04a9a', team: '#4a5272' };
+
+// bubble centred on (cx, cy), 11 x 11 px, with its trail of two dots at the lower left
+export function drawBubble(g, cx, cy, icon) {
+  const x = cx - 5, y = cy - 5;
+  g.fillStyle = OUT;
+  g.fillRect(x - 1, y + 1, 13, 9); g.fillRect(x + 1, y - 1, 9, 13);
+  g.fillRect(x - 5, y + 11, 3, 3); g.fillRect(x - 8, y + 14, 2, 2);
+  g.fillStyle = '#ffffff';
+  g.fillRect(x, y + 1, 11, 9); g.fillRect(x + 1, y, 9, 11);
+  g.fillRect(x - 4, y + 12, 1, 1); g.fillRect(x - 4, y + 11, 2, 2); g.fillRect(x - 7, y + 15, 1, 1);
+  g.fillStyle = ICON_COLOR[icon] || ICON_COLOR.brain;
+  const pts = ICON_PTS[icon] || ICON_PTS.brain;
+  for (let i = 0; i < pts.length; i += 2) g.fillRect(x + 2 + pts[i], y + 2 + pts[i + 1], 1, 1);
+}
+
+// ---- ambient life: all tiny, all drawn from the clock t so nothing is stored -----------------------------------------------------------------
+export function drawSteam(g, x, y, t) {
+  g.fillStyle = '#ffffff';
+  for (let k = 0; k < 3; k++) {
+    const p = ((t / 900 + k / 3) % 1), yy = y - Math.round(p * 9), xx = x + Math.round(Math.sin((t / 400) + k * 2) * 1.5);
+    g.globalAlpha = 0.55 * (1 - p);
+    g.fillRect(xx, yy, 2, 2);
+  }
+  g.globalAlpha = 1;
+}
+const WING = ['#ffd84a', '#f27fb4', '#7fd6ff', '#ffffff'];
+export function drawButterfly(g, x, y, t, i) {
+  const open = Math.floor(t / 130 + i) % 2;
+  g.fillStyle = OUT; g.fillRect(x, y, 1, 2);
+  g.fillStyle = WING[i % WING.length];
+  if (open) { g.fillRect(x - 2, y - 1, 2, 2); g.fillRect(x + 1, y - 1, 2, 2); } else { g.fillRect(x - 1, y, 1, 2); g.fillRect(x + 1, y, 1, 2); }
+}
+export function drawBird(g, x, y, t) {
+  const up = Math.floor(t / 180) % 2;
+  g.fillStyle = OUT;
+  if (up) { g.fillRect(x - 3, y - 1, 2, 1); g.fillRect(x - 1, y, 2, 1); g.fillRect(x + 1, y - 1, 2, 1); }
+  else { g.fillRect(x - 3, y, 2, 1); g.fillRect(x - 1, y - 1, 2, 1); g.fillRect(x + 1, y, 2, 1); }
+}

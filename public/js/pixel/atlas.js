@@ -50,6 +50,24 @@ export function createAtlas(manifest, image, projName) {
     g.drawImage(t.canvas, Math.round(x - t.px), Math.round(y - t.py));
     return true;
   }
+  // a copy with a translucent colour laid over its pixels (source-atop: the transparent parts stay transparent), for the garden at night
+  const shades = new Map();
+  function shaded(id, facing, color) {
+    const key = id + '|' + facing + '|' + color;
+    let t = shades.get(key);
+    if (t) return t;
+    const s = sprite(id, facing);
+    if (!s) return null;
+    const [rx, ry, rw, rh] = s.rect;
+    const c = newCanvas(rw, rh), g = c.getContext('2d');
+    g.imageSmoothingEnabled = false;
+    g.drawImage(image, rx, ry, rw, rh, 0, 0, rw, rh);
+    g.globalCompositeOperation = 'source-atop';
+    g.fillStyle = color;
+    g.fillRect(0, 0, rw, rh);
+    shades.set(key, t = { canvas: c, w: rw, h: rh });
+    return t;
+  }
   // alpha (0..255) of a sprite pixel, in sprite-local coordinates
   function alphaAt(id, facing, lx, ly) {
     const s = sprite(id, facing);
@@ -64,8 +82,15 @@ export function createAtlas(manifest, image, projName) {
     }
     return mask[((ry + ly) * image.width + rx + lx) * 4 + 3];
   }
+  // light and animation anchors of a sprite (monitor, lamp, window, led, steam): [{ k, x, y, r, s }] in sprite pixels
+  function anchors(id, facing = 0) {
+    const pl = P.sprites[id], def = manifest.sprites[id];
+    if (!pl || !pl.anchors) return null;
+    const list = pl.anchors[(((facing | 0) % def.facings) + def.facings) % def.facings];
+    return list.map(([k, x, y, r, s]) => ({ k, x, y, r, s }));
+  }
   return {
-    manifest, image, projName, sprite, draw, tinted, drawTinted, alphaAt,
+    manifest, image, projName, sprite, draw, tinted, drawTinted, alphaAt, anchors, shaded, clearShades() { shades.clear(); },
     has: id => !!manifest.sprites[id],
     get ids() { return Object.keys(manifest.sprites); },
   };

@@ -2,6 +2,7 @@ import { t as msg, locale, fmtPct } from './i18n.js';
 import { CATS, STATUS, verbOf, actText, evName, evText, catColor, fmtDur, fmtShort, fmtClock, fmtTok, fmtUsd, pct, esc, icon } from './util.js';
 import { createPano } from './pano.js';
 import { createPixelOffice } from './pixel/index.js';
+import { parseClock } from './pixel/time.js';
 import { createAkis } from './akis.js';
 import { createMaliyet } from './maliyet.js';
 import './site.js';
@@ -146,7 +147,8 @@ function safeView(name, create) {
 // The Office view is the pixel scene. The original three.js scene stays available as ?scene=3d; it is loaded only then, so the
 // default view never fetches three.js.
 function createOffice(root) {
-  if (new URLSearchParams(location.search).get('scene') !== '3d') return createPixelOffice(root, ctx);
+  const q = new URLSearchParams(location.search);
+  if (q.get('scene') !== '3d') return createPixelOffice(root, ctx, { time: parseClock(q.get('time')) });   // ?time=HH:MM pins the time of day
   root.dataset.scene = '3d';
   let real = null, visible = false;
   import('./ofis.js').then(m => { real = m.createOfis(root, ctx); if (visible) real.show(); })
@@ -539,3 +541,5 @@ let startView = location.hash.slice(1);
 if (!views[startView]) { try { startView = localStorage.getItem('ajan-ofisi.view') || 'pano'; } catch { startView = 'pano'; } }
 setView(startView);
 connect();
+// ?gallery=1 lists every sprite of the atlas on top of the app (loaded only then)
+if (new URLSearchParams(location.search).get('gallery') === '1') import('./pixel/gallery.js').then(m => m.showGallery()).catch(e => console.error('[gallery]', e));
