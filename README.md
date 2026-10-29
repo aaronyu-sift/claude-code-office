@@ -58,7 +58,7 @@ Claude Code Office answers those questions live, from the data Claude Code alrea
   
   The first scan runs in a worker thread; after that only new bytes are read.
 - **Drawer with details.** Click any agent to see its last prompt, recap, last reply, tool mix, per-minute tokens and full event log.
-- **English and Turkish UI.** The language is detected from the browser and can be switched in the header.
+- **English and Turkish UI, ready for more.** The page uses your system language when it is supported and otherwise asks you to pick one from a list (each language in its own language); the header button changes it later. A language is one file (see [Languages](#languages)).
 - **Local, read-only, zero dependencies.** It binds to `127.0.0.1` only and never writes to `~/.claude`. It has no telemetry and no npm dependencies at runtime.
 
 | Dashboard | Timeline |
@@ -141,7 +141,19 @@ npm run sprites:table                                # the content lists of the 
 
 The models are in `tools/sprites/` (`models.mjs`, `props.mjs`, `decor.mjs`; `catalog.mjs` lists every sprite; `seasons.mjs` makes the seasonal variants out of the same models with another palette, snow caps, bare branches and the four seasonal props); [`tools/sprites/README.md`](tools/sprites/README.md) has the details.
 
-**Tests.** `npm test` runs the unit tests (projections, layout in both views, depth order, labels, scheduler, time of day, seasons, weather, settings, manifest). `node tools/qa/pixel-qa.mjs --proj iso` (or `--proj front`) starts the server against a fake `~/.claude`, drives headless Chrome in a throw-away profile and prints one `CHECK … PASS|FAIL` line per check (occlusion, click targets, labels, frame budget, idle, time of day, seasons, weather, settings, gallery, projection toggle) and a final `QA PASS` or `QA FAIL`. The checks run in one fixed season (`--season summer` by default, `--season auto` follows the date) so the date they run on does not matter. `--shots <dir> --set m4` also writes the screenshots of the seasons, the weather and the times of day. The plan, its decisions and the deviations are in [docs/pixel-scene-plan.md](docs/pixel-scene-plan.md).
+**Tests.** `npm test` runs the unit tests (projections, layout in both views, depth order, labels, scheduler, time of day, seasons, weather, settings, languages, manifest). `node tools/qa/pixel-qa.mjs --proj iso` (or `--proj front`) starts the server against a fake `~/.claude`, drives headless Chrome in a throw-away profile and prints one `CHECK … PASS|FAIL` line per check (occlusion, click targets, labels, frame budget, idle, time of day, seasons, weather, settings, gallery, projection toggle) and a final `QA PASS` or `QA FAIL`. The checks run in one fixed season (`--season summer` by default, `--season auto` follows the date) so the date they run on does not matter. `--shots <dir> --set m4` also writes the screenshots of the seasons, the weather and the times of day. The plan, its decisions and the deviations are in [docs/pixel-scene-plan.md](docs/pixel-scene-plan.md).
+
+## Languages
+
+The UI is in English and Turkish today. The page chooses its language in this order:
+
+1. The language you picked before (kept in the browser, `localStorage['cco.lang']`).
+2. Your system language: the first language your browser lists (`navigator.languages[0]`). `tr-TR` gives Turkish, `en-GB` gives English.
+3. If that language is not supported, the page opens a list of the supported languages over the English UI, each written in its own language ("English", "Türkçe"). Esc does not close it. Choosing a language saves the choice and reloads the page.
+
+The language button in the header (`EN`, `TR`) opens the same list at any time; there Esc, a click outside or Close dismiss it. Only the first language your browser lists counts: a visitor whose first language is German and second is English is asked, because a second place in a ranking is not a choice.
+
+**Adding a language.** Copy `public/js/lang/en.js` to `public/js/lang/<code>.js`, fill in `code`, `name` (the language's own name, as its speakers write it), `locale` (for example `de-DE`) and `chooseTitle` ("Choose your language" in that language), and translate `messages`. Then add the file to the list in `public/js/lang/index.js`. Nothing else changes: the detection, the list, number formats (decimal separator, place of the percent sign), plural rules and sort order come from the browser's `Intl` for the `locale`. The server writes a few fixed labels in Turkish; English's `server` map translates them for any other language, and a language can bring its own. `npm test` fails until every English key is translated and the name is really in that language, so a language is never listed half done. Not covered: right-to-left layout.
 
 ## About the cost numbers
 
