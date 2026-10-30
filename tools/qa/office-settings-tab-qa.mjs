@@ -1,6 +1,6 @@
 // QA of the Settings tab (public/js/settings-tab.js, tabs.js, office-settings.js, settings-panel.js, main.js): headless Chrome in a throw-away profile, the server against a fake
 // ~/.claude, one `CHECK <name> PASS|FAIL <detail>` line per check and a final `QA PASS` or `QA FAIL`.
-//   node tools/qa/office-settings-tab-qa.mjs [--only settings-tab|open|store|scene|project|keys|narrow] [--shots <dir>] [--mutations [--mutation N]]
+//   node tools/qa/office-settings-tab-qa.mjs [--only settings-tab|open|store|scene|project|lounge|keys|narrow] [--shots <dir>] [--mutations [--mutation N]]
 //   npm run qa:settings-tab
 //
 //   settings-tab-open     the tab is the fifth of the header's tablist and opens from a click and from #settings, the rows follow the 3D scene (no camera row), each row says where its value
@@ -9,6 +9,12 @@
 //                         address that names a setting follows the control and is not stored
 //   settings-tab-scene    the scene choice is kept, `?scene=` wins and is not stored, the new scene arrives at the next load (a button reloads now), the camera row exists in the pixel scene only
 //   settings-tab-project  the project folder: the tab's switch and the popover's switch show it on a 3D plaque (pixels) and on a pixel board, the sample on the tab follows
+//   settings-tab-lounge   the agent lounge row (3D scene only): the tab's Text / Names only / Off and the popover's select are one store, and a choice made with either reaches the lounge live, with no
+//                         reload (the demo conversation of ?lounge=demo on the wall: names only draws no text, off draws nothing and has no people, text brings it back, also when the choice was made
+//                         while the Office view was hidden); the source tag (default, saved, the address's own words ?lounge=demo,names), the note under the row when the address plays the demo,
+//                         ?lounge=demo kept in the address when a control changes the mode, and a kept choice is still there after a reload; the lounge's own subscription to the setting is read in the
+//                         task that makes the change (an open card closes and the poll timer is cleared on Off, the timer is armed on Text), because its frame loop and its one-second view would
+//                         make up for a lounge that never heard of the change
 //   settings-tab-keys     the tablist by keyboard (one stop of the Tab key, arrows, Home, End, wrapping), every control reachable and operable with the keyboard, a visible focus ring, the
 //                         number shortcuts do not fire inside a select
 //   settings-tab-narrow   375 px wide in English and Turkish: no horizontal overflow, all five tabs inside the bar, controls inside the cards; 360 and 320 px keep the five tabs inside the bar, 280 px
@@ -22,6 +28,9 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { ROOT, sleep, startServer } from './harness.mjs';
 import { scenario3d, o3 } from './harness3d.mjs';
+import { DEMO_SCRIPT } from '../../public/js/lounge-source.js';
+import { clipChars, splitLines, LIMITS } from '../../public/js/lounge-model.js';
+import { BOARD } from '../../public/js/lounge-plan.js';
 
 const args = process.argv.slice(2);
 const val = f => { const i = args.indexOf('--' + f); return i >= 0 ? args[i + 1] : undefined; };
@@ -70,12 +79,13 @@ const SNAP = `(() => {
     tabs: all('.top [role=tab]').map(b => ({ view: b.dataset.view, text: b.textContent.trim(), sel: b.getAttribute('aria-selected'), idx: b.tabIndex, controls: b.getAttribute('aria-controls'), id: b.id })),
     rows: all('#view-settings .st-row[data-row]').filter(r => shown(r)).map(r => r.dataset.row),
     helps: all('#view-settings .st-row[data-row]').filter(r => shown(r)).every(r => (r.querySelector('.st-help') || {}).textContent),
-    src: Object.fromEntries(['scene', 'time', 'season', 'hemisphere', 'weather', 'shelf', 'project', 'camera'].map(k => [k, src(k)])),
+    src: Object.fromEntries(['scene', 'time', 'season', 'hemisphere', 'weather', 'shelf', 'project', 'lounge', 'camera'].map(k => [k, src(k)])),
     tab: { scene: pressedOf('#st-scene'), timeMode: pressedOf('#st-time-mode'), slider: q('#st-time').value, sliderOut: q('#st-time-out').textContent, sliderText: q('#st-time').getAttribute('aria-valuetext'), sliderShown: shown(q('.st-time')), season: q('#st-season').value, hemi: q('#st-hemisphere').value,
       weather: q('#st-weather').value, shelf: q('#st-shelf').value, shelfOpts: [...q('#st-shelf').options].map(o => o.value).join(), project: q('#st-project').checked, sample: q('.st-sample').dataset.on,
-      camera: pressedOf('#st-camera'), pending: shown(q('.st-pending')), noteReduced: shown(q('[data-note="reduced"]')) },
+      camera: pressedOf('#st-camera'), pending: shown(q('.st-pending')), noteReduced: shown(q('[data-note="reduced"]')),
+      lounge: pressedOf('#st-lounge'), loungeNote: shown(q('#view-settings [data-note="lounge-demo"]')) ? q('#view-settings [data-note="lounge-demo"]').textContent : null, loungeHelp: (q('#st-h-lounge') || {}).textContent || '', loungeLabels: all('#st-lounge button').map(b => b.dataset.v + ':' + b.textContent.trim()).join() },
     pop: { wrapShown: !!pop && !pop.hidden, open: !q('#set-pop').hidden, season: q('#set-season').value, hemi: q('#set-hemisphere').value, weather: q('#set-weather').value, shelf: q('#set-shelf').value,
-      project: q('#set-project').checked, timeMode: pressedOf('#set-time-mode'), sliderOut: q('#set-time-out').textContent, sliderText: q('#set-time').getAttribute('aria-valuetext'), rows: all('#set-pop .set-row[data-row]').filter(r => shown(r)).map(r => r.dataset.row) },
+      project: q('#set-project').checked, lounge: q('#set-lounge').value, loungeOpts: [...q('#set-lounge').options].map(o => o.value + ':' + o.textContent.trim()).join(), note: q('#set-note').hidden ? '' : q('#set-note').textContent.replace(/\u2060/g, ''), timeMode: pressedOf('#set-time-mode'), sliderOut: q('#set-time-out').textContent, sliderText: q('#set-time').getAttribute('aria-valuetext'), rows: all('#set-pop .set-row[data-row]').filter(r => shown(r)).map(r => r.dataset.row) },
     store: off ? off.settings.get() : px ? px.settings : null, from: off ? off.settings.from() : px ? px.settingsFrom : null, engine: off ? '3d' : px ? 'pixel' : null,
     dataScene: v && v.dataset.scene || null,
     stored: (() => { try { return localStorage.getItem('ajan-ofisi.settings'); } catch { return 'THROWS'; } })(),
@@ -142,12 +152,16 @@ if (want('open')) {
       bad.push(`the hash: ${JSON.stringify({ s2: s2.shown, s3: s3.shown, s4: s4.shown })}`);
     notes.push(`#ofis then #settings switch the views without a reload, a direct load of #settings opens it`);
     // the rows of the 3D scene, each with its source; a fresh profile and no ?scene= says default everywhere
-    const wantRows = ['scene', 'time', 'season', 'hemisphere', 'weather', 'shelf', 'project', 'board'];
-    const allDefault = ['scene', 'time', 'season', 'hemisphere', 'weather', 'shelf', 'project'].every(k => s4.src[k] && s4.src[k].from === 'default' && s4.src[k].text === 'Default');
+    const wantRows = ['scene', 'time', 'season', 'hemisphere', 'weather', 'shelf', 'project', 'lounge', 'board'];
+    const allDefault = ['scene', 'time', 'season', 'hemisphere', 'weather', 'shelf', 'project', 'lounge'].every(k => s4.src[k] && s4.src[k].from === 'default' && s4.src[k].text === 'Default');
     if (!(same(s4.rows, wantRows) && s4.helps && allDefault && s4.src.camera === null)) bad.push(`rows ${s4.rows.join('/')} (want ${wantRows.join('/')}), every row has a line ${s4.helps}, sources ${JSON.stringify(s4.src)}`);
-    if (!(s4.tab.scene === '3d' && s4.tab.timeMode === 'auto' && !s4.tab.sliderShown && s4.tab.season === 'auto' && s4.tab.hemi === 'north' && s4.tab.weather === 'off' && s4.tab.shelf === '10' && s4.tab.project === false && s4.tab.sample === 'false' && !s4.tab.pending))
+    if (!(s4.tab.scene === '3d' && s4.tab.timeMode === 'auto' && !s4.tab.sliderShown && s4.tab.season === 'auto' && s4.tab.hemi === 'north' && s4.tab.weather === 'off' && s4.tab.shelf === '10' && s4.tab.project === false && s4.tab.sample === 'false' && !s4.tab.pending && s4.tab.lounge === 'text' && s4.tab.loungeNote === null))
       bad.push(`the defaults on the page: ${JSON.stringify(s4.tab)}`);
-    notes.push(`rows ${s4.rows.join('/')}, camera row hidden in 3D, every source "Default" on a fresh profile`);
+    // the lounge row says what each mode shows on the wall, in the words of the tab and of the popover
+    if (!(s4.tab.loungeLabels === 'text:Text,names:Names only,off:Off' && /posts/.test(s4.tab.loungeHelp) && /who talks to whom/.test(s4.tab.loungeHelp) && /without the text/.test(s4.tab.loungeHelp) && /plain pavilion/.test(s4.tab.loungeHelp)))
+      bad.push(`the lounge row's words: ${JSON.stringify({ labels: s4.tab.loungeLabels, help: s4.tab.loungeHelp })}`);
+    if (!(s4.pop.lounge === 'text' && s4.pop.loungeOpts === 'text:Text,names:Names only,off:Off' && s4.pop.note === '')) bad.push(`the popover's lounge select: ${JSON.stringify({ value: s4.pop.lounge, opts: s4.pop.loungeOpts, note: s4.pop.note })}`);
+    notes.push(`rows ${s4.rows.join('/')}, camera row hidden in 3D, every source "Default" on a fresh profile, lounge ${s4.tab.lounge} (${s4.tab.loungeLabels})`);
     // the message board line follows /api/config
     const boardOf = async cfg => {
       await page.evaluate(cfg === undefined ? `delete window.__cfg` : `window.__cfg = ${JSON.stringify(cfg)}`);
@@ -213,12 +227,13 @@ if (want('store')) {
     await click(page, '#st-time-mode button[data-v="fixed"]'); await sleep(250);
     await range(page, '#st-time', 1320); await sleep(300);
     await sel(page, '#st-season', 'winter'); await sel(page, '#st-hemisphere', 'south'); await sel(page, '#st-weather', 'rain'); await sel(page, '#st-shelf', '20');
+    await click(page, '#st-lounge button[data-v="names"]'); await sleep(200);
     await click(page, '.st-toggle span'); await sleep(500);
     const a = await snap(page);
-    const E = { time: '22:00', season: 'winter', hemisphere: 'south', weather: 'rain', shelf: 20, project: 'on' };
+    const E = { time: '22:00', season: 'winter', hemisphere: 'south', weather: 'rain', shelf: 20, project: 'on', lounge: 'names' };
     const inStore = k => a.store[k] === E[k];
     if (!(Object.keys(E).every(inStore) && a.engine === '3d')) bad.push(`3D store after the tab's changes: ${JSON.stringify(a.store)}`);
-    if (!(a.pop.season === 'winter' && a.pop.hemi === 'south' && a.pop.weather === 'rain' && a.pop.shelf === '20' && a.pop.project === true && a.pop.timeMode === 'fixed' && a.pop.sliderOut === '22:00')) bad.push(`the popover did not follow the tab at once: ${JSON.stringify(a.pop)}`);
+    if (!(a.pop.season === 'winter' && a.pop.hemi === 'south' && a.pop.weather === 'rain' && a.pop.shelf === '20' && a.pop.lounge === 'names' && a.pop.project === true && a.pop.timeMode === 'fixed' && a.pop.sliderOut === '22:00')) bad.push(`the popover did not follow the tab at once: ${JSON.stringify(a.pop)}`);
     // a screen reader says the clock time for the slider (aria-valuetext), not the minutes after midnight that the slider's value counts, in the tab and in the popover
     if (!(a.tab.sliderText === '22:00' && a.tab.sliderText === a.tab.sliderOut && a.pop.sliderText === '22:00' && a.pop.sliderText === a.pop.sliderOut)) bad.push(`the time slider says ${JSON.stringify({ tab: a.tab.sliderText, tabOut: a.tab.sliderOut, pop: a.pop.sliderText, popOut: a.pop.sliderOut })} to a screen reader, not 22:00`);
     const st = stored(a.stored);
@@ -227,23 +242,23 @@ if (want('store')) {
     // (the scene is not drawing while the Settings page is up, so what it can show now is what its atmosphere and its environment have been told)
     const sc = await waitFor(async () => { const r = await envOf(); return r.atm.season === 'winter' && r.atm.weather === 'rain' && r.atm.minute === 1320 && r.atm.hemisphere === 'south' && r.env.season === 'winter' && r.env.weather === 'rain' && r.env.minute === 1320 ? r : null; }, 20000);
     if (!sc) bad.push(`the 3D scene did not follow: ${JSON.stringify(await envOf())}`);
-    notes.push(`tab -> store ${JSON.stringify(a.store)}, popover ${a.pop.season}/${a.pop.hemi}/${a.pop.weather}/${a.pop.shelf}/project ${a.pop.project}/${a.pop.timeMode} ${a.pop.sliderOut}, stored ${a.stored}, scene atmosphere ${sc ? sc.atm.season + ' ' + sc.atm.weather + ' ' + sc.atm.minute : 'not followed'}`);
+    notes.push(`tab -> store ${JSON.stringify(a.store)}, popover ${a.pop.season}/${a.pop.hemi}/${a.pop.weather}/${a.pop.shelf}/project ${a.pop.project}/lounge ${a.pop.lounge}/${a.pop.timeMode} ${a.pop.sliderOut}, stored ${a.stored}, scene atmosphere ${sc ? sc.atm.season + ' ' + sc.atm.weather + ' ' + sc.atm.minute : 'not followed'}`);
     // 2. the popover shows the same when it is opened, and a change there reaches the tab at once (before the tab is looked at)
     await click(page, '#tab-ofis'); await sleep(500);
     const openedPop = await click(page, '#set-btn'); await sleep(300);
     const b = await snap(page);
-    if (!(openedPop && b.pop.open && b.pop.wrapShown && b.pop.season === 'winter' && b.pop.project === true && same(b.pop.rows, ['time', 'season', 'hemisphere', 'weather', 'shelf', 'project']))) bad.push(`the popover on the Office view: ${JSON.stringify(b.pop)}`);
-    await sel(page, '#set-season', 'autumn'); await sel(page, '#set-weather', 'snow'); await sel(page, '#set-hemisphere', 'north'); await sel(page, '#set-shelf', '5');
+    if (!(openedPop && b.pop.open && b.pop.wrapShown && b.pop.season === 'winter' && b.pop.project === true && same(b.pop.rows, ['time', 'season', 'hemisphere', 'weather', 'shelf', 'project', 'lounge']))) bad.push(`the popover on the Office view: ${JSON.stringify(b.pop)}`);
+    await sel(page, '#set-season', 'autumn'); await sel(page, '#set-weather', 'snow'); await sel(page, '#set-hemisphere', 'north'); await sel(page, '#set-shelf', '5'); await sel(page, '#set-lounge', 'off');
     await click(page, '#set-pop .toggle span'); await sleep(400);                       // the project switch of the popover: off again
     const built = await waitFor(async () => { const r = await envOf(); return r.env.builtSeason === 'autumn' && r.atm.season === 'autumn' && r.atm.weather === 'snow' ? r : null; }, 40000);     // the scene is drawing now: it rebuilds for the new season
     if (!built) bad.push(`the visible 3D scene did not follow the popover: ${JSON.stringify(await envOf())}`);
     await range(page, '#set-time', 435); await sleep(300);                                // the popover's own slider: 07:15, which the tab's slider and both clock texts must say too
     const c = await snap(page);                                                           // still on the Office view: the tab is hidden, its controls are not stale
     if (!(c.pop.sliderText === '07:15' && c.pop.sliderOut === '07:15' && c.tab.sliderText === '07:15' && c.tab.slider === '435' && c.store.time === '07:15')) bad.push(`the popover's slider: ${JSON.stringify({ pop: c.pop.sliderText, popOut: c.pop.sliderOut, tab: c.tab.sliderText, tabSlider: c.tab.slider, store: c.store.time })}`);
-    if (!(c.tab.season === 'autumn' && c.tab.weather === 'snow' && c.tab.hemi === 'north' && c.tab.shelf === '5' && c.tab.project === false && c.tab.sample === 'false')) bad.push(`the tab did not follow the popover at once: ${JSON.stringify(c.tab)}`);
+    if (!(c.tab.season === 'autumn' && c.tab.weather === 'snow' && c.tab.hemi === 'north' && c.tab.lounge === 'off' && c.tab.shelf === '5' && c.tab.project === false && c.tab.sample === 'false')) bad.push(`the tab did not follow the popover at once: ${JSON.stringify(c.tab)}`);
     await click(page, '#tab-settings'); await sleep(500);
     const d = await snap(page);
-    if (!(d.shown.settings && d.tab.season === 'autumn' && d.tab.project === false && d.src.season.from === 'stored' && d.store.season === 'autumn' && d.store.project === 'off' && d.mark === mark && stored(d.stored).season === 'autumn' && stored(d.stored).project === 'off')) bad.push(`after the popover's changes, on the tab: ${JSON.stringify({ tab: d.tab, store: d.store })}`);
+    if (!(d.shown.settings && d.tab.season === 'autumn' && d.tab.project === false && d.tab.lounge === 'off' && d.store.lounge === 'off' && stored(d.stored).lounge === 'off' && d.src.lounge.from === 'stored' && d.src.lounge.text === 'Saved in this browser' && d.src.season.from === 'stored' && d.store.season === 'autumn' && d.store.project === 'off' && d.mark === mark && stored(d.stored).season === 'autumn' && stored(d.stored).project === 'off')) bad.push(`after the popover's changes, on the tab: ${JSON.stringify({ tab: d.tab, store: d.store })}`);
     notes.push(`popover -> tab at once: ${c.tab.season}/${c.tab.weather}/${c.tab.hemi}/shelf ${c.tab.shelf}/project ${c.tab.project}; the page was never reloaded (mark kept ${d.mark === mark})`);
     // 3. a size from the address is offered while it is current; the address follows the control and is not stored by loading
     await S.load('?scene=3d&season=spring&shelf=7', '#settings');
@@ -271,7 +286,7 @@ if (want('scene')) {
     await page.evaluate(MARK);
     const mark = (await snap(page)).mark;
     const a = await snap(page);
-    if (!(a.engine === '3d' && a.dataScene === '3d' && a.tab.scene === '3d' && a.src.scene.from === 'default' && !a.tab.pending && a.src.camera === null && !a.rows.includes('camera'))) bad.push(`fresh: ${JSON.stringify({ engine: a.engine, tab: a.tab, src: a.src.scene })}`);
+    if (!(a.engine === '3d' && a.dataScene === '3d' && a.tab.scene === '3d' && a.src.scene.from === 'default' && !a.tab.pending && a.src.camera === null && !a.rows.includes('camera') && a.rows.includes('lounge') && a.src.lounge && a.src.lounge.from === 'default')) bad.push(`fresh: ${JSON.stringify({ engine: a.engine, tab: a.tab, src: a.src.scene, rows: a.rows })}`);
     // choose Pixel: kept, the 3D scene keeps running, the page says it takes effect at the next load
     await click(page, '#st-scene button[data-v="pixel"]'); await sleep(400);
     const b = await snap(page);
@@ -287,6 +302,13 @@ if (want('scene')) {
     const c = await snap(page);
     if (!(up && c.engine === 'pixel' && c.dataScene === 'pixel' && c.tab.scene === 'pixel' && !c.tab.pending && c.src.scene.from === 'stored' && c.rows.includes('camera') && c.src.camera && c.src.camera.from === 'default' && same(c.tab.camera, 'iso') && c.hash === '#settings'))
       bad.push(`after Reload now: ${JSON.stringify({ up, engine: c.engine, tab: c.tab, rows: c.rows, camera: c.src.camera, hash: c.hash })}`);
+    // the pixel scene has no lounge: no row on the page, none in the popover, and the camera that the 3D scene lacks is there
+    await click(page, '#tab-ofis'); await sleep(600); await click(page, '#set-btn'); await sleep(300);
+    const cp = await snap(page);
+    const pixelRows = ['camera', 'time', 'season', 'hemisphere', 'weather', 'shelf', 'project'];
+    if (!(!c.rows.includes('lounge') && c.src.lounge === null && cp.pop.open && same(cp.pop.rows, pixelRows))) bad.push(`the pixel scene has a lounge row: page ${c.rows.join('/')}, popover ${cp.pop.rows.join('/')} (want ${pixelRows.join('/')})`);
+    notes.push(`pixel scene rows: page ${c.rows.join('/')}, popover ${cp.pop.rows.join('/')} (no lounge)`);
+    await click(page, '#set-btn'); await sleep(200); await click(page, '#tab-settings'); await sleep(500);
     // the camera row works and says where it comes from; the scene store is the pixel scene's
     await click(page, '#st-camera button[data-proj="front"]'); await sleep(900);
     const d = await snap(page);
@@ -414,6 +436,113 @@ if (want('project')) {
   });
 }
 
+// ============================================================================ lounge
+// What the lounge shows, from the scene's own state (`o.lounge`, the snapshot of ofis-lounge.js). The demo conversation of ?lounge=demo gives the wall something to show without a server.
+const LOUNGE_LINES = DEMO_SCRIPT.flatMap(e => splitLines(clipChars(e[4], LIMITS.wallText)));          // every line of text that the demo script can put on the wall
+const hasText = x => x.wall.some(r => r.lines.length > 0);
+if (want('lounge')) {
+  await part('lounge', {}, async S => {
+    const { page } = S, bad = [], notes = [];
+    const lsnap = () => page.evaluate(o3('o.lounge'));
+    const until = async (test, ms = 30000) => { const t0 = Date.now(); let r = null; while (Date.now() - t0 < ms) { r = await lsnap().catch(() => null); if (r && test(r)) return r; await sleep(250); } return null; };
+    const shows = x => x.mode === 'text' && x.state === 'ok' && hasText(x) && x.paint.texts.some(t => LOUNGE_LINES.includes(t)) && x.people.length >= 2;
+    await page.evaluate(`localStorage.clear()`);
+    await S.load('?scene=3d&lounge=demo', '#ofis');
+    await page.evaluate(MARK);
+    const mark = (await snap(page)).mark;
+    const built = await waitFor(() => page.evaluate(o3('!!(o && s && s.rooms.length && o.office().lounge)')).catch(() => false), 60000);
+    if (!built) bad.push('the 3D scene did not build a lounge');
+    const cell = await page.evaluate(o3('o.office().lounge'));
+    await page.evaluate(o3(`o.view(${cell.X + cell.W / 2}, 0.5, ${cell.Z + cell.D / 2}, 60)`));          // the plaza on the screen: the lounge is read and polled only while it is
+    const t0 = await until(shows, 60000);
+    if (!t0) bad.push(`the demo lounge shows nothing to start from: ${JSON.stringify(await lsnap().then(x => ({ mode: x.mode, state: x.state, rows: x.wall.length, people: x.people.length, onScreen: x.onScreen })).catch(() => null))}`);
+    // 1. the popover (Office view): the row is there, the demo address says so, and Names only reaches the wall at once, with no reload
+    await click(page, '#set-btn'); await sleep(300);
+    const p0 = await snap(page);
+    if (!(p0.pop.open && p0.pop.rows.includes('lounge') && p0.pop.lounge === 'text' && p0.pop.note === 'The address shows the demo conversation.')) bad.push(`the popover with ?lounge=demo: ${JSON.stringify({ open: p0.pop.open, rows: p0.pop.rows, lounge: p0.pop.lounge, note: p0.pop.note })}`);
+    await sel(page, '#set-lounge', 'names');
+    const nm = await until(x => x.mode === 'names' && x.state === 'ok' && x.wall.length > 0 && !hasText(x) && x.paint.texts.length > 0 && !x.paint.texts.some(t => LOUNGE_LINES.includes(t)));
+    if (!nm) bad.push(`Names only from the popover did not reach the wall: ${JSON.stringify(await lsnap().then(x => ({ mode: x.mode, rows: x.wall.length, text: hasText(x), texts: x.paint.texts.slice(0, 4) })))}`);
+    const a1 = await snap(page);
+    if (!(a1.store.lounge === 'names' && stored(a1.stored).lounge === 'names' && a1.tab.lounge === 'names' && a1.pop.lounge === 'names' && /lounge=demo%2Cnames/.test(a1.search) && a1.mark === mark)) bad.push(`after Names only in the popover: ${JSON.stringify({ store: a1.store.lounge, stored: a1.stored, tab: a1.tab.lounge, pop: a1.pop.lounge, search: a1.search, kept: a1.mark === mark })}`);
+    await S.shot('settings-lounge-names.png');
+    // 2. the Settings tab: it shows the choice, says where it comes from and that the demo plays; Off here reaches the lounge while the Office view is hidden, and shows when it comes back
+    await click(page, '#tab-settings'); await sleep(600);
+    const t1 = await snap(page);
+    if (!(t1.shown.settings && t1.tab.lounge === 'names' && t1.src.lounge && t1.src.lounge.from === 'url' && t1.src.lounge.text === 'From the address: ?lounge=demo,names' && t1.tab.loungeNote === 'The address shows the demo conversation.')) bad.push(`the tab with ?lounge=demo,names: ${JSON.stringify({ lounge: t1.tab.lounge, src: t1.src.lounge, note: t1.tab.loungeNote })}`);
+    await page.evaluate(`document.querySelector('#view-settings [data-row="lounge"]').scrollIntoView({ block: 'center' })`); await sleep(200);
+    await S.shot('settings-lounge-demo.png');
+    await click(page, '#st-lounge button[data-v="off"]'); await sleep(400);
+    const t2 = await snap(page);
+    if (!(t2.tab.lounge === 'off' && t2.pop.lounge === 'off' && t2.store.lounge === 'off' && stored(t2.stored).lounge === 'off' && /lounge=demo%2Coff/.test(t2.search) && t2.src.lounge.text === 'From the address: ?lounge=demo,off' && t2.mark === mark)) bad.push(`after Off in the tab: ${JSON.stringify({ tab: t2.tab.lounge, pop: t2.pop.lounge, store: t2.store.lounge, stored: t2.stored, search: t2.search, src: t2.src.lounge, kept: t2.mark === mark })}`);
+    await click(page, '#tab-ofis'); await sleep(500);
+    const off = await until(x => x.mode === 'off' && x.people.length === 0 && x.paint.texts.length === 0 && !(x.signLabel && x.signLabel.want));
+    if (!off) bad.push(`Off from the tab did not reach the lounge: ${JSON.stringify(await lsnap().then(x => ({ mode: x.mode, people: x.people.length, texts: x.paint.texts.length, sign: x.signLabel && x.signLabel.want })))}`);
+    // 3. the popover again, from Off to Text: the wall, the people and the poll come back
+    await click(page, '#set-btn'); await sleep(300);
+    const p2 = await snap(page);
+    if (!(p2.pop.open && p2.pop.lounge === 'off' && p2.pop.note === 'The address shows the demo conversation.')) bad.push(`the popover after Off in the tab: ${JSON.stringify({ lounge: p2.pop.lounge, note: p2.pop.note })}`);
+    await sel(page, '#set-lounge', 'text');
+    const back = await until(shows);
+    if (!back) bad.push(`Text from the popover did not bring the lounge back: ${JSON.stringify(await lsnap().then(x => ({ mode: x.mode, state: x.state, rows: x.wall.length, people: x.people.length })))}`);
+    const p3 = await snap(page);
+    if (!(p3.tab.lounge === 'text' && p3.store.lounge === 'text' && stored(p3.stored).lounge === 'text' && /lounge=demo%2Ctext/.test(p3.search) && p3.mark === mark)) bad.push(`after Text in the popover: ${JSON.stringify({ tab: p3.tab.lounge, store: p3.store.lounge, stored: p3.stored, search: p3.search, kept: p3.mark === mark })}`);
+    notes.push(`demo wall ${t0 ? t0.wall.length : 0} rows and ${t0 ? t0.people.length : 0} people -> popover Names only: ${nm ? nm.wall.length + ' rows without text' : 'not reached'} (address ${a1.search}) -> tab Off while the Office was hidden: ${off ? 'no people, no text' : 'not reached'} -> popover Text: ${back ? back.wall.length + ' rows with text, ' + back.people.length + ' people' : 'not reached'}; the page was never reloaded (mark kept ${p3.mark === mark})`);
+    // 3b. the lounge's own subscription to the setting (ofis-lounge.js `settings.on('lounge', ...)`). The waits above cannot prove it: the lounge's frame loop notices a mode that changed within a
+    // frame, and its view is made again every second, whether or not it heard of the change. So this reads the lounge in the very task that makes the change, with no frame and no timer in between:
+    // Off closes an open card and clears the poll timer at once (the poll is not merely idle), and Text arms the timer at once; then a request starts within one cadence of Text, and none does after Off.
+    const flip = to => page.evaluate(o3(`(() => {
+      const read = () => { const l = o.lounge; return { mode: l.mode, card: l.card.open, armed: l.poll.armed, inflight: l.poll.inflight, can: l.poll.canPoll, requests: l.poll.requests, pollMs: l.poll.pollMs }; };
+      const before = read(), pick = document.querySelector('#set-lounge');
+      pick.value = ${JSON.stringify(to)}; pick.dispatchEvent(new Event('change', { bubbles: true }));
+      return { before, after: read() };
+    })()`));
+    const at = c => page.evaluate(o3(`(() => { const a = v.querySelector('.of-area').getBoundingClientRect(), p = s.project(${c.X + BOARD.cu}, ${BOARD.y0 + BOARD.h / 2}, ${c.Z + BOARD.cv}); return [a.left + p[0], a.top + p[1]]; })()`));
+    const [wx, wy] = await at(cell);
+    if ((await snap(page)).pop.open) { await click(page, '#set-btn'); await sleep(300); }          // the popover covers the wall: close it for the click, open it again for the choice
+    await page.mouse.move(2, 2); await sleep(150); await page.mouse.move(wx, wy); await sleep(250);
+    await page.mouse.click(wx, wy);
+    const opened = await until(x => x.card.open && x.poll.canPoll && (x.poll.armed || x.poll.inflight), 6000);
+    if (!opened) bad.push(`the card did not open from a click on the wall, or the poll was not running: ${JSON.stringify(await lsnap().then(x => ({ card: x.card.open, poll: x.poll })))} (clicked at ${Math.round(wx)},${Math.round(wy)}, under the pointer: ${await page.evaluate(`(() => { const e = document.elementFromPoint(${wx}, ${wy}); return e ? e.tagName + '.' + String(e.className).slice(0, 40) + '#' + e.id : null; })()`)})`);
+    else {
+      await click(page, '#set-btn'); await sleep(300);
+      const pp = await snap(page);
+      if (!(pp.pop.open && pp.pop.lounge === 'text')) bad.push(`the popover did not open beside the open card: ${JSON.stringify({ open: pp.pop.open, lounge: pp.pop.lounge })}`);
+      const f1 = await flip('off');
+      if (!(f1.before.card && f1.before.armed && f1.after.mode === 'off' && !f1.after.card && !f1.after.armed && !f1.after.inflight && !f1.after.can)) bad.push(`Off in the same task (the card was open, the poll timer armed): ${JSON.stringify(f1)}`);
+      await sleep(f1.after.pollMs + 1200);
+      const quiet = await lsnap();
+      if (!(quiet.poll.requests === f1.after.requests && !quiet.card.open && quiet.mode === 'off')) bad.push(`a request started or the card came back while the lounge was Off: ${JSON.stringify({ requests: [f1.after.requests, quiet.poll.requests], card: quiet.card.open, mode: quiet.mode })}`);
+      const f2 = await flip('text');
+      if (!(f2.before.mode === 'off' && !f2.before.armed && f2.after.mode === 'text' && f2.after.can && (f2.after.armed || f2.after.inflight) && !f2.after.card)) bad.push(`Text in the same task (the poll timer must be armed): ${JSON.stringify(f2)}`);
+      const again = await until(x => x.mode === 'text' && x.poll.requests > f2.after.requests, f2.after.pollMs + 2000);
+      if (!again) bad.push(`no request started within one poll cadence of Text: ${JSON.stringify(await lsnap().then(x => ({ requests: x.poll.requests, from: f2.after.requests, poll: x.poll })))}`);
+      notes.push(`subscription: Off closed the open card and cleared the poll timer in the same task (armed ${f1.before.armed} -> ${f1.after.armed}, card ${f1.before.card} -> ${f1.after.card}), no request in ${f1.after.pollMs + 1200} ms; Text armed the timer in the same task (${f2.before.armed} -> ${f2.after.armed}) and a request started ${again ? 'within one cadence (' + (again.poll.requests - f2.after.requests) + ' since)' : 'never'}`);
+    }
+    // 4. without the demo: ?lounge=demo alone names no mode (a note, the tag stays Default, nothing stored); ?lounge=names is the address's word; a control changes the address and keeps the choice
+    await page.evaluate(`localStorage.clear()`);
+    await S.load('?scene=3d', '#settings');
+    const d0 = await snap(page);
+    if (!(d0.tab.lounge === 'text' && d0.src.lounge && d0.src.lounge.from === 'default' && d0.src.lounge.text === 'Default' && d0.tab.loungeNote === null && d0.pop.note === '' && d0.stored === null)) bad.push(`a plain address: ${JSON.stringify({ lounge: d0.tab.lounge, src: d0.src.lounge, note: d0.tab.loungeNote, stored: d0.stored })}`);
+    await S.load('?scene=3d&lounge=demo', '#settings');
+    const d1 = await snap(page);
+    if (!(d1.tab.lounge === 'text' && d1.src.lounge.from === 'default' && d1.tab.loungeNote === 'The address shows the demo conversation.' && d1.stored === null)) bad.push(`?lounge=demo alone: ${JSON.stringify({ lounge: d1.tab.lounge, src: d1.src.lounge, note: d1.tab.loungeNote, stored: d1.stored })}`);
+    await S.load('?scene=3d&lounge=names', '#settings');
+    const n0 = await snap(page);
+    if (!(n0.tab.lounge === 'names' && n0.src.lounge.from === 'url' && n0.src.lounge.text === 'From the address: ?lounge=names' && n0.tab.loungeNote === null && n0.stored === null && n0.store.lounge === 'names')) bad.push(`?lounge=names: ${JSON.stringify({ lounge: n0.tab.lounge, src: n0.src.lounge, note: n0.tab.loungeNote, stored: n0.stored })}`);
+    await click(page, '#st-lounge button[data-v="off"]'); await sleep(400);
+    const n1 = await snap(page);
+    if (!(n1.tab.lounge === 'off' && /lounge=off/.test(n1.search) && !/demo/.test(n1.search) && stored(n1.stored).lounge === 'off' && n1.src.lounge.text === 'From the address: ?lounge=off')) bad.push(`Off with ?lounge=names in the address: ${JSON.stringify({ lounge: n1.tab.lounge, search: n1.search, stored: n1.stored, src: n1.src.lounge })}`);
+    await S.load('?scene=3d', '#settings');
+    const n2 = await snap(page);
+    const live = await waitFor(() => page.evaluate(o3('o && o.lounge ? o.lounge.mode : null')).catch(() => null), 60000);
+    if (!(n2.tab.lounge === 'off' && n2.src.lounge.from === 'stored' && n2.src.lounge.text === 'Saved in this browser' && n2.store.lounge === 'off' && n2.tab.loungeNote === null && live === 'off')) bad.push(`a plain address after Off was kept: ${JSON.stringify({ lounge: n2.tab.lounge, src: n2.src.lounge, store: n2.store.lounge, scene: live })}`);
+    notes.push(`plain address: Default; ?lounge=demo alone: Default with the demo note, nothing stored; ?lounge=names: "${n0.src.lounge.text}", Off chosen -> ${n1.search} stored ${n1.stored}; plain address again: "${n2.src.lounge.text}", the lounge reads ${live}`);
+    const errs = S.problems();
+    check('lounge', bad.length === 0 && errs.length === 0 && offsite(S.requests).length === 0, `${bad.length ? 'PROBLEMS ' + bad.join('; ') + ' | ' : ''}${notes.join(' | ')}; console errors ${errs.length}${errs.length ? ' ' + errs.slice(0, 2).join(' / ') : ''}; requests off localhost ${offsite(S.requests).length}`);
+  });
+}
+
 // ============================================================================ keys
 if (want('keys')) {
   await part('keys', {}, async S => {
@@ -455,21 +584,22 @@ if (want('keys')) {
       await press(page, 'Tab'); await sleep(40);
       const r = await page.evaluate(`(() => { const a = document.activeElement; const inPage = !!a && !!a.closest('#view-settings'); const cs = a ? getComputedStyle(a) : null; const target = a && a.type === 'checkbox' ? a.nextElementSibling : a, ts = target ? getComputedStyle(target) : null; const ring = a && a.matches(':focus-visible') ? ts.outlineStyle !== 'none' && parseFloat(ts.outlineWidth) > 0 : null; return { id: a && (a.id || a.dataset.v || a.dataset.proj || a.tagName), inPage, ring, fv: a ? a.matches(':focus-visible') : null }; })()`);
       if (r.inPage) order.push(r);
-      if (r.id === 'st-project' || order.length >= 14) break;
+      if (order.length >= 12) break;
     }
     const ids = order.map(o => o.id);
-    const wantIds = ['3d', 'pixel', 'auto', 'fixed', 'st-season', 'st-hemisphere', 'st-weather', 'st-shelf', 'st-project'];
+    const wantIds = ['3d', 'pixel', 'auto', 'fixed', 'st-season', 'st-hemisphere', 'st-weather', 'st-shelf', 'st-project', 'text', 'names', 'off'];
     if (!wantIds.every((id, i) => ids[i] === id)) bad.push(`tab order on the page: ${ids.join(' > ')} (want ${wantIds.join(' > ')})`);
     if (!order.slice(0, wantIds.length).every(o => o.fv && o.ring)) bad.push(`a control without a visible focus ring: ${JSON.stringify(order.filter(o => !(o.fv && o.ring)))}`);
-    // 5. operable by keyboard: Space on Pixel, on Fixed and on the project switch
+    // 5. operable by keyboard: Space on Pixel, on Fixed, on the project switch and on Names only of the lounge
     await page.evaluate(`localStorage.clear()`);
     const mark2 = (await snap(page)).mark;
     await page.evaluate(`document.querySelector('#st-scene button[data-v="pixel"]').focus()`); await press(page, ' '); await sleep(300);
     await page.evaluate(`document.querySelector('#st-time-mode button[data-v="fixed"]').focus()`); await press(page, ' '); await sleep(300);
     await page.evaluate(`document.querySelector('#st-project').focus()`); await press(page, ' '); await sleep(500);
+    await page.evaluate(`document.querySelector('#st-lounge button[data-v="names"]').focus()`); await press(page, ' '); await sleep(400);
     const k = await snap(page);
-    if (!(stored(k.stored) && stored(k.stored).scene === 'pixel' && stored(k.stored).project === 'on' && /^\d\d:\d\d$/.test(stored(k.stored).time) && k.tab.pending && k.tab.sample === 'true' && k.tab.timeMode === 'fixed' && k.mark === mark2 && mark2)) bad.push(`operating with the keyboard: ${k.stored} ${JSON.stringify(k.tab)}`);
-    notes.push(`first Tab stop ${t1.id}; arrows ${seq.map(s => s[0] + '>' + s[1]).join(' ')}; Enter on Office -> ${v1}, Space on Cost -> ${v2}, "5" -> ${v3}, "2" in the shelf select -> ${v4} (value ${shelfAfter}); page order ${ids.slice(0, 10).join(' > ')}; keyboard operation stored ${k.stored}`);
+    if (!(stored(k.stored) && stored(k.stored).scene === 'pixel' && stored(k.stored).project === 'on' && /^\d\d:\d\d$/.test(stored(k.stored).time) && k.tab.pending && k.tab.sample === 'true' && k.tab.timeMode === 'fixed' && stored(k.stored).lounge === 'names' && k.tab.lounge === 'names' && k.pop.lounge === 'names' && k.mark === mark2 && mark2)) bad.push(`operating with the keyboard: ${k.stored} ${JSON.stringify(k.tab)}`);
+    notes.push(`first Tab stop ${t1.id}; arrows ${seq.map(s => s[0] + '>' + s[1]).join(' ')}; Enter on Office -> ${v1}, Space on Cost -> ${v2}, "5" -> ${v3}, "2" in the shelf select -> ${v4} (value ${shelfAfter}); page order ${ids.join(' > ')}; keyboard operation stored ${k.stored}`);
     const errs = S.problems();
     check('keys', bad.length === 0 && errs.length === 0, `${bad.length ? 'PROBLEMS ' + bad.join('; ') + ' | ' : ''}${notes.join(' | ')}; console errors ${errs.length}${errs.length ? ' ' + errs.slice(0, 2).join(' / ') : ''}`);
   });
@@ -491,15 +621,18 @@ if (want('narrow')) {
     })()`).then(JSON.parse);
     for (const [label, lang] of [['English', 'en'], ['Turkish', 'tr']]) {
       await page.evaluate(`localStorage.setItem('cco.lang', '${lang}')`);
-      await S.load('?scene=3d', '#settings');
+      await S.load('?scene=3d&lounge=demo,names', '#settings');       // the lounge row has its longest tag and its note
       // everything on: a fixed time (the slider row), a weather (the reduced-motion note is not shown), the project switch (the sample), a long address-named value
       await click(page, '#st-time-mode button[data-v="fixed"]'); await sleep(250);
       await click(page, '.st-toggle span'); await sleep(300);
       const m = await measure();
       if (!(m.vw === 375 && m.docW <= 375 && m.bodyW <= 375 && m.viewW <= m.viewC && m.out.length === 0 && m.inCard && m.navFits && m.navRight <= m.topRight)) bad.push(`${label}: overflow ${JSON.stringify({ docW: m.docW, viewW: m.viewW, viewC: m.viewC, out: m.out.slice(0, 4), inCard: m.inCard, navFits: m.navFits, nav: m.navRight, top: m.topRight })}`);
       if (!(m.tabs.length === 5 && m.tabs.every(t => t[1] >= 0 && t[2] <= 375))) bad.push(`${label}: tabs ${JSON.stringify(m.tabs)}`);
-      notes.push(`${label} (${m.lang}, "${m.title}"): page ${m.docW} px of ${m.vw}, ${m.rows} rows, tabs end at ${m.tabs[4][2]}, nav inside the bar ${m.navRight <= m.topRight}`);
+      const ln = await snap(page);
+      if (!(ln.tab.loungeNote && ln.src.lounge && ln.src.lounge.from === 'url' && /\?lounge=demo,names/.test(ln.src.lounge.text) && ln.tab.lounge === 'names')) bad.push(`${label}: the lounge row with ?lounge=demo,names: ${JSON.stringify({ note: ln.tab.loungeNote, src: ln.src.lounge, lounge: ln.tab.lounge })}`);
+      notes.push(`${label} (${m.lang}, "${m.title}"): page ${m.docW} px of ${m.vw}, ${m.rows} rows, tabs end at ${m.tabs[4][2]}, nav inside the bar ${m.navRight <= m.topRight}, lounge note "${ln.tab.loungeNote}" and tag "${ln.src.lounge && ln.src.lounge.text}"`);
       await S.shot(`settings-375-${lang}.png`);
+      if (shotsDir) { await page.evaluate(`document.querySelector('#view-settings [data-row="lounge"]').scrollIntoView({ block: 'center' })`); await sleep(200); await S.shot(`settings-375-lounge-${lang}.png`); await page.evaluate(`window.scrollTo(0, 0)`); }
       // a smaller phone (the window is made narrower with the page open, as when a phone is turned round): 360 and 320 px keep all five tabs inside the bar (WCAG reflow is judged at 320);
       // 280 px, narrower than a phone sold today, cannot hold the English labels, so the strip scrolls and the chosen tab is brought into view
       const strip = () => page.evaluate(`(() => { const nav = document.querySelector('.top nav'), nb = nav.getBoundingClientRect(), sel = nav.querySelector('[aria-selected=true]'), s = sel.getBoundingClientRect();
@@ -537,6 +670,13 @@ const MUTATIONS = [
   { name: 'the server says nothing about the message board', file: 'server.js', from: ", chat: chatInfo() });", to: ' });', fails: ['open'] },
   { name: 'the server says the message board is off while it reads the chat database', file: 'server.js', from: 'return { state: s.state, schema: s.schema };', to: "return { state: 'off', schema: null };", fails: ['open'] },
   { name: 'the camera row shows in the 3D scene', file: 'public/js/office-settings.js', from: "export const tabRowsOf = office => ['scene', ...rowsOf(office)];", to: "export const tabRowsOf = office => TAB_ROWS;", fails: ['open'] },
+  { name: 'a click on the lounge row of the tab changes nothing', file: 'public/js/settings-tab.js', from: "q('#st-lounge').addEventListener('click', e => { const b = e.target.closest('button[data-v]'); if (b) hub.set('lounge', b.dataset.v); });", to: "q('#st-lounge').addEventListener('click', () => refresh());", fails: ['lounge'] },
+  { name: 'the popover\'s lounge select changes nothing', file: 'public/js/settings-panel.js', from: "lounge.addEventListener('change', () => { hub.set('lounge', lounge.value); refresh(); });", to: "lounge.addEventListener('change', () => refresh());", fails: ['lounge'] },
+  { name: 'the lounge ignores its setting', file: 'public/js/ofis-lounge.js', from: "const m = settings && typeof settings.get === 'function' ? settings.get('lounge') : null;", to: "const m = 'text';", fails: ['lounge'] },
+  { name: 'the lounge leaves its card open when the setting goes Off', file: 'public/js/ofis-lounge.js', from: "if (mode() === 'off') card.close(); });", to: '});', fails: ['lounge'] },
+  { name: 'the lounge does not kick its poll when the setting changes', file: 'public/js/ofis-lounge.js', from: "dirty = true; poller.kick(); if (mode() === 'off')", to: "dirty = true; if (mode() === 'off')", fails: ['lounge'] },
+  { name: 'the tab does not say that the address plays the demo', file: 'public/js/settings-tab.js', from: "q('[data-note=\"lounge-demo\"]').hidden = !(rows.includes('lounge') && loungeDemo(addr));", to: "q('[data-note=\"lounge-demo\"]').hidden = true;", fails: ['lounge'] },
+  { name: 'the pixel scene shows the lounge row', file: 'public/js/pixel/index.js', from: '    settingRows: PIXEL_ROWS,', to: '', fails: ['scene'] },
   { name: 'the tab does not follow a change made in the popover', file: 'public/js/settings-tab.js', from: 'hub.on(refresh);', to: '', fails: ['store'] },
   { name: 'the popover does not follow a change made in the tab', file: 'public/js/settings-panel.js', from: 'hub.on(refresh);', to: '', fails: ['store'] },
   { name: 'the tab\'s time slider says minutes to a screen reader', file: 'public/js/settings-tab.js', from: "time.setAttribute('aria-valuetext', text);", to: '', fails: ['store'] },

@@ -10,7 +10,8 @@
 //   scene:      '3d' (default) | 'pixel': which Office scene the page opens. It is read once, when the page loads (the two scenes are separate engines), so a change is
 //               kept for the next load; ?scene= wins over it and is not stored
 //   lounge:     'text' (default) | 'names' | 'off': the lounge on the plaza of the 3D map (lounge-model.js): the text of the posts on its wall, only who talks to whom and where, or a plain pavilion
-//               (the address also takes ?lounge=demo, the demo source, which is not a setting: it can come with a mode, ?lounge=demo,names)
+//               (the address also takes ?lounge=demo, the demo source, which is not a setting: it can come with a mode, ?lounge=demo,names). The popover and the Settings tab have
+//               a row for it ("Agent lounge": Text / Names only / Off) in the 3D scene, the only one with a lounge; the lounge reads it live
 // The camera view (isometric or front) has its own, older key and is handled by the view itself.
 import { parseClock, fmtClock } from './time.js';
 import { parseSeason, parseHemisphere } from './season.js';

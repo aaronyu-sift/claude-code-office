@@ -87,7 +87,7 @@ millisecond value is the time the spring needs to settle to within 0.3 percent.
 ## Where the current animations sit
 
 - Surface, small control, feedback, data change: done (cards, menus, tooltip, switch knob, hover transitions).
-- Page: done for the Settings view (`public/js/settings-tab.js`: a Web Animations fade of `.st` with `DUR.fast` and `EASE.out`, `DUR.hover` under reduced motion). The sample board of the project setting there is a mounted sign: its project line only fades (200 ms) and keeps its place.
+- Page: done for the Settings view (`public/js/settings-tab.js`: a Web Animations fade of `.st` with `DUR.fast` and `EASE.out`, `DUR.hover` under reduced motion). The sample board of the project setting there is a mounted sign: its project line only fades (200 ms) and keeps its place. A row that a scene does not have (the lounge row in the pixel scene, the camera row in the 3D scene) and the note under the lounge row ("The address shows the demo conversation.") are shown and hidden with `hidden`, without animation; what the choice does to the pavilion is the Lounge kind's business.
 - The 3D scene (`?scene=3d`) has the card, the details card and the shelf card through the same helpers (`enter`, `leave`, `setShown`, the same tokens), so they move as above; its camera is still direct (see the next item).
 - Indicator: done. The working dot uses the slow tempo and the thinking dots and the waiting balloon the quick one (CSS); in the pixel scene the light beam is slow and the waiting
   figure's bob is quick; in the 3D scene the beam is slow and the lamp's blink is quick.

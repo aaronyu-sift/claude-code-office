@@ -2,7 +2,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
-import { OPTIONS, sourceParam, cameraSource, boardState, CAMERA_KEY } from '../public/js/settings-tab-model.js';
+import { OPTIONS, sourceParam, cameraSource, boardState, loungeDemo, CAMERA_KEY } from '../public/js/settings-tab-model.js';
 import { clean } from '../public/js/pixel/settings.js';
 import { LANGUAGES, FALLBACK } from '../public/js/lang/index.js';
 
@@ -11,7 +11,7 @@ const html = readFileSync(here('../public/index.html'), 'utf8');
 const EN = LANGUAGES.find(l => l.code === FALLBACK).messages;
 
 test('options: every choice of the tab is a value the store accepts, every label is a language key, and the popover offers the same choices', () => {
-  for (const key of ['scene', 'season', 'hemisphere', 'weather']) for (const [v, k] of OPTIONS[key]) {
+  for (const key of ['scene', 'season', 'hemisphere', 'weather', 'lounge']) for (const [v, k] of OPTIONS[key]) {
     assert.equal(clean(key, v), v, `${key}=${v} is a valid setting`);
     assert.ok(k in EN, `${k} is a language key`);
   }
@@ -20,6 +20,8 @@ test('options: every choice of the tab is a value the store accepts, every label
   assert.deepEqual(popover('set-season'), OPTIONS.season.map(o => o[0]), 'season');
   assert.deepEqual(popover('set-hemisphere'), OPTIONS.hemisphere.map(o => o[0]), 'hemisphere');
   assert.deepEqual(popover('set-weather'), OPTIONS.weather.map(o => o[0]), 'weather');
+  assert.deepEqual(popover('set-lounge'), OPTIONS.lounge.map(o => o[0]), 'lounge');
+  assert.deepEqual(OPTIONS.lounge.map(o => o[0]), ['text', 'names', 'off'], 'the three modes of the lounge, the default first');
   for (const [, k] of OPTIONS.camera) assert.ok(k in EN);
 });
 
@@ -32,6 +34,14 @@ test('source of a value, in the address\'s own words: ?season=winter, ?hour=21 f
   assert.equal(sourceParam('scene', '?scene=pixel'), '?scene=pixel');
   assert.equal(sourceParam('shelf', '?shelf=2'), '', 'a value that is not valid is not the address\'s');
   assert.equal(sourceParam('project', ''), ''); assert.equal(sourceParam('project', undefined), '');
+  assert.equal(sourceParam('lounge', '?lounge=names'), '?lounge=names');
+  assert.equal(sourceParam('lounge', '?lounge=demo,names'), '?lounge=demo,names', 'the address\'s own words, demo included');
+  assert.equal(sourceParam('lounge', '?lounge=demo'), '', 'the demo alone names no mode: the row is not the address\'s');
+});
+
+test('the demo conversation: ?lounge=demo, alone or with a mode, is a source the tab says so about; no other address is', () => {
+  for (const s of ['?lounge=demo', '?lounge=demo,names', '?scene=3d&lounge=DEMO+off', '?lounge=names%20demo']) assert.equal(loungeDemo(s), true, s);
+  for (const s of ['', '?lounge=names', '?lounge=off', '?lounge=demonstration', '?scene=3d', undefined, null]) assert.equal(loungeDemo(s), false, String(s));
 });
 
 test('the camera: ?proj= wins, then its own stored key, else the default; a storage that throws is the default', () => {
@@ -69,9 +79,12 @@ test('words: every language key that the tab uses exists, in every language', ()
   assert.ok(indexKeys.includes('tab.settings') && indexKeys.includes('set.project'));
 });
 
-test('markup: the popover has a project switch in its own row, after the shelf; the settings view is a panel of the tablist', () => {
+test('markup: the popover has a project switch in its own row, after the shelf, and the lounge select in the last row; the settings view is a panel of the tablist', () => {
   assert.match(html, /<div class="set-row" data-row="project">[\s\S]*?<input type="checkbox" role="switch" id="set-project">/);
   assert.ok(html.indexOf('data-row="shelf"') < html.indexOf('data-row="project"'));
+  assert.match(html, /<div class="set-row" data-row="lounge"><label class="set-l" for="set-lounge" data-i18n="set\.lounge">Agent lounge<\/label>\s*<select id="set-lounge">/);
+  assert.ok(html.indexOf('data-row="project"') < html.indexOf('data-row="lounge"') && html.indexOf('data-row="lounge"') < html.indexOf('id="set-note"'), 'the lounge row follows the project row and comes before the note line');
+  for (const [, k] of OPTIONS.lounge) assert.ok(html.includes(`data-i18n="${k}"`), `${k} is bound in the popover`);
   assert.match(html, /<section id="view-settings" class="view view-settings" role="tabpanel" aria-labelledby="tab-settings" hidden><\/section>/);
 });
 
