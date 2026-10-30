@@ -581,17 +581,21 @@ async function runFollow(ctx) {
     else {
       const rel = [], fig = [];
       await sleep(450);                                                  // (the card comes in with a short scale: measure it once it has settled)
-      for (let i = 0; i < 10; i++) {
-        const c = await page.evaluate(`document.querySelector('#view-ofis').__ofisUi.card`), at = await ev(page, `s.charScreen(${JSON.stringify(chat.id)})`);
+      for (let i = 0; i < 14; i++) {
+        const { c, at } = await ev(page, `({ c: v.__ofisUi.card, at: s.charScreen(${JSON.stringify(chat.id)}) })`);       // one reading: no frame comes between the card and the figure
         if (!c.open || !at) break;
         rel.push([c.rect.x - at[0], at[1] - c.rect.y, c.rect.h]); fig.push(at);
         await sleep(160);
       }
+      // the card may still be coming in (its spring) or the chief turning a corner at the first readings: measure from the first reading that is within 4 px of the one before
+      const k = rel.findIndex((r, i) => i > 0 && Math.abs(r[0] - rel[i - 1][0]) < 4);
+      const early = k > 0 ? k : 0;
+      rel.splice(0, early); fig.splice(0, early);
       const move = fig.length > 1 ? Math.hypot(fig.at(-1)[0] - fig[0][0], fig.at(-1)[1] - fig[0][1]) : 0;
       // the card is as tall as the view allows and the page keeps it inside the view, so its height can't follow the figure's: along the screen it follows to within a few px, and the
       // figure stays beside it (inside its height) the whole time
       const drift = rel.length ? Math.max(...rel.map(r => Math.abs(r[0] - rel[0][0]))) : 999;
-      const beside = rel.filter(r => r[1] >= 0 && r[1] <= r[2]).length;
+      const beside = rel.filter(r => r[1] >= -30 && r[1] <= r[2] + 30).length;                 // (30 px of slack: the card sits against the top of the free area while the chief walks up the screen)
       if (rel.length && beside < rel.length) problems.push(`the walking chief was beside its card in only ${beside} of ${rel.length} readings`);
       if (rel.length < 6) problems.push(`the card was open in only ${rel.length} readings`);
       if (move < 30) problems.push(`the walking chief moved only ${f1(move)} px while the card was open`);
@@ -694,6 +698,7 @@ const MUTATIONS = [
   { name: 'a rebuild drops the people whose walk changed', file: 'public/js/ofis.js', from: "        if (moved) startWalk(c, repath(route, pos, out ? 'entrance' : 'seat'), c.after);", to: "        if (moved) { removeChar(c); continue; }", fails: 'rebuild' },
   { name: 'a sub-agent taken out of the data while it walks in is removed on the spot', file: 'public/js/ofis.js', from: "      else if (c.mode === 'walk' && c.path) turnAround(c);", to: "      else if (c.mode === 'walk' && c.path) removeChar(c);", fails: 'hidden' },
   { name: 'the name label stays where the figure was made', file: 'public/js/ofis.js', from: '    c.tag.pos.set(pos.x, 0, pos.z);\n    if (c.pk) applyPack(c);', to: "    if (c.mode !== 'walk') c.tag.pos.set(pos.x, 0, pos.z);\n    if (c.pk) applyPack(c);", fails: 'follow' },
+  { name: 'the card is not placed again after each frame', file: 'public/js/ofis.js', from: "        placeLabels();\n        ui.card.place();", to: "        placeLabels();", fails: 'follow' },
   { name: 'settle does nothing', file: 'public/js/ofis.js', from: '        n++;\n        finishWalk(c);', to: '        n++;', fails: 'settle' },
   { name: 'the app calls settle', file: 'public/js/ofis.js', from: "    if (born.length) {\n      for (const b of born)", to: "    if (born.length) {\n      setTimeout(() => root.__ofis.settle(), 60000);\n      for (const b of born)", fails: 'settle' },
   { name: 'reduced motion keeps the bounce of the step', file: 'public/js/ofis.js', from: "pose === 'walk' && !atmosphere.state.reducedMotion ?", to: "pose === 'walk' ?", fails: 'reduced' },
@@ -711,10 +716,14 @@ async function runMutations() {
       if (!text.includes(m.from)) { rows.push({ m, caught: false, detail: 'the line to break was not found' }); console.log(`MUTATION MISSED ${m.fails}: ${m.name} -> the line to break was not found`); continue; }
       writeFileSync(file, text.replace(m.from, m.to));
       const want = [].concat(m.fails), got = [];
-      for (const k of want) { const r = await CHECKS[k]({ root: dir }); got.push(r.find(x => x.name === NAME[k])); }
+      for (const k of want) {
+        let r;
+        try { r = await CHECKS[k]({ root: dir }); } catch (e) { await sleep(2000); r = await CHECKS[k]({ root: dir }); }        // a run that throws (the harness, the server) is run once more: only a result counts
+        got.push(r.find(x => x.name === NAME[k]));
+      }
       rows.push({ m, caught: got.every(r => r && !r.ok), detail: got.map((r, i) => (r ? `${NAME[want[i]]} ${r.ok ? 'PASSED' : 'FAILED'}: ${r.detail.slice(r.ok ? 0 : Math.max(0, r.detail.indexOf('PROBLEMS')), (r.ok ? 0 : Math.max(0, r.detail.indexOf('PROBLEMS'))) + 200)}` : `${NAME[want[i]]} did not run`)).join(' || ') });
     } catch (e) {
-      rows.push({ m, caught: true, detail: `the run threw: ${String(e.message || e).slice(0, 160)}` });         // a mutation that breaks the page badly fails every check
+      rows.push({ m, caught: false, detail: `the run threw twice, so nothing was read: ${String(e.message || e).slice(0, 160)}` });
     } finally { rmSync(dir, { recursive: true, force: true }); }
     const last = rows[rows.length - 1];
     console.log(`MUTATION ${last.caught ? 'CAUGHT' : 'MISSED'} ${m.fails}: ${m.name} -> ${last.detail}`);
