@@ -2,7 +2,7 @@
 // both controls talk to (public/js/office-settings.js). The tab's own logic (tabs.js, settings-tab.js) is in tabs.test.mjs and settings-tab.test.mjs.
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { createOfficeSettings, createSettingsHub, officeQuery, urlAfterChange, tabRowsOf, sceneChoice, sourceOf, shelfChoices, fixedNow, minutesOf, TAB_ROWS, OFFICE3D_ROWS } from '../public/js/office-settings.js';
+import { createOfficeSettings, createSettingsHub, officeQuery, urlAfterChange, tabRowsOf, sceneChoice, sourceOf, shelfChoices, fixedNow, minutesOf, TAB_ROWS, OFFICE3D_ROWS, PIXEL_ROWS } from '../public/js/office-settings.js';
 import { KEY, save } from '../public/js/pixel/settings.js';
 
 const memory = (init = {}) => { const m = { ...init }; return { m, getItem: k => (k in m ? m[k] : null), setItem: (k, v) => { m[k] = String(v); } }; };
@@ -81,10 +81,11 @@ test('source of a value: the address when it names the setting, else stored when
   assert.equal(sourceOf('project', {}, ''), 'default'); assert.equal(sourceOf('project', null, undefined), 'default');
 });
 
-test('tab rows: the scene first, then the popover\'s rows that the scene in force supports (the camera only where the scene has one)', () => {
-  assert.deepEqual(TAB_ROWS, ['scene', 'camera', 'time', 'season', 'hemisphere', 'weather', 'shelf', 'project']);
+test('tab rows: the scene first, then the popover\'s rows that the scene in force supports (the camera only where the scene has one, the lounge only in the 3D scene)', () => {
+  assert.deepEqual(TAB_ROWS, ['scene', 'camera', 'time', 'season', 'hemisphere', 'weather', 'shelf', 'project', 'lounge']);
   assert.deepEqual(tabRowsOf({}), TAB_ROWS); assert.deepEqual(tabRowsOf(null), TAB_ROWS, 'before any scene exists every row is listed');
-  assert.deepEqual(tabRowsOf({ settingRows: OFFICE3D_ROWS }), ['scene', 'time', 'season', 'hemisphere', 'weather', 'shelf', 'project']);
+  assert.deepEqual(tabRowsOf({ settingRows: OFFICE3D_ROWS }), ['scene', 'time', 'season', 'hemisphere', 'weather', 'shelf', 'project', 'lounge']);
+  assert.deepEqual(tabRowsOf({ settingRows: PIXEL_ROWS }), ['scene', 'camera', 'time', 'season', 'hemisphere', 'weather', 'shelf', 'project'], 'the pixel scene has no lounge');
   assert.deepEqual(tabRowsOf({ settingRows: [] }), ['scene']);
 });
 
@@ -112,7 +113,7 @@ test('settings hub: a change applies to the scene in force, keeps the address in
   assert.equal(hub.set('season', 'monsoon'), false, 'a value the scene refuses is neither kept in step nor told');
   assert.deepEqual(calls, ['season=winter']); assert.deepEqual(told, ['season=winter']); assert.deepEqual(second, ['season=winter']);
   assert.equal(hub.settings().season, 'winter'); assert.equal(hub.from().season, 'user');
-  assert.deepEqual(hub.rows(), ['scene', 'time', 'season', 'hemisphere', 'weather', 'shelf', 'project']);
+  assert.deepEqual(hub.rows(), ['scene', 'time', 'season', 'hemisphere', 'weather', 'shelf', 'project', 'lounge']);
   office.store.on('*', (v, k) => hub.heard(k, v));                             // the store reports every change, also the ones that came through the hub
   hub.set('project', 'on');
   assert.deepEqual(told, ['season=winter', 'project=on'], 'once, not twice');

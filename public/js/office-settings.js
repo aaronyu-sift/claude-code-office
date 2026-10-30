@@ -1,5 +1,5 @@
-// The settings of an Office scene as one stateful object: time of day, season, hemisphere, weather, the shelf size, the project folder on the boards and the scene
-// that the page opens (what the popover in the header and the Settings tab edit). It sits on top of pixel/settings.js (the rules: defaults < stored < address,
+// The settings of an Office scene as one stateful object: time of day, season, hemisphere, weather, the shelf size, the project folder on the boards, the lounge on the plaza
+// and the scene that the page opens (what the popover in the header and the Settings tab edit). It sits on top of pixel/settings.js (the rules: defaults < stored < address,
 // validation, the storage key), so a choice made in one scene is the choice in the other: both read and write the same localStorage object. The pixel scene keeps its
 // own copy of these few lines (pixel/index.js); this module is used by the 3D scene, which reads every setting from it (`project` too, live), and by the controls,
 // which ask it which rows a scene supports.
@@ -9,15 +9,17 @@
 //                                                         tells both controls (on(fn)), so a change in one shows at once in the other; settings(), from(), rows()
 //   officeQuery(search)                            the overrides of an address: ?time ?season ?weather ?hemisphere ?shelf ?project ?scene ?lounge, and ?hour= as an older name of ?time=
 //   urlAfterChange(search, key, value)             the address after a change made with the controls, when the address named that setting (else null); ?lounge=demo stays named
-//   rowsOf(office), tabRowsOf(office)              the rows of the popover and of the Settings tab that a scene supports
+//   rowsOf(office), tabRowsOf(office)              the rows of the popover and of the Settings tab that a scene supports (`lounge` only where there is a lounge: the 3D scene)
 //   sceneChoice({ storage, search })               the scene the page opens: the address, else the stored choice, else '3d'
 //   sourceOf(key, from, search)                    where a value comes from, for the note under a row: 'default', 'stored', 'visit' (changed, but not kept by the browser) or 'url' (the address names it)
 import { merge, load as loadSettings, keep as keepSettings, clean, fromQuery, sanitize, KEY, KEYS } from './pixel/settings.js';
 import { fmtClock, parseClock } from './pixel/time.js';
 
-// the rows of the popover, in the order they are shown; a scene lists the ones it supports (`settingRows`), a scene that lists none supports all of them
-export const ROWS = ['camera', 'time', 'season', 'hemisphere', 'weather', 'shelf', 'project'];
-export const OFFICE3D_ROWS = ['time', 'shelf', 'weather', 'season', 'hemisphere', 'project'];
+// the rows of the popover, in the order they are shown; a scene lists the ones it supports (`settingRows`), a scene that lists none supports all of them. Each scene lists its own:
+// the camera exists in the pixel scene only, the lounge in the 3D scene only (the pixel scene has no plaza pavilion)
+export const ROWS = ['camera', 'time', 'season', 'hemisphere', 'weather', 'shelf', 'project', 'lounge'];
+export const OFFICE3D_ROWS = ['time', 'shelf', 'weather', 'season', 'hemisphere', 'project', 'lounge'];
+export const PIXEL_ROWS = ROWS.filter(r => r !== 'lounge');
 export const rowsOf = office => (office && Array.isArray(office.settingRows) ? ROWS.filter(r => office.settingRows.includes(r)) : [...ROWS]);
 // the Settings tab lists the rows of the popover and, first, the scene itself (no scene supports or not: the page decides it when it loads)
 export const TAB_ROWS = ['scene', ...ROWS];

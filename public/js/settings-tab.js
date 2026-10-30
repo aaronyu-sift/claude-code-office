@@ -4,8 +4,9 @@
 // takes effect at the next load (a button reloads now).
 //
 // Each row says what it does in a line and where its value comes from (the default, a choice kept in this browser, or the address, which wins and is not stored). The rows follow
-// the scene in force (the camera exists only in the pixel scene). A last row, read-only, says what the server reports about the agent message board (/api/config `chat.state`:
-// connected, not enabled or unsupported); a server that says nothing about it shows nothing. The page fades in like a surface (docs/motion.md, kind "Page").
+// the scene in force (the camera exists only in the pixel scene, the agent lounge only in the 3D scene; the lounge row also says so under itself when the address plays its demo
+// conversation, ?lounge=demo). A last row, read-only, says what the server reports about the agent message board (/api/config `chat.state`: connected, not enabled or
+// unsupported); a server that says nothing about it shows nothing. The page fades in like a surface (docs/motion.md, kind "Page"); a row or a note that appears or goes does not animate.
 //
 //   createSettingsTab(root, { hub, running, loadConfig, search, storage })    show(), hide(), update(), refresh()
 //     hub          the settings hub (office-settings.js)
@@ -17,12 +18,12 @@ import { esc } from './util.js';
 import { fmtClock } from './pixel/time.js';
 import { fillShelf } from './settings-panel.js';
 import { fixedNow, minutesOf, sourceOf } from './office-settings.js';
-import { OPTIONS, sourceParam, cameraSource, boardState } from './settings-tab-model.js';
+import { OPTIONS, sourceParam, cameraSource, boardState, loungeDemo } from './settings-tab-model.js';
 import { DUR, EASE, reduced } from './motion.js';
 
 const defaultConfig = async () => { try { return await (await fetch('api/config', { cache: 'no-store' })).json(); } catch { return null; } };
 const defaultStorage = () => { try { return window.localStorage; } catch { return null; } };
-const SOURCED = ['scene', 'time', 'season', 'hemisphere', 'weather', 'shelf', 'project'];
+const SOURCED = ['scene', 'time', 'season', 'hemisphere', 'weather', 'shelf', 'project', 'lounge'];
 
 // the page's markup; the text is the language's (msg), the values are set by refresh()
 function build() {
@@ -64,6 +65,10 @@ function build() {
         label: msg('st.project'), help: msg('st.project.help'), labelFor: 'st-project',
         control: `<label class="toggle st-toggle"><input type="checkbox" role="switch" id="st-project" aria-describedby="st-h-project"><span></span></label>`,
         extra: `<div class="st-sample" aria-hidden="true" data-on="false"><span class="st-sample-name">${esc(msg('st.sample.name'))}</span><span class="st-sample-proj">${esc(msg('st.sample.project'))}</span></div>`,
+      }) +
+      row('lounge', {
+        label: msg('st.lounge'), help: msg('st.lounge.help'), control: seg('st-lounge', 'lounge', buttons(OPTIONS.lounge, 'data-v')),
+        extra: `<p class="st-note" data-note="lounge-demo" hidden>${esc(msg('set.note.demo'))}</p>`,
       })) +
     group('system',
       row('board', {
@@ -108,6 +113,8 @@ export function createSettingsTab(root, { hub, running = () => '3d', loadConfig 
     q('#st-project').checked = s.project === 'on';
     q('.st-sample').dataset.on = String(s.project === 'on');
     q('[data-note="reduced"]').hidden = !(s.weather !== 'off' && reduced());
+    for (const b of q('#st-lounge').querySelectorAll('button')) b.setAttribute('aria-pressed', String(b.dataset.v === s.lounge));
+    q('[data-note="lounge-demo"]').hidden = !(rows.includes('lounge') && loungeDemo(addr));
     for (const k of SOURCED) { const kind = sourceOf(k, from, addr); source(k, kind, kind === 'url' ? sourceParam(k, addr) : ''); }
     const cam = cameraSource(addr, storage);
     source('camera', cam, cam === 'url' ? `?proj=${new URLSearchParams(addr).get('proj')}` : '');
@@ -135,6 +142,7 @@ export function createSettingsTab(root, { hub, running = () => '3d', loadConfig 
   for (const key of ['season', 'hemisphere', 'weather']) q('#st-' + key).addEventListener('change', e => hub.set(key, e.target.value));
   q('#st-shelf').addEventListener('change', e => hub.set('shelf', +e.target.value));
   q('#st-project').addEventListener('change', e => hub.set('project', e.target.checked ? 'on' : 'off'));
+  q('#st-lounge').addEventListener('click', e => { const b = e.target.closest('button[data-v]'); if (b) hub.set('lounge', b.dataset.v); });
   hub.on(refresh);                                                     // a change made in the popover, or in another tab, shows here at once
 
   refresh();

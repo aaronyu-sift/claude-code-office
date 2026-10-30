@@ -1,7 +1,9 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { KEY, clean, fromQuery, merge, load, save } from '../public/js/pixel/settings.js';
-import { createOfficeSettings, officeQuery, urlAfterChange } from '../public/js/office-settings.js';
+import { readFileSync } from 'node:fs';
+import { createOfficeSettings, createSettingsHub, officeQuery, urlAfterChange, sourceOf, rowsOf, tabRowsOf, OFFICE3D_ROWS, PIXEL_ROWS } from '../public/js/office-settings.js';
+import { sourceParam } from '../public/js/settings-tab-model.js';
 
 const memory = (init = {}) => { const m = { ...init }; return { m, getItem: k => (k in m ? m[k] : null), setItem: (k, v) => { m[k] = String(v); } }; };
 
@@ -32,4 +34,27 @@ test('lounge: ?lounge= reaches the 3D scene, and a change made with the controls
   assert.equal(urlAfterChange('?lounge=demo', 'lounge', 'names'), '?lounge=demo%2Cnames', 'the demo source stays in the address');
   assert.equal(urlAfterChange('?lounge=demo,off', 'lounge', 'text'), '?lounge=demo%2Ctext');
   assert.equal(urlAfterChange('?scene=3d', 'lounge', 'names'), null, 'not named in the address: the address stays');
+});
+
+test('lounge row: the controls change the setting live through the hub (the lounge listens to the store), keep ?lounge=demo in the address and say where the value comes from', () => {
+  const store = createOfficeSettings({ storage: memory(), overrides: officeQuery('?lounge=demo'), watch: null }), heard = [], addr = [];
+  assert.equal(store.get('lounge'), 'text', '?lounge=demo alone names no mode'); assert.equal(store.from().lounge, 'default');
+  store.on('lounge', v => heard.push(v));                                           // what ofis-lounge.js does: it reads settings.get('lounge') on every use and listens for a change
+  const hub = createSettingsHub({ getOffice: () => ({ settingRows: OFFICE3D_ROWS, get settings() { return store.get(); }, get settingsFrom() { return store.from(); }, setSetting: (k, v) => store.set(k, v) }), afterChange: (k, v) => addr.push(urlAfterChange('?lounge=demo', k, v)) });
+  assert.equal(hub.set('lounge', 'names'), true); assert.equal(hub.set('lounge', 'off'), true); assert.equal(hub.set('lounge', 'off'), true); assert.equal(hub.set('lounge', 'demo'), false, 'demo is a source, not a mode');
+  assert.equal(hub.set('lounge', 'loud'), false);
+  assert.deepEqual(heard, ['names', 'off'], 'one notice for each real change, none for a value that is the same or not a mode');
+  assert.equal(hub.settings().lounge, 'off'); assert.equal(hub.from().lounge, 'user');
+  assert.deepEqual(addr.filter(Boolean), ['?lounge=demo%2Cnames', '?lounge=demo%2Coff', '?lounge=demo%2Coff'], 'the demo source stays in the address that a change keeps in step');
+  assert.equal(sourceOf('lounge', hub.from(), ''), 'stored'); assert.equal(sourceOf('lounge', hub.from(), '?lounge=demo,off'), 'url'); assert.equal(sourceOf('lounge', hub.from(), '?lounge=demo'), 'stored');
+  assert.equal(sourceParam('lounge', '?lounge=demo,off'), '?lounge=demo,off');
+  assert.deepEqual(hub.rows().slice(-2), ['project', 'lounge']);
+});
+
+test('lounge row: only the scene with a lounge lists it, and the pixel scene says so itself', () => {
+  assert.ok(rowsOf({ settingRows: OFFICE3D_ROWS }).includes('lounge')); assert.ok(tabRowsOf({ settingRows: OFFICE3D_ROWS }).includes('lounge'));
+  assert.ok(!rowsOf({ settingRows: PIXEL_ROWS }).includes('lounge')); assert.ok(!tabRowsOf({ settingRows: PIXEL_ROWS }).includes('lounge'));
+  const here = p => new URL(p, import.meta.url);
+  assert.match(readFileSync(here('../public/js/pixel/index.js'), 'utf8'), /^\s*settingRows: PIXEL_ROWS,/m, 'the pixel scene lists its rows, so a scene that lists none does not get a lounge row');
+  assert.match(readFileSync(here('../public/js/main.js'), 'utf8'), /settingRows: OFFICE3D_ROWS,/, 'the 3D scene lists its rows');
 });

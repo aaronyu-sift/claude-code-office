@@ -18,6 +18,7 @@ import { createBoardLayer } from './board.js';
 import { createOfficeUi, MIN_TARGET } from '../office-ui.js';
 import { labelParts, labelHtml } from '../office-labels.js';
 import { ZOOMS, fitZoom, minZoom, stepZoom, centerPan, clampPan, zoomAbout } from './input.js';
+import { PIXEL_ROWS } from '../office-settings.js';
 
 const FIT_ICON = '<svg class="ic" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M2.5 6V2.5H6M10 2.5h3.5V6M13.5 10v3.5H10M6 13.5H2.5V10"/></svg>';
 const DONE_MS = 4500;                 // a finished subagent stays at its desk this long
@@ -763,6 +764,7 @@ export function createPixelOffice(root, ctx, opts = {}) {
     },
     update() { if (visible) sync(); },
     get projection() { return proj.name; },
+    settingRows: PIXEL_ROWS,                 // the rows of the popover and the Settings tab that this scene has: the camera, not the lounge (that is the 3D scene's plaza)
     get settings() { return { ...settings }; },
     get settingsFrom() { return { ...from }; },
     get season() { return season; },

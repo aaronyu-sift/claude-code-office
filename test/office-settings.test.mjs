@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { createOfficeSettings, createSettingsHub, officeQuery, urlAfterChange, rowsOf, tabRowsOf, sceneChoice, sourceOf, shelfChoices, fixedNow, minutesOf, ROWS, TAB_ROWS, OFFICE3D_ROWS } from '../public/js/office-settings.js';
+import { createOfficeSettings, createSettingsHub, officeQuery, urlAfterChange, rowsOf, tabRowsOf, sceneChoice, sourceOf, shelfChoices, fixedNow, minutesOf, ROWS, TAB_ROWS, OFFICE3D_ROWS, PIXEL_ROWS } from '../public/js/office-settings.js';
 import { KEY, load, save, merge } from '../public/js/pixel/settings.js';
 
 const memory = (init = {}) => { const m = { ...init }; return { m, getItem: k => (k in m ? m[k] : null), setItem: (k, v) => { m[k] = String(v); } }; };
@@ -110,11 +110,14 @@ test('address after a change: a parameter that the address names follows the con
   assert.equal(urlAfterChange('', 'weather', 'rain'), null);
 });
 
-test('popover rows: a scene lists the rows it supports; a scene that lists none (the pixel scene) shows them all; the 3D scene has no camera row', () => {
-  assert.deepEqual(ROWS, ['camera', 'time', 'season', 'hemisphere', 'weather', 'shelf', 'project']);
+test('popover rows: a scene lists the rows it supports; a scene that lists none shows them all; the 3D scene has no camera row, the pixel scene no lounge row', () => {
+  assert.deepEqual(ROWS, ['camera', 'time', 'season', 'hemisphere', 'weather', 'shelf', 'project', 'lounge']);
   assert.deepEqual(rowsOf({}), ROWS); assert.deepEqual(rowsOf(null), ROWS); assert.deepEqual(rowsOf(undefined), ROWS);
-  assert.deepEqual(rowsOf({ settingRows: OFFICE3D_ROWS }), ['time', 'season', 'hemisphere', 'weather', 'shelf', 'project'], 'in the popover\'s order, whatever order the scene wrote');
+  assert.deepEqual(rowsOf({ settingRows: OFFICE3D_ROWS }), ['time', 'season', 'hemisphere', 'weather', 'shelf', 'project', 'lounge'], 'in the popover\'s order, whatever order the scene wrote');
   assert.ok(!rowsOf({ settingRows: OFFICE3D_ROWS }).includes('camera'));
+  assert.deepEqual(PIXEL_ROWS, ['camera', 'time', 'season', 'hemisphere', 'weather', 'shelf', 'project'], 'every row but the lounge');
+  assert.deepEqual(rowsOf({ settingRows: PIXEL_ROWS }), PIXEL_ROWS); assert.ok(!rowsOf({ settingRows: PIXEL_ROWS }).includes('lounge'));
+  assert.deepEqual([...ROWS].sort(), [...new Set([...OFFICE3D_ROWS, ...PIXEL_ROWS])].sort(), 'every row belongs to a scene, and no scene has a row that the popover lacks');
   assert.deepEqual(rowsOf({ settingRows: ['weather', 'bogus'] }), ['weather'], 'a name the popover does not have is ignored');
   assert.deepEqual(rowsOf({ settingRows: [] }), [], 'a scene can support none');
 });
