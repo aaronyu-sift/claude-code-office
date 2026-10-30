@@ -11,7 +11,8 @@
 //   settings-tab-project  the project folder: the tab's switch and the popover's switch show it on a 3D plaque (pixels) and on a pixel board, the sample on the tab follows
 //   settings-tab-keys     the tablist by keyboard (one stop of the Tab key, arrows, Home, End, wrapping), every control reachable and operable with the keyboard, a visible focus ring, the
 //                         number shortcuts do not fire inside a select
-//   settings-tab-narrow   375 px wide in English and Turkish: no horizontal overflow, all five tabs inside the bar, controls inside the cards; nothing leaves localhost in any check
+//   settings-tab-narrow   375 px wide in English and Turkish: no horizontal overflow, all five tabs inside the bar, controls inside the cards; 360 and 320 px keep the five tabs inside the bar, 280 px
+//                         scrolls the strip to the chosen tab; nothing leaves localhost in any check
 //
 // --mutations breaks the code in a copy of the repo, one line at a time, and runs the check that guards that line: every one must FAIL there (a check that cannot fail guards nothing).
 // Timing is the one thing a busy machine bends; a failing check is worth running again on its own (--only) before concluding anything.
@@ -488,6 +489,19 @@ if (want('narrow')) {
       if (!(m.tabs.length === 5 && m.tabs.every(t => t[1] >= 0 && t[2] <= 375))) bad.push(`${label}: tabs ${JSON.stringify(m.tabs)}`);
       notes.push(`${label} (${m.lang}, "${m.title}"): page ${m.docW} px of ${m.vw}, ${m.rows} rows, tabs end at ${m.tabs[4][2]}, nav inside the bar ${m.navRight <= m.topRight}`);
       await S.shot(`settings-375-${lang}.png`);
+      // a smaller phone (the window is made narrower with the page open, as when a phone is turned round): 360 and 320 px keep all five tabs inside the bar (WCAG reflow is judged at 320);
+      // 280 px, narrower than a phone sold today, cannot hold the English labels, so the strip scrolls and the chosen tab is brought into view
+      const strip = () => page.evaluate(`(() => { const nav = document.querySelector('.top nav'), nb = nav.getBoundingClientRect(), sel = nav.querySelector('[aria-selected=true]'), s = sel.getBoundingClientRect();
+        return JSON.stringify({ vw: innerWidth, fits: nav.scrollWidth <= nav.clientWidth + 0.5, selIn: s.left >= nb.left - 0.5 && s.right <= nb.right + 0.5, docW: document.documentElement.scrollWidth, sel: sel.textContent.trim(), scrolled: Math.round(nav.scrollLeft) }); })()`).then(JSON.parse);
+      const small = [];
+      for (const w of [360, 320, 280]) {
+        await page.setViewport(w, 820); await sleep(350);
+        const r = await strip();
+        small.push(`${w}: ${r.fits ? 'fits' : 'scrolls ' + r.scrolled}`);
+        if (!(r.vw === w && r.selIn && r.docW <= w && (w >= 320 ? r.fits : true))) bad.push(`${label} at ${w} px: ${JSON.stringify(r)}`);
+      }
+      await page.setViewport(375, 820); await sleep(250);
+      notes.push(`${label} tabs at ${small.join(', ')}; the chosen tab is inside the strip each time`);
     }
     await page.evaluate(`localStorage.removeItem('cco.lang')`);
     // the address-named values make the longest source tags; the pixel scene adds the camera row
@@ -528,6 +542,8 @@ const MUTATIONS = [
   { name: 'the arrow keys do nothing', file: 'public/js/tabs.js', from: "if (key === 'ArrowRight') return (at + 1) % count;", to: "if (key === 'ArrowRight') return null;", fails: ['keys'] },
   { name: 'the number keys fire inside a select', file: 'public/js/main.js', from: "if (e.target.matches('input, textarea, select')) return;", to: "if (e.target.matches('input, textarea')) return;", fails: ['keys'] },
   { name: 'the switch has no focus ring', file: 'public/app.css', from: '.toggle input:focus-visible + span { outline: 2px solid rgba(144, 133, 233, .55); outline-offset: 2px; }', to: '.toggle input:focus-visible + span { outline: none; }', fails: ['keys'] },
+  { name: 'the tabs are too wide for a small phone', file: 'public/app.css', from: '@media (max-width: 370px) { .top { padding-left: 8px; padding-right: 8px; } .top nav.seg { gap: 1px; } .top nav.seg button { padding: 6px 4px; font-size: 11.5px; } }', to: '', fails: ['narrow'] },
+  { name: 'a chosen tab that the strip cuts off is not scrolled into view', file: 'public/js/tabs.js', from: 'if (d) nav.scrollLeft += d;', to: '', fails: ['narrow'] },
   { name: 'the tabs are too wide for a phone', file: 'public/app.css', from: '@media (max-width: 520px) { .top nav.seg { flex: 1 1 100%; } .top nav.seg button { padding: 6px 7px; font-size: 12px; } }', to: '', fails: ['narrow'] },
   { name: 'a row keeps two columns on a phone', file: 'public/app.css', from: '  .st-row { grid-template-columns: minmax(0, 1fr); gap: 10px; }\n  .st-ctl { justify-self: stretch; }\n  .st select { width: 100%; max-width: none; }', to: '  .st-row { grid-template-columns: minmax(0, 1fr) 420px; }', fails: ['narrow'] },
 ];

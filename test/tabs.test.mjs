@@ -2,7 +2,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
-import { nextIndex, createTablist } from '../public/js/tabs.js';
+import { nextIndex, revealDelta, createTablist } from '../public/js/tabs.js';
 
 test('tablist keys: Right and Left go round, Home and End go to the ends, nothing else is for the tablist', () => {
   assert.equal(nextIndex(5, 0, 'ArrowRight'), 1); assert.equal(nextIndex(5, 4, 'ArrowRight'), 0, 'wraps to the first');
@@ -70,4 +70,27 @@ test('markup: the nav is a tablist of five tabs, each names its panel, each pane
     assert.match(html, new RegExp(`<section id="${t.controls}"[^>]*role="tabpanel"[^>]*aria-labelledby="${t.id}"`), `${t.controls} is a panel labelled by ${t.id}`);
   }
   assert.match(html, /title="Settings \(5\)"/, 'the shortcut is on the tab');
+});
+
+test('the strip scrolls the chosen tab into view: nothing when it is inside, left or right by exactly what is cut off', () => {
+  const strip = { left: 29, right: 291 };
+  assert.equal(revealDelta(strip, { left: 100, right: 160 }), 0, 'inside');
+  assert.equal(revealDelta(strip, { left: 29, right: 291 }), 0, 'exactly as wide as the strip');
+  assert.equal(revealDelta(strip, { left: 270, right: 332 }), 41, 'the last tab is cut off on the right: scroll right by the 41 px that are lost');
+  assert.equal(revealDelta(strip, { left: 10, right: 80 }), -19, 'cut off on the left: scroll left');
+  assert.equal(revealDelta(null, { left: 0, right: 5 }), 0); assert.equal(revealDelta(strip, null), 0);
+});
+
+test('tablist: choosing a tab that is cut off scrolls the strip by the delta; a pretend nav without layout does nothing', () => {
+  const { nav, buttons } = pretend(['pano', 'ofis', 'akis', 'maliyet', 'settings']);
+  const tl = createTablist(nav);
+  assert.doesNotThrow(() => tl.select('ofis'));
+  nav.scrollLeft = 0;
+  nav.getBoundingClientRect = () => ({ left: 29, right: 291 });
+  buttons[4].getBoundingClientRect = () => ({ left: 270, right: 332 });
+  tl.select('settings');
+  assert.equal(nav.scrollLeft, 41);
+  buttons[1].getBoundingClientRect = () => ({ left: 60, right: 110 });
+  tl.select('ofis');
+  assert.equal(nav.scrollLeft, 41, 'a tab that is inside leaves the strip alone');
 });
