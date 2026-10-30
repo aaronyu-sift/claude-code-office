@@ -739,7 +739,7 @@ export function createOfis(root, ctx, opts = {}) {
     // every office of the building, vacant ones included, in slot order: the stable layout's state (tools/qa/office3d-qa.mjs)
     office() {
       const all = [...world.rooms.values(), ...(world.vacant || [])].sort((a, b) => a.slot - b.slot);
-      return { ...world.plan, minRooms: MIN_ROOMS_NOW, entryX: world.entryX, bounds: world.bounds, lounge: world.lounge ? { X: world.lounge.X, Z: world.lounge.Z, W: world.lounge.W, D: world.lounge.D, door: world.lounge.door, hall: world.lounge.hall } : null,
+      return { ...world.plan, minRooms: MIN_ROOMS_NOW, entryX: world.entryX, bounds: world.bounds, stubs: world.stubs || [], lounge: world.lounge ? { X: world.lounge.X, Z: world.lounge.Z, W: world.lounge.W, D: world.lounge.D, door: world.lounge.door, hall: world.lounge.hall } : null,
         halls: (world.halls || []).map(h => ({ z0: h.z0, z1: h.z1, lane: h.lane, open: h.open, x0: h.x0, x1: h.x1, row: h.row })),
         slots: all.map(r => ({ slot: r.slot, id: r.vacant ? null : r.id, vacant: r.vacant, tris: r.tris, cls: r.cls, cap: r.cap, X: r.X, Z: r.Z, W: r.W, D: r.D, door: r.door, hall: r.hall })) };
     },
@@ -1222,6 +1222,7 @@ export function createOfis(root, ctx, opts = {}) {
   function buildHalls(B, g, items, areas) {
     const T = WALL_T, H = WALL_H;
     world.lobby = null;
+    world.stubs = [];                                        // the paved paths from the arms' halls to the street (verification: tools/qa/office3d-qa.mjs walks them)
     const endWall = '#e8dcc5', endCap = '#5b4636', endWain = '#b98a5c';
     world.halls.forEach((h, hi) => {
       const lobby = hi === 0;                                // the reception stays in the first hall (the bar of the X): a bay added later never moves it
@@ -1262,6 +1263,7 @@ export function createOfis(root, ctx, opts = {}) {
       if (px1 - px0 > 0.1) {
         const half = hi === world.halls.length - 1 ? 1.35 : 0.95;                  // the last entrance is the wide one in the environment
         B.box((px0 + px1) / 2, -0.012 - 0.09, h.lane, px1 - px0, 0.18, 2 * half, '#d4d7dc');
+        world.stubs.push({ hall: hi, x0: px0, x1: px1, z0: h.lane - half, z1: h.lane + half });
       }
 
       // furniture along the back edge: keep the doors that open onto the hall clear

@@ -1,6 +1,6 @@
 // QA of the 3D scene's models and polish (public/js/ofis*.js): headless Chrome with software WebGL in a throw-away profile, the server against a fake
 // ~/.claude, one `CHECK <name> PASS|FAIL <detail>` line per check and a final `QA PASS` or `QA FAIL`.
-//   node tools/qa/office3d-qa.mjs [--only boot|budget|agents|fallback|stable|stable-layout|vacant|expand] [--shots <dir>] [--mutations [--group main|fallback|stable] [--mutation <words>]]
+//   node tools/qa/office3d-qa.mjs [--only boot|budget|agents|fallback|stable|stable-layout|vacant|expand|fit|walk] [--shots <dir>] [--mutations [--group main|fallback|stable|fit|walk] [--mutation <words>]]
 //
 //   3d-boot      the canvas is not blank, no console error, every model file the scene asks for came back 200, nothing leaves 127.0.0.1
 //   3d-fallback  models blocked, corrupt, missing or empty: the scene still draws, every piece that fell back says so once; ?assets=procedural asks for nothing
@@ -8,10 +8,15 @@
 //   3d-agents    every agent has a figure, and its colour shows on screen (the figure's own pixels, found by drawing with and without it)
 //   3d-stable-layout  3, 7 and 10 chats open, 4 close, others come, one sleeps and wakes: no office changes its rectangle, no chat its slot, no seated
 //                figure its place, a new chat takes the lowest free slot, and the camera is not refitted while the building stays the same
-//   3d-vacant    3 chats in the 10 offices (7 vacant): the building as it is used stays inside its budget (triangles, draw calls, rebuild time), and every
-//                vacant office costs a fraction of an office with a chat (a vacant office is a shell with a few bare things, no meshes of its own)
-//   3d-expand    a chat whose sub-agents outgrow its 6 desks grows its room inside its cell and nothing else changes; the 11th chat appends a row
-//                (the first ten offices, their chats and the sub-agents still walking stay as they are)
+//   3d-vacant    3 chats in the 11 offices of the X (8 vacant, and the hub plaza): the building as it is used stays inside its budget (triangles, draw
+//                calls, rebuild time), and every vacant office costs a fraction of an office with a chat (a shell with a few bare things, no meshes of its own)
+//   3d-expand    a chat whose sub-agents outgrow its 6 desks grows its room inside its cell and nothing else changes; the 11th chat takes the last office of
+//                the X (no change); the 12th chat adds a bay (two offices): the first eleven offices, the hub, the reception, their chats and the sub-agents
+//                still walking stay as they are, and the view refits once
+//   3d-fit       the X fills the window: at 1440 x 900 and 1920 x 1080 the fit zoom is at least FIT_GAIN above the two rows of before (measured with the
+//                same fixture: 21.41 and 26.2), the building covers at least FOOT_SHARE of the window and half of its own box, and the box is between 16:10 and 16:9
+//   3d-walk      a sub-agent of a chat in the bar, in the north arm and in the south arm comes in from the street side along its hall's lane, over the paved
+//                path (an arm's hall is shorter than the building) and the plinth only, and sits at its desk
 //
 // --mutations breaks the code in a copy of the repo, one line at a time, and runs the check that guards that line: every one must FAIL there
 // (a check that cannot fail guards nothing). Timing is the one thing a busy machine can bend: the rebuild time is the best of three, and a failing
@@ -21,13 +26,15 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { scenario3d, lookAt, o3, sleep, ROOT } from './harness3d.mjs';
 import { MANIFEST } from '../../public/js/ofis-rig.js';
+import { MIN_ROOMS, baysFor, officesIn } from '../../public/js/ofis-layout.js';
+import { MEASURE } from './map-measure.mjs';
 import { writeGlb } from '../models/strip-glb.mjs';
 
 const args = process.argv.slice(2);
 const val = f => { const i = args.indexOf('--' + f); return i >= 0 ? args[i + 1] : undefined; };
 const only = val('only'), shotsDir = val('shots');
 
-// ---- budgets. 3d-budget is the full building: 10 agents, which is 9 offices with a chat (one chat is asleep: it is on the shelf) and 1 vacant one.
+// ---- budgets. 3d-budget is the full building: 10 agents, which is 9 offices with a chat (one chat is asleep: it is on the shelf) and 2 vacant ones (the X has 11 offices).
 // The old limits (151k triangles, 120 ms) were set when a room had 3 desks and no lounge. Since the stable layout (public/js/ofis-layout.js) a
 // room with a chat has 6 desks and a lounge from the start, and a chat taking a vacant slot must build that full room: each of the 9 rooms costs
 // about 13k triangles (floor included), so 9 of them alone are 117k and the old limits cannot hold. Measured with vacant offices made cheap:
@@ -36,7 +43,7 @@ const only = val('only'), shotsDir = val('shots');
 // reading plus 15 percent: 9 of the 10 offices are full ones, so this building is not faster to build than before, and a loaded machine adds noise
 // (the time of the building as it is used is guarded by 3d-vacant). The models may weigh 1.3 MB (they weigh 1.15 MB).
 const BUDGET = { calls: 190, tris: 215000, rebuildMs: 220, modelBytes: 1.3e6 };
-// 3d-vacant is the building as it is used: 3 chats in the 10 offices, 7 of them vacant. The targets for it were 165k triangles and 100 ms. A vacant
+// 3d-vacant is the building as it is used: 3 chats in the 11 offices of the X, 8 of them vacant. The targets for it were 165k triangles and 100 ms. A vacant
 // office is a shell with a few bare desks, a plant and a sofa (about 1.1k triangles, one batch, no meshes of its own, one shared sign for all of
 // them): the scene takes 115k triangles and 63 draw calls, a rebuild takes 67 to 86 ms on a machine with a load of 30. The limits are the
 // measurement plus 10 percent (the time is the 100 ms of the target). A vacant office may cost at most 15 percent of an office with a chat (it
@@ -101,7 +108,7 @@ async function runMain(ctx) {
     const first = await page.evaluate(o3('o.rebuildMs')), best = Math.min(...rebuilds);
     const bytes = files.reduce((s, f) => s + f.bytes, 0);
     res.push(make('3d-budget', info.calls <= BUDGET.calls && info.tris <= BUDGET.tris && best <= BUDGET.rebuildMs && bytes <= BUDGET.modelBytes && files.length === KEYS.length + 1,
-      `10 agents (${S.expect} figures) at fit zoom: ${info.calls} draw calls (budget ${BUDGET.calls}), ${info.tris} triangles (${BUDGET.tris}), rebuild of the 10 offices (${mains.length} with a chat) ${rebuilds.map(r => r.toFixed(0)).join(', ')} ms, best ${best.toFixed(0)} (${BUDGET.rebuildMs}), `
+      `10 agents (${S.expect} figures) at fit zoom: ${info.calls} draw calls (budget ${BUDGET.calls}), ${info.tris} triangles (${BUDGET.tris}), rebuild of the 11 offices (${mains.length} with a chat) ${rebuilds.map(r => r.toFixed(0)).join(', ')} ms, best ${best.toFixed(0)} (${BUDGET.rebuildMs}), `
       + `${files.length} model files ${(bytes / 1e6).toFixed(2)} MB (${BUDGET.modelBytes / 1e6} MB), ${info.geos} geometries, ${info.tex} textures`));
     ctx.info = { info, rebuilds, bytes, files: files.length, first };
 
@@ -222,13 +229,20 @@ const MUTATIONS = [
   { name: 'a model path is wrong', file: 'public/js/ofis-rig.js', from: "desk: F + 'desk.glb'", to: "desk: F + 'deskk.glb'", group: 'main', fails: '3d-boot' },
   // the stable layout: each of these breaks one rule of public/js/ofis-layout.js or of the way ofis.js draws it
   { name: 'slots are not sticky: every chat is handed a slot again on every update', file: 'public/js/ofis-layout.js', from: 'const fresh = chats.filter(c => !slotOf.has(c.id))', to: 'const fresh = chats.filter(() => true)', group: 'stable', fails: ['3d-stable-layout', '3d-expand'] },
-  { name: 'an expansion repacks the rows: the row size follows the number of chats', file: 'public/js/ofis.js', from: 'const P = buildingPlan(plan.rows, slots.perRow, leads);', to: 'const P = buildingPlan(plan.rows, Math.max(slots.perRow, Math.ceil(list.length / 2)), leads);', group: 'stable', fails: '3d-expand' },
+  { name: 'an added bay recentres the building: every office shifts with the number of bays', file: 'public/js/ofis-layout.js', from: 'x0 = mm(c * PITCH), x1 = mm(x0 + CELL_W);', to: 'x0 = mm((c + bays * 0.01) * PITCH), x1 = mm(x0 + CELL_W);', group: 'stable', fails: '3d-expand' },
+  { name: 'the hub is given to a chat: slots do not skip it', file: 'public/js/ofis-layout.js', from: 'export const siteOfSlot = s => (s < LOUNGE_SITE ? s : s + 1);', to: 'export const siteOfSlot = s => s;', group: 'stable', fails: ['3d-stable-layout', '3d-expand'] },
+  { name: 'a hall that gains a bay moves its lane', file: 'public/js/ofis-layout.js', from: 'h.x0 = Math.min(h.x0, x0); h.x1 = Math.max(h.x1, x1); h.bays++;', to: 'h.x0 = Math.min(h.x0, x0); h.x1 = Math.max(h.x1, x1); h.bays++; h.lane = mm(h.lane + 0.01 * h.bays);', group: 'stable', fails: ['3d-stable-layout', '3d-expand'] },
   { name: 'the camera refits at every rebuild, not only when the building changed', file: 'public/js/ofis.js', from: 'const changed = key !== fitKey;', to: 'const changed = true;', group: 'stable', fails: ['3d-stable-layout', '3d-expand'] },
   { name: 'a room is built for 3 desks: the fourth sub-agent changes it', file: 'public/js/ofis-layout.js', from: 'export const BASE_CLS = 1;', to: 'export const BASE_CLS = 0;', group: 'stable', fails: '3d-stable-layout' },
   // the vacant office: cheap, so the building stays light while few chats are open
   { name: 'a vacant office is furnished and drawn like an office with a chat', file: 'public/js/ofis.js', from: 'it.vacant ? buildVacant(B, g, it) : buildRoom(B, g, it)', to: 'it.vacant ? Object.assign(buildRoom(B, g, { ...it, vacant: false }), { vacant: true }) : buildRoom(B, g, it)', group: 'stable', fails: '3d-vacant' },
   { name: 'a vacant office has its own door leaf, floor and sign meshes again', file: 'public/js/ofis.js', from: 'buildShell(B, g, X, Z, W, D, th, it.door, true)', to: 'buildShell(B, g, X, Z, W, D, th, it.door, false)', group: 'stable', fails: '3d-vacant' },
   { name: 'a rebuild seats the sub-agents that are still walking', file: 'public/js/ofis.js', from: "if (c.mode === 'walk' && c.path && (c.slot < 0", to: "if (false && c.mode === 'walk' && c.path && (c.slot < 0", group: 'stable', fails: '3d-expand' },
+  // the compact map: the fit, and the way in
+  { name: 'the fit frames the box around the whole plan, not the footprint', file: 'public/js/ofis.js', from: 'for (const r of [...(world.footprint || [b]), ...(world.lots || [])])', to: 'for (const r of [b, ...(world.lots || [])])', group: 'fit', fails: '3d-fit' },
+  { name: 'one plinth around the whole plan: the corners between the arms are paved and framed', file: 'public/js/ofis-layout.js', from: '  const bounds = { x0: Infinity, x1: -Infinity, z0: Infinity, z1: -Infinity };', to: '  { const rs = plinth.splice(0); plinth.push({ x0: Math.min(...rs.map(r => r.x0)), x1: Math.max(...rs.map(r => r.x1)), z0: Math.min(...rs.map(r => r.z0)), z1: Math.max(...rs.map(r => r.z1)), hall: 0 }); }\n  const bounds = { x0: Infinity, x1: -Infinity, z0: Infinity, z1: -Infinity };', group: 'fit', fails: '3d-fit' },
+  { name: 'the walk starts beside the lane instead of on it', file: 'public/js/ofis.js', from: 'const p = [V(world.entryX, lane), V(room.doorX, lane)];', to: 'const p = [V(world.entryX, lane + 2.2), V(room.doorX, lane)];', group: 'walk', fails: '3d-walk' },
+  { name: 'the arms have no path to the street', file: 'public/js/ofis.js', from: 'if (px1 - px0 > 0.1) {', to: 'if (false && px1 - px0 > 0.1) {', group: 'walk', fails: '3d-walk' },
 ];
 
 async function runMutations() {
@@ -241,7 +255,7 @@ async function runMutations() {
       const file = join(dir, m.file), text = readFileSync(file, 'utf8');
       if (!text.includes(m.from)) { rows.push({ m, caught: false, detail: 'the line to break was not found' }); continue; }
       writeFileSync(file, text.replace(m.from, m.to));
-      const res = await ({ fallback: runFallback, stable: runStable }[m.group] || runMain)({ root: dir });
+      const res = await ({ fallback: runFallback, stable: runStable, fit: runFit, walk: runWalk }[m.group] || runMain)({ root: dir });
       const want = [].concat(m.fails), got = want.map(n => res.find(x => x.name === n));
       rows.push({ m, caught: got.every(r => r && !r.ok), detail: got.map((r, i) => (r ? `${want[i]} ${r.ok ? 'PASSED' : 'FAILED'}: ${r.detail.slice(r.ok ? 0 : r.detail.indexOf('PROBLEMS'), (r.ok ? 0 : r.detail.indexOf('PROBLEMS')) + 230)}` : `${want[i]} did not run`)).join(' || ') });
     } finally { rmSync(dir, { recursive: true, force: true }); }
@@ -259,6 +273,7 @@ async function runMutations() {
 const CHAT_STATUS = ['working', 'working', 'waiting', 'working', 'working', 'ask', 'working', 'waiting', 'working', 'waiting', 'working', 'dormant', 'working', 'waiting', 'working', 'working'];
 const WALK_SPEED = 2.2;                                  // units per second (WALK in ofis.js)
 const MANY = 3;                                          // the chat with nine working sub-agents: two from the start, four more within its 6 desks, three more beyond them
+const BAYS = baysFor(MIN_ROOMS), OFFICES = officesIn(BAYS);      // the X: six bays, eleven offices (the twelfth cell is the hub, reserved for a lounge)
 const rectKey = s => [...[s.X, s.Z, s.W, s.D].map(v => +v.toFixed(3)), s.door, s.hall].join(',');            // to the millimetre
 
 async function runStable(ctx) {
@@ -314,6 +329,11 @@ async function runStable(ctx) {
         if (!grow.includes(i) && a.office.slots[i].cap !== b.office.slots[i].cap) bad.push(`${label}: office ${i} changed its desks`);
       }
       if (JSON.stringify(a.office.halls[0]) !== JSON.stringify(b.office.halls[0])) bad.push(`${label}: the first hall (the reception) changed`);
+      if (JSON.stringify(a.office.lounge) !== JSON.stringify(b.office.lounge)) bad.push(`${label}: the hub changed`);
+      a.office.halls.forEach((h, i) => {
+        const g = b.office.halls[i];
+        if (!g || h.z0 !== g.z0 || h.z1 !== g.z1 || h.lane !== g.lane || g.x0 > h.x0 + 1e-9 || g.x1 < h.x1 - 1e-9) bad.push(`${label}: hall ${i} moved (a hall may only get longer)`);
+      });
       const sb = slotOf(b);
       for (const [cid, s] of slotOf(a)) if (sb.has(cid)) { stats.kept++; if (sb.get(cid) !== s) bad.push(`${label}: chat ${cid.slice(0, 6)} moved from slot ${s} to ${sb.get(cid)}`); }
       const fb = seated(b);
@@ -329,25 +349,25 @@ async function runStable(ctx) {
 
     // ---- 3 chats
     await settle(3);
-    // the building as it is used: 3 of 10 offices have a chat (3d-vacant); the rebuilds change no layout, so the reading below is taken after them
+    // the building as it is used: 3 of 11 offices have a chat (3d-vacant); the rebuilds change no layout, so the reading below is taken after them
     const info3 = await page.evaluate(o3('o.draw()'));
     const rebuilds3 = [];
     for (let i = 0; i < 3; i++) rebuilds3.push(await page.evaluate(o3('o.rebuildNow()')));
     const best3 = Math.min(...rebuilds3);
     const s3 = await settle(3);
     const first = s3.office.slots.map(rectKey);
-    if (s3.office.slots.length !== 10 || s3.office.rows !== 2 || vacant(s3) !== 7) problems.push(`3 chats: ${s3.office.slots.length} offices in ${s3.office.rows} rows, ${vacant(s3)} vacant (want 10 in 2, 7 vacant)`);
+    if (s3.office.slots.length !== OFFICES || s3.office.bays !== BAYS || vacant(s3) !== OFFICES - 3 || !s3.office.lounge) problems.push(`3 chats: ${s3.office.slots.length} offices in ${s3.office.bays} bays, ${vacant(s3)} vacant, hub ${s3.office.lounge ? 'reserved' : 'missing'} (want ${OFFICES} in ${BAYS}, ${OFFICES - 3} vacant, a hub)`);
     if (![0, 1, 2].every(i => slotOf(s3).get(id(i)) === i)) problems.push(`3 chats: slots ${[0, 1, 2].map(i => slotOf(s3).get(id(i)))} (want 0,1,2)`);
     const occTris = s3.office.slots.filter(x => !x.vacant).map(x => x.tris), vacTris = s3.office.slots.filter(x => x.vacant).map(x => x.tris);
     const heaviestVacant = Math.max(...vacTris), lightestOccupied = Math.min(...occTris);
     const vacantProblems = [];
-    if (occTris.length !== 3 || vacTris.length !== 7) vacantProblems.push(`${occTris.length} offices with a chat and ${vacTris.length} vacant (want 3 and 7)`);
+    if (occTris.length !== 3 || vacTris.length !== OFFICES - 3) vacantProblems.push(`${occTris.length} offices with a chat and ${vacTris.length} vacant (want 3 and ${OFFICES - 3})`);
     if (info3.tris > TYPICAL.tris) vacantProblems.push(`${info3.tris} triangles (budget ${TYPICAL.tris})`);
     if (info3.calls > TYPICAL.calls) vacantProblems.push(`${info3.calls} draw calls (budget ${TYPICAL.calls})`);
     if (best3 > TYPICAL.rebuildMs) vacantProblems.push(`a rebuild takes ${best3.toFixed(0)} ms at best (budget ${TYPICAL.rebuildMs})`);
     if (!(heaviestVacant <= lightestOccupied * TYPICAL.lighter)) vacantProblems.push(`a vacant office costs ${heaviestVacant} triangles, an office with a chat ${lightestOccupied} (a vacant one may cost at most ${TYPICAL.lighter * 100} percent)`);
     res.push(make('3d-vacant', S.ready.ok && vacantProblems.length === 0,
-      `3 chats in 10 offices (7 vacant): ${info3.tris} triangles (budget ${TYPICAL.tris}), ${info3.calls} draw calls (${TYPICAL.calls}), rebuild ${rebuilds3.map(r => r.toFixed(0)).join(', ')} ms, best ${best3.toFixed(0)} (${TYPICAL.rebuildMs}); `
+      `3 chats in ${OFFICES} offices (${OFFICES - 3} vacant): ${info3.tris} triangles (budget ${TYPICAL.tris}), ${info3.calls} draw calls (${TYPICAL.calls}), rebuild ${rebuilds3.map(r => r.toFixed(0)).join(', ')} ms, best ${best3.toFixed(0)} (${TYPICAL.rebuildMs}); `
       + `an office costs ${Math.round(lightestOccupied)} to ${Math.round(Math.max(...occTris))} triangles with a chat and ${Math.round(Math.min(...vacTris))} to ${Math.round(heaviestVacant)} vacant (${(heaviestVacant / lightestOccupied * 100).toFixed(0)} percent of the lightest office with a chat, at most ${TYPICAL.lighter * 100})`
       + (vacantProblems.length ? '; PROBLEMS: ' + vacantProblems.join(' | ') : '')));
     // ---- 7 chats
@@ -359,14 +379,15 @@ async function runStable(ctx) {
     [7, 8, 9].forEach(open);
     const s10 = await settle(10);
     problems.push(...compare(s7, s10, '7 -> 10 chats'));
-    if (s10.office.slots.length !== 10 || vacant(s10) !== 0 || s10.office.rows !== 2) problems.push(`10 chats: ${s10.office.slots.length} offices, ${vacant(s10)} vacant, ${s10.office.rows} rows (want 10, 0, 2)`);
+    if (s10.office.slots.length !== OFFICES || vacant(s10) !== OFFICES - 10 || s10.office.bays !== BAYS) problems.push(`10 chats: ${s10.office.slots.length} offices, ${vacant(s10)} vacant, ${s10.office.bays} bays (want ${OFFICES}, ${OFFICES - 10}, ${BAYS})`);
     // ---- four chats close: their offices turn vacant and nobody else moves
     const closing = [1, 4, 6, 8];
     closing.forEach(i => fx.closeSession(id(i)));
     const s6 = await settle(6);
     problems.push(...compare(s10, s6, '10 -> 6 chats (4 closed)'));
     const free = s6.office.slots.filter(s => s.vacant).map(s => s.slot).join();
-    if (free !== closing.join()) problems.push(`4 closed: vacant slots ${free} (want ${closing.join()})`);
+    const wantFree = [...closing, ...Array.from({ length: OFFICES - 10 }, (_, i) => 10 + i)].join();       // the four that closed, and the offices no chat ever took
+    if (free !== wantFree) problems.push(`4 closed: vacant slots ${free} (want ${wantFree})`);
     // ---- the next chat takes the lowest free slot
     open(10);
     const s7b = await settle(7);
@@ -386,8 +407,8 @@ async function runStable(ctx) {
     [12, 13].forEach(open);
     const sTen = await settle(10);
     problems.push(...compare(s8, sTen, '8 -> 10 chats'));
-    if (sTen.office.slots.length !== 10 || vacant(sTen) !== 0 || slotOf(sTen).get(id(12)) !== 6 || slotOf(sTen).get(id(13)) !== 8) {
-      problems.push(`10 chats again: ${sTen.office.slots.length} offices, ${vacant(sTen)} vacant, slots ${slotOf(sTen).get(id(12))},${slotOf(sTen).get(id(13))} (want 10, 0, 6, 8)`);
+    if (sTen.office.slots.length !== OFFICES || vacant(sTen) !== OFFICES - 10 || slotOf(sTen).get(id(12)) !== 6 || slotOf(sTen).get(id(13)) !== 8) {
+      problems.push(`10 chats again: ${sTen.office.slots.length} offices, ${vacant(sTen)} vacant, slots ${slotOf(sTen).get(id(12))},${slotOf(sTen).get(id(13))} (want ${OFFICES}, ${OFFICES - 10}, 6, 8)`);
     }
     // ---- sub-agents join a chat that has desks free (2 to 6 of its 6): nothing is rebuilt and nothing moves
     openSubs([2, 3, 4, 5]);
@@ -400,42 +421,127 @@ async function runStable(ctx) {
       + `camera refits ${s3.fits} -> ${sSub.fits} at zoom ${s3.zoom.toFixed(2)} -> ${sSub.zoom.toFixed(2)}; new chats took the lowest free slots; a sleeping chat had no room and took slot ${slotOf(s8).get(id(11))} on waking`
       + (problems.length ? '; PROBLEMS: ' + problems.slice(0, 4).join(' | ') + (problems.length > 4 ? ` (and ${problems.length - 4} more)` : '') : '')));
 
-    // ---- 3d-expand: a chat whose sub-agents outgrow its room, then the 11th chat
+    // ---- 3d-expand: the 11th chat takes the last office (no change), a chat whose sub-agents outgrow its room grows it inside its cell, the 12th chat adds a bay
     const ex = [];
-    const before = sSub, desks0 = room3(before).cap;
-    openSubs([6, 7, 8]);
-    const sGrow = await settle(10, st => room3(st).cap > desks0);
-    ex.push(...compare(before, sGrow, 'a chat with nine sub-agents', { grow: [room3(before).slot] }));
-    if (room3(sGrow).cap !== 12 || room3(sGrow).cls !== 2) ex.push(`its room has ${room3(sGrow).cap} desks in class ${room3(sGrow).cls} (want 12 and 2)`);
-    if (sGrow.office.rows !== 2) ex.push(`${sGrow.office.rows} rows (want 2: no chat was added)`);
-    const growWait = await settle(10, st => subsOf3(st) >= 9);
-    if (subsOf3(growWait) !== 9) ex.push(`${subsOf3(growWait)} figures for the nine sub-agents`);
-    // the 11th chat: a row is appended, the first ten offices stay
-    const tenSlots = slotOf(growWait);
     open(14);
     const s11 = await settle(11);
-    ex.push(...compare(growWait, s11, '10 -> 11 chats', { same: false }));
-    if (s11.office.rows !== 3 || s11.office.slots.length !== 15 || vacant(s11) !== 4) ex.push(`11 chats: ${s11.office.slots.length} offices in ${s11.office.rows} rows, ${vacant(s11)} vacant (want 15 in 3, 4 vacant)`);
-    if (slotOf(s11).get(id(14)) !== 10) ex.push(`the 11th chat took slot ${slotOf(s11).get(id(14))} (want 10, the first office of the new row)`);
-    for (const [cid, sl] of tenSlots) if (slotOf(s11).get(cid) !== sl) ex.push(`chat ${cid.slice(0, 6)} lost its slot ${sl}`);
-    if (s11.fits !== growWait.fits + 1 || !(s11.zoom < growWait.zoom)) ex.push(`the view did not refit once to the bigger building (refits ${growWait.fits} -> ${s11.fits}, zoom ${growWait.zoom.toFixed(2)} -> ${s11.zoom.toFixed(2)})`);
-    if (subsOf3(s11) !== 9) ex.push(`${subsOf3(s11)} figures of the nine sub-agents after the rebuild`);
+    ex.push(...compare(sSub, s11, '10 -> 11 chats (the last office of the X)'));
+    if (s11.office.bays !== BAYS || s11.office.slots.length !== OFFICES || vacant(s11) !== OFFICES - 11 || slotOf(s11).get(id(14)) !== OFFICES - 1) {
+      ex.push(`11 chats: ${s11.office.slots.length} offices in ${s11.office.bays} bays, ${vacant(s11)} vacant, the 11th chat in slot ${slotOf(s11).get(id(14))} (want ${OFFICES} in ${BAYS}, ${OFFICES - 11}, ${OFFICES - 1}: no bay is added for it)`);
+    }
+    const before = s11, desks0 = room3(before).cap;
+    openSubs([6, 7, 8]);
+    const sGrow = await settle(11, st => room3(st).cap > desks0);
+    ex.push(...compare(before, sGrow, 'a chat with nine sub-agents', { grow: [room3(before).slot] }));
+    if (room3(sGrow).cap !== 12 || room3(sGrow).cls !== 2) ex.push(`its room has ${room3(sGrow).cap} desks in class ${room3(sGrow).cls} (want 12 and 2)`);
+    if (sGrow.office.bays !== BAYS) ex.push(`${sGrow.office.bays} bays (want ${BAYS}: no chat was added)`);
+    const growWait = await settle(11, st => subsOf3(st) >= 9);
+    if (subsOf3(growWait) !== 9) ex.push(`${subsOf3(growWait)} figures for the nine sub-agents`);
+    // the 12th chat: a bay (two offices) is added, the first eleven offices stay
+    const elevenSlots = slotOf(growWait);
+    open(15);
+    const s12 = await settle(12);
+    ex.push(...compare(growWait, s12, '11 -> 12 chats', { same: false }));
+    if (s12.office.bays !== BAYS + 1 || s12.office.slots.length !== OFFICES + 2 || vacant(s12) !== 1) ex.push(`12 chats: ${s12.office.slots.length} offices in ${s12.office.bays} bays, ${vacant(s12)} vacant (want ${OFFICES + 2} in ${BAYS + 1}, 1 vacant)`);
+    if (slotOf(s12).get(id(15)) !== OFFICES) ex.push(`the 12th chat took slot ${slotOf(s12).get(id(15))} (want ${OFFICES}, the first office of the new bay)`);
+    for (const [cid, sl] of elevenSlots) if (slotOf(s12).get(cid) !== sl) ex.push(`chat ${cid.slice(0, 6)} lost its slot ${sl}`);
+    if (s12.fits !== growWait.fits + 1 || s12.zoom > growWait.zoom + 1e-9) ex.push(`the view did not refit once to the bigger building (it frames the box of the footprint: the same zoom is possible when only its height grew) (refits ${growWait.fits} -> ${s12.fits}, zoom ${growWait.zoom.toFixed(2)} -> ${s12.zoom.toFixed(2)})`);
+    if (subsOf3(s12) !== 9) ex.push(`${subsOf3(s12)} figures of the nine sub-agents after the rebuild`);
     // the sub-agents still walking in when the building grew must go on walking from where they were (a rebuild that seated them would jump them to their desks)
-    const walkers = growWait.figs.filter(f => f.mode === 'walk' && s11.figs.some(g => g.id === f.id));
-    const maxStep = WALK_SPEED * (s11.t - growWait.t) / 1000 * 1.5 + 0.6;
-    const jumped = walkers.filter(f => { const g = s11.figs.find(x => x.id === f.id); return Math.hypot(g.x - f.x, g.z - f.z) > maxStep; });
-    if (!walkers.length) ex.push('no sub-agent was walking when the 11th chat came: the walkers check had nothing to look at');
+    const walkers = growWait.figs.filter(f => f.mode === 'walk' && s12.figs.some(g => g.id === f.id));
+    const maxStep = WALK_SPEED * (s12.t - growWait.t) / 1000 * 1.5 + 0.6;
+    const jumped = walkers.filter(f => { const g = s12.figs.find(x => x.id === f.id); return Math.hypot(g.x - f.x, g.z - f.z) > maxStep; });
+    if (!walkers.length) ex.push('no sub-agent was walking when the 12th chat came: the walkers check had nothing to look at');
     if (jumped.length) ex.push(`${jumped.length} of ${walkers.length} walking sub-agents jumped when the building grew`);
     await sleep(2500);
     const sLater = await read();
-    ex.push(...compare(s11, sLater, 'a quiet moment after the expansion'));
+    ex.push(...compare(s12, sLater, 'a quiet moment after the expansion'));
     res.push(make('3d-expand', S.ready.ok && ex.length === 0,
-      `a chat went from 6 to 9 working sub-agents (it has 6 desks): its room grew ${desks0} -> ${room3(sGrow).cap} desks inside its cell (${rectKey(room3(sGrow))} unchanged), no other office, chat or seated figure changed and the view did not refit; `
-      + `the 11th chat took slot ${slotOf(s11).get(id(14))}: ${s11.office.slots.length} offices in ${s11.office.rows} rows, the first ten offices and their ${tenSlots.size} chats unchanged, ${subsOf3(s11)} sub-agent figures kept, `
-      + `${walkers.length} walkers went on walking, one refit (zoom ${growWait.zoom.toFixed(2)} -> ${s11.zoom.toFixed(2)})`
+      `the 11th chat took the last office (slot ${slotOf(s11).get(id(14))} of ${OFFICES}, no bay added, nothing moved); a chat went from 6 to 9 working sub-agents (it has 6 desks): its room grew ${desks0} -> ${room3(sGrow).cap} desks inside its cell (${rectKey(room3(sGrow))} unchanged), no other office, chat or seated figure changed and the view did not refit; `
+      + `the 12th chat took slot ${slotOf(s12).get(id(15))}: ${s12.office.slots.length} offices in ${s12.office.bays} bays, the first ${OFFICES} offices, the hub, the reception and their ${elevenSlots.size} chats unchanged, ${subsOf3(s12)} sub-agent figures kept, `
+      + `${walkers.length} walkers went on walking, one refit (zoom ${growWait.zoom.toFixed(2)} -> ${s12.zoom.toFixed(2)})`
       + (ex.length ? '; PROBLEMS: ' + ex.slice(0, 4).join(' | ') + (ex.length > 4 ? ` (and ${ex.length - 4} more)` : '') : '')));
   } finally { await S.done(); }
   return res;
+}
+
+// ---- 3d-fit: how much of the window the building uses. The two rows of five (the layout before the X) were measured with this very fixture and harness
+// (tools/qa/office3d-map.mjs --root <the commit before>): the fit zoom with 3 chats and no shelf card, and with 10 chats (one asleep: the shelf card is open
+// and takes the right 322 px at 1440 wide). The X must fit at least FIT_GAIN above them (it measures +17 and +19 percent), the building itself must cover
+// FOOT_SHARE of the window (45 and 42 percent; two rows covered 28 and 26) and half of its own box (53; two rows 32), and the box must keep the shape of a
+// wide window (1.7 for 1; 16:10 is 1.6 and 16:9 is 1.78).
+const OLD_FIT = { '1440x900x3': { zoom: 21.41, foot: 0.277 }, '1920x1080x3': { zoom: 26.2, foot: 0.26 }, '1440x900x10': { zoom: 16.84, foot: 0.172 }, '1920x1080x10': { zoom: 24.27, foot: 0.223 } };
+const FIT_GAIN = 1.15, FOOT_SHARE = 0.4, FOOT_GAIN_SHELF = 1.4, FILL_MIN = 0.5, ASPECT = [1.5, 1.8];
+
+async function runFit(ctx) {
+  const rows = [], problems = [];
+  for (const [w, h, n] of [[1440, 900, 3], [1920, 1080, 3], [1440, 900, 10], [1920, 1080, 10]]) {
+    const S = await scenario3d(n, { tag: `fit${w}n${n}`, root: ctx.root, width: w, height: h });
+    try {
+      await sleep(700);
+      const m = await S.page.evaluate(o3(MEASURE)), old = OLD_FIT[`${w}x${h}x${n}`], gain = m.zoom / old.zoom;
+      rows.push({ w, h, n, m, gain });
+      const tag = `${w}x${h} with ${n} chats`;
+      if (!S.ready.ok) problems.push(`${tag}: the scene did not become ready`);
+      if (!m.autoFit) problems.push(`${tag}: the view is not the automatic fit`);
+      if (gain < FIT_GAIN) problems.push(`${tag}: fit zoom ${m.zoom} is ${((gain - 1) * 100).toFixed(0)} percent above the two rows' ${old.zoom} (need ${((FIT_GAIN - 1) * 100).toFixed(0)})`);
+      if (n === 3 && m.footShare < FOOT_SHARE) problems.push(`${tag}: the building covers ${(m.footShare * 100).toFixed(0)} percent of the window (need ${FOOT_SHARE * 100})`);
+      if (n === 10 && m.footShare < old.foot * FOOT_GAIN_SHELF) problems.push(`${tag}: the building covers ${(m.footShare * 100).toFixed(0)} percent of the window, two rows covered ${(old.foot * 100).toFixed(0)} (need ${FOOT_GAIN_SHELF} times)`);
+      if (m.fill < FILL_MIN) problems.push(`${tag}: the building fills ${(m.fill * 100).toFixed(0)} percent of its box (need ${FILL_MIN * 100})`);
+      if (m.aspect < ASPECT[0] || m.aspect > ASPECT[1]) problems.push(`${tag}: its box is ${m.aspect} wide for 1 high (want ${ASPECT.join(' to ')})`);
+      if (m.offices !== OFFICES) problems.push(`${tag}: ${m.offices} offices (want ${OFFICES})`);
+    } finally { await S.done(); }
+  }
+  return [make('3d-fit', problems.length === 0,
+    rows.map(r => `${r.w}x${r.h}, ${r.n} chats: fit zoom ${r.m.zoom} (two rows ${OLD_FIT[`${r.w}x${r.h}x${r.n}`].zoom}, +${((r.gain - 1) * 100).toFixed(0)} percent), building covers ${(r.m.footShare * 100).toFixed(0)} percent of the window (two rows ${(OLD_FIT[`${r.w}x${r.h}x${r.n}`].foot * 100).toFixed(0)}), fills ${(r.m.fill * 100).toFixed(0)} percent of its box, box ${r.m.boxW}x${r.m.boxH} px = ${r.m.aspect} wide`).join('; ')
+    + ` (need +${((FIT_GAIN - 1) * 100).toFixed(0)} percent zoom, ${FOOT_SHARE * 100} percent covered with 3 chats, ${FILL_MIN * 100} percent of its box, aspect ${ASPECT.join(' to ')})`
+    + (problems.length ? '; PROBLEMS: ' + problems.slice(0, 4).join(' | ') + (problems.length > 4 ? ` (and ${problems.length - 4} more)` : '') : ''))];
+}
+
+// ---- 3d-walk: a sub-agent in the bar, the north arm and the south arm walks in from the street side. Its walk is replayed from the entrance (s.replayEnter);
+// every few frames the figure is read: the first reading is at the entrance on the hall's lane, until the door it stays on the lane, every reading is on paved
+// ground (the plinth under the building or the path from an arm's hall to the street, o.office().stubs), and it ends on the desk it started from.
+async function runWalk(ctx) {
+  const S = await scenario3d(10, { tag: 'walk', root: ctx.root });
+  const problems = [], notes = [];
+  try {
+    const { page } = S;
+    if (!S.ready.ok) problems.push('the scene did not become ready');
+    const info = await page.evaluate(o3('({ office: o.office(), foot: o.footprint(), subs: s.subs(), figs: o.figures() })'));
+    const hallOf = new Map(info.office.slots.filter(r => r.id).map(r => [r.id, r.hall]));
+    const seated = info.subs.filter(x => x.mode === 'seated' && hallOf.has(x.room));
+    const pick = [];
+    for (let h = 0; h < info.office.halls.length; h++) { const c = seated.find(x => hallOf.get(x.room) === h); if (c) pick.push({ id: c.id, hall: h, room: c.room }); else problems.push(`no sub-agent sits in hall ${h} (the bar and the two arms each have a chat with one)`); }
+    const at0 = new Map(info.figs.map(f => [f.id, [f.x, f.z]]));
+    const rect = new Map(info.office.slots.filter(r => r.id).map(r => [r.id, r]));
+    for (const w of pick) if (!(await page.evaluate(o3(`s.replayEnter(${JSON.stringify(w.id)})`)))) problems.push(`hall ${w.hall}: the walk could not be replayed`);
+    const trace = new Map(pick.map(w => [w.id, []]));
+    const t0 = Date.now();
+    while (Date.now() - t0 < 60000) {
+      const figs = await page.evaluate(o3('o.figures().map(f => ({ id: f.id, mode: f.mode, x: f.x, z: f.z }))'));
+      for (const w of pick) { const f = figs.find(x => x.id === w.id); if (f) trace.get(w.id).push(f); }
+      if (pick.every(w => { const t = trace.get(w.id); return t.length > 3 && t[t.length - 1].mode === 'seated'; })) break;
+      await sleep(120);
+    }
+    const E = info.office.entryX, onPlinth = (x, z, hall) => info.foot.some(r => x >= r.x0 - 0.05 && x <= r.x1 + 0.05 && z >= r.z0 && z <= r.z1)
+      || info.office.stubs.some(r => r.hall === hall && x >= r.x0 - 0.05 && x <= r.x1 + 0.05 && z >= r.z0 && z <= r.z1);
+    for (const w of pick) {
+      const t = trace.get(w.id), hall = info.office.halls[w.hall], r = rect.get(w.room), doorX = r.X + r.W - 1.0, seat = at0.get(w.id);
+      const tag = `hall ${w.hall} (${w.hall === 0 ? 'bar' : hall.row < 0 ? 'north arm' : 'south arm'})`;
+      if (t.length < 4) { problems.push(`${tag}: the walk was not seen`); continue; }
+      const first = t[0], last = t[t.length - 1];
+      if (first.x < E - 1.2 || Math.abs(first.z - hall.lane) > 0.7) problems.push(`${tag}: the walk starts at (${first.x.toFixed(1)}, ${first.z.toFixed(1)}), not at the entrance (${E.toFixed(1)}, lane ${hall.lane.toFixed(1)})`);
+      const lawn = t.filter(f => !onPlinth(f.x, f.z, w.hall));
+      if (lawn.length) problems.push(`${tag}: ${lawn.length} of ${t.length} readings are off the pavement, first at (${lawn[0].x.toFixed(1)}, ${lawn[0].z.toFixed(1)})`);
+      const wander = t.filter(f => f.x > doorX + 0.9 && Math.abs(f.z - hall.lane) > 0.7);
+      if (wander.length) problems.push(`${tag}: ${wander.length} readings before the door are off the lane (first at z ${wander[0].z.toFixed(1)}, lane ${hall.lane.toFixed(1)})`);
+      if (last.mode !== 'seated' || Math.hypot(last.x - seat[0], last.z - seat[1]) > 0.1) problems.push(`${tag}: it ends ${last.mode} at (${last.x.toFixed(1)}, ${last.z.toFixed(1)}), its desk is (${seat[0].toFixed(1)}, ${seat[1].toFixed(1)})`);
+      const stub = info.office.stubs.find(x => x.hall === w.hall);
+      notes.push(`${tag}: ${t.length} readings from x ${first.x.toFixed(1)} to the door ${doorX.toFixed(1)}${stub ? `, ${(stub.x1 - stub.x0).toFixed(1)} m of it on the paved path` : ''}`);
+    }
+    if (pick.length < 3) problems.push(`only ${pick.length} halls had a sub-agent to replay`);
+  } finally { await S.done(); }
+  return [make('3d-walk', problems.length === 0, `${notes.join('; ')}${problems.length ? '; PROBLEMS: ' + problems.slice(0, 4).join(' | ') + (problems.length > 4 ? ` (and ${problems.length - 4} more)` : '') : ''}`)];
 }
 
 // ---- main
@@ -450,6 +556,8 @@ if (args.includes('--mutations')) {
 }
 if (!only || ['boot', 'budget', 'agents'].includes(only)) for (const r of await runMain(ctx)) if (!only || r.name === '3d-' + only) show(r);
 if (!only || only === 'fallback') for (const r of await runFallback(ctx)) show(r);
+if (!only || only === 'fit') for (const r of await runFit(ctx)) show(r);
+if (!only || only === 'walk') for (const r of await runWalk(ctx)) show(r);
 if (!only || ['stable', 'stable-layout', 'vacant', 'expand'].includes(only)) for (const r of await runStable(ctx)) if (!only || only === 'stable' || r.name === '3d-' + only) show(r);   // one scene serves the three
 const bad = report.filter(r => !r.ok);
 console.log(bad.length ? `QA FAIL (${bad.length} of ${report.length} checks)` : `QA PASS (${report.length} checks)`);
