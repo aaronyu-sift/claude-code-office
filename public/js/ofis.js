@@ -28,6 +28,7 @@ import {
 import { boardName, boardProject, boardBadges, fitName } from './board-text.js';
 import { createLounge } from './ofis-lounge.js';
 import { roomLights } from './ofis-presence.js';
+import { createPacer, LABEL_WAKE_MS } from './ofis-pace.js';
 
 // Models (ofis-assets.js has loaded them before this module runs): a piece that did not load is missing from PK and the procedural shape
 // below is drawn in its place. POLISH is the procedural polish: occlusion baked into the room batch, a noise floor, tone mapping, contact
@@ -46,7 +47,6 @@ const SIGN_PX = 288;                      // sign texture height in pixels (for 
 const SIGN_FONT = '"Segoe UI Variable Text", "Segoe UI", system-ui, sans-serif';
 const SIGN_FONT_D = '"Segoe UI Variable Display", "Segoe UI", system-ui, sans-serif';
 const DOOR_W = 0.9, DOOR_H = 1.72;
-const FRAME_MS = 1000 / 30;
 const VIEW = new THREE.Vector3(1, 0.9, 1).normalize();
 const LIGHT = new THREE.Vector3(0.55, 1, 0.8).normalize();
 const YELLOW = '#fab219';
@@ -412,6 +412,7 @@ export function createOfis(root, ctx, opts = {}) {
     camera.up.set(0, 1, 0);
     camera.lookAt(focus);
     camera.updateMatrixWorld();
+    pacer.wake(performance.now());                          // every pan, zoom, fit and resize is motion
     ui.syncZoom(zoom, zMin, zMax);
   }
 
@@ -436,6 +437,11 @@ export function createOfis(root, ctx, opts = {}) {
   // ---------------------------------------------------------- state
 
   let visible = false, raf = 0, lastT = 0, resized = true, instantNext = true;
+  // when a frame is drawn (ofis-pace.js, docs/pacing.md): the display's own rate while something moves or somebody interacts, 30 fps when nothing does, 15 fps after a minute of nothing.
+  // `busy` and `casters` are set in step() by the figures, the doors and the lounge (paceFigures, paceDoors, paceLounge): busy = something moved in this frame, casters = something that
+  // casts a shadow did (the shadow map is drawn again on motion, not every 12th frame)
+  const pacer = createPacer({ softwareGL: SOFTWARE_GL });
+  let busy = false, casters = false;
   let floorJobs = [], rebuildMs = 0;
   const world = { group: null, rooms: new Map(), pick: [], screens: [], screenMesh: null, bounds: null, sig: '' };
   const roomState = new Map();   // session id → { cls, low }
@@ -1435,7 +1441,8 @@ export function createOfis(root, ctx, opts = {}) {
    *     return true to own that drag, and it no longer pans the view; its moves then come as 'drag' and its end as
    *     'drop' (released) or 'cancel'. A press the module did not own ends with 'up' (before any 'click').
    * api.shake(px): shakes the camera by about px screen pixels; decays in about half a second, calls add up.
-   * api.wake(): counts as user activity, so the adaptive frame rate stays at full speed (call it while an animation runs).
+   * api.wake(): something moves (an animation of the module's own runs): the scene draws at the display's own rate from the next frame and for a second after the last call, instead of the
+   *     30 fps (15 after a minute of nothing) of a scene at rest (call it every frame while the animation runs; nothing of the scene's own is asked of the window's focus).
    * api.figures() → [{ root, hip, upper, head, armL, armR, legL, legR, staff }]: every person in the office right now,
    *     the agents (staff: true) and the people made with api.person / area.person (staff: false). The office sets the
    *     staff poses every frame before onFrame callbacks run, so temporary offsets written in onFrame are safe.
@@ -1608,7 +1615,7 @@ export function createOfis(root, ctx, opts = {}) {
       },
       onPointer(fn) { if (typeof fn === 'function') extraPointer.push(fn); },
       shake(px) { shakeAmp = clamp(shakeAmp + (Number(px) || 0), 0, 40); },
-      wake() { lastInput = performance.now(); },
+      wake() { pacer.wake(performance.now()); },
       figures() {
         const out = [];
         for (const c of chars.values()) out.push({ root: c.root, hip: c.hip, upper: c.upper, head: c.head, armL: c.armL, armR: c.armR, legL: c.legL, legR: c.legR, staff: true });
@@ -2005,6 +2012,7 @@ export function createOfis(root, ctx, opts = {}) {
       // `delay` at the entrance (not drawn yet), `standT` to stand up, `turnT` to turn around; slotWas is the seat it left, cell the slot of the office it walks in or out of
       route: null, travelled: 0, plen: 0, pace: 1, delay: 0, standT: 0, turnT: 0, slotWas: -1, cell: -1,
     };
+    pacer.wake(performance.now());                           // a figure is made: it is about to walk in (or pop in, in the lounge)
     if (plain) return c;
     c.tag = mkLabel('of-tagl', main ? 70 : 40, 'down', 3, main ? 0 : 12);
     c.bal = mkLabel('of-ball', main ? 60 : 30, 'up', 6, main ? 0 : 22);
@@ -2532,6 +2540,44 @@ export function createOfis(root, ctx, opts = {}) {
     room.doorPivot.rotation.y = -1.35 * room.doorOpen;
   }
 
+  // ---- pacing: what counts as motion (the pacer is in ofis-pace.js; docs/pacing.md has the rules and the reasons). Set in step(), after the figures have moved: a figure that walks (one
+  // that waits at the entrance only for its first second: nothing of it is drawn yet), stands up, sits down or turns; a door that swings; a person of the lounge that pops in or out; a
+  // room's light that is switched; the camera that shakes. The camera, the pointer, the wheel and the keys wake the pacer where they happen. NOT motion: a figure that types, thinks,
+  // waves or sleeps at its seat, the flicker of the lamps, the cars and the water, the weather overlay and the slow turn of the light with the time of day: they run at the idle rate.
+  const PACE_QUEUE_S = 1, PACE_EPS = 0.01, PACE_DOOR_EPS = 1e-4;
+  function paceFigures(T) {
+    for (const c of chars.values()) {
+      if (c.mode === 'walk' && c.path) {
+        if (c.delay > 0) {
+          if (c.paceQ === undefined) c.paceQ = T;
+          if (T - c.paceQ < PACE_QUEUE_S) busy = true;
+        } else { c.paceQ = undefined; busy = casters = true; }
+        continue;
+      }
+      c.paceQ = undefined;
+      if (Math.abs(c.sit - (c.mode === 'seated' ? 1 : 0)) > PACE_EPS || Math.abs(angTo(c.heading, c.th, 1) - c.heading) > PACE_EPS) busy = casters = true;
+    }
+  }
+  // the doors are compared around stepRooms (stepDoor is not touched): `before` records how far each one is open, the call after it says whether any moved
+  const doorSnap = [];
+  function paceDoors(before) {
+    let i = 0;
+    for (const room of world.rooms.values()) { if (before) doorSnap[i] = room.doorOpen; else if (Math.abs(room.doorOpen - doorSnap[i]) > PACE_DOOR_EPS) busy = casters = true; i++; }
+    for (const room of world.vacant || []) { if (before) doorSnap[i] = room.doorOpen; else if (Math.abs(room.doorOpen - doorSnap[i]) > PACE_DOOR_EPS) busy = casters = true; i++; }
+  }
+  // the people of the lounge are not in `chars`: one whose pop (a spring on its scale) has not come to rest is moving, and it casts a shadow
+  function paceLounge() {
+    if (!lounge.peopleCount()) return;
+    for (const c of lounge.people()) {
+      const sc = c.force.scale;
+      if (c.paceS !== undefined && Math.abs(sc - c.paceS) > 1e-4) busy = casters = true;
+      c.paceS = sc;
+    }
+  }
+  // PACING HOOK for the label layout (the integration step connects it, nothing of the labels is exposed from here): the stateful layout reports `moving` while a label glides to its
+  // spot, and the loop calls this with its own timestamp, after placeLabels(): `if (labelLayout.moving) wakeForLabels(now);`
+  const wakeForLabels = now => pacer.wake(now, LABEL_WAKE_MS);
+
   function step(dt, T) {
     sceneT += dt;
     // a sub-agent that is done sits out its 4.5 s (the check mark), then gets up: the time runs on the frame clock, not on the next update from the data
@@ -2543,14 +2589,19 @@ export function createOfis(root, ctx, opts = {}) {
     REC.dt = dt;
     if (REC.on) REC.n++;
     for (const c of [...chars.values()]) animChar(c, dt, T);
+    paceFigures(T);
     if (REC.on) for (const c of chars.values()) note('frame', c);
     REC.dt = 0;
     lightsFor();                                          // after the walkers have moved: the light of an office follows who is inside it now
     for (const fn of extraFrame) { try { fn(T, dt); } catch { /* decoration frame callback */ } }
     stepScreens(T);
+    paceDoors(true);
     stepRooms(dt, T);
+    paceDoors(false);
     lounge.step(dt, T);
-    decor.update(T, dt);
+    paceLounge();
+    if (decor.update(T, dt)) busy = true;                  // a room's light is being switched
+    if (shakeAmp > 0.2) busy = true;                      // the camera shakes (api.shake)
     if (REC.on && world.lightRooms) REC.lights.push({ n: REC.n, t: performance.now(), st: sceneT, dt, rooms: world.lightRooms.map(r => [r.slot, +decor.litOf(r.slot).toFixed(4), decor.targetOf(r.slot), r.owner]) });
     doorWalkers.length = 0;
     env.frame(T, dt);
@@ -2646,8 +2697,9 @@ export function createOfis(root, ctx, opts = {}) {
     renderer.setSize(vw, vh, false);
     if (autoFit) fit(); else applyCam();
     renderer.shadowMap.needsUpdate = true;
+    pacer.shadowTaken(performance.now());
   }
-  new ResizeObserver(() => { resized = true; }).observe(root);
+  new ResizeObserver(() => { resized = true; pacer.wake(performance.now()); }).observe(root);
 
   // ---------------------------------------------------------- mouse and touch
 
@@ -2833,33 +2885,32 @@ export function createOfis(root, ctx, opts = {}) {
       renderSum();
       lounge.touch();
       renderer.shadowMap.needsUpdate = true;
+      pacer.shadowTaken(performance.now());
     } catch (err) { logOnce('sync', err); }
   }
 
-  // Adaptive frame rate: full speed only while someone is interacting with a focused window;
-  // idle, unfocused, slow or software-rendered pages draw far fewer frames.
-  let lastInput = performance.now(), frameNo = 0;
-  for (const ev of ['pointermove', 'pointerdown', 'wheel', 'keydown']) {
-    root.addEventListener(ev, () => { lastInput = performance.now(); }, { passive: true });
+  // Adaptive frame rate (ofis-pace.js, docs/pacing.md): the display's own rate while something moves or somebody touches the Office, 30 fps when nothing does, 15 fps after a minute of
+  // nothing, 8 fps in software GL. The window's focus is not asked: a visible window that has no focus is watched, not asleep.
+  let frameNo = 0;
+  for (const ev of ['pointermove', 'pointerdown', 'pointerup', 'wheel', 'keydown', 'touchmove']) {
+    root.addEventListener(ev, () => pacer.wake(performance.now()), { passive: true });
   }
-  function frameInterval(now) {
-    if (SOFTWARE_GL) return 1000 / 8;
-    let fps = now - lastInput > 45e3 || !document.hasFocus() ? 15 : 1000 / FRAME_MS;
-    if (frameMs > 18) fps = Math.min(fps, 15);
-    return 1000 / fps;
-  }
+  document.addEventListener('visibilitychange', () => { if (!document.hidden) pacer.wake(performance.now()); });
 
   function loop(now) {
     raf = requestAnimationFrame(loop);
     if (!visible || document.hidden) { lastT = 0; return; }
-    if (lastT && now - lastT < frameInterval(now) - 2) return;
-    if (++frameNo % 12 === 0) renderer.shadowMap.needsUpdate = true;
+    if (!pacer.due(now)) return;
+    frameNo++;
     const dt = lastT ? Math.min(0.1, (now - lastT) / 1000) : 1 / 30;
     lastT = now;
     try {
       const t0 = performance.now();
       if (resized) { resized = false; doResize(); }
+      busy = casters = false;
       step(dt, now / 1000);
+      if (busy) pacer.wake(now);
+      if (pacer.shadow(now, casters)) renderer.shadowMap.needsUpdate = true;     // on motion, every 25 ms; otherwise every 400 ms (the data sync and a resize ask for theirs)
       // camera shake (api.shake): a temporary screen-space offset that is removed again right after drawing
       let shX = 0, shY = 0;
       if (shakeAmp > 0.2) {
@@ -2878,6 +2929,7 @@ export function createOfis(root, ctx, opts = {}) {
         if (shX || shY) { camera.position.addScaledVector(R, -shX / zoom).addScaledVector(U, -shY / zoom); camera.updateMatrixWorld(); }
       }
       frameMs = frameMs * 0.9 + (performance.now() - t0) * 0.1;
+      pacer.cost(performance.now() - t0);
     } catch (err) { logOnce('frame', err); }
   }
 
@@ -2907,6 +2959,11 @@ export function createOfis(root, ctx, opts = {}) {
     project(x, y, z) { PV.set(x, y, z).project(camera); return [(PV.x + 1) / 2 * vw, (1 - PV.y) / 2 * vh]; },
     charScreen(id) { const c = chars.get(id); if (!c) return null; const p = c.root.position; return this.project(p.x, 0.8, p.z); },
     get frameMs() { return +frameMs.toFixed(2); },
+    // the pacer's decision and counters (verification and the page's cadence logger; the app never reads them): moving, the rate it asks for, the display period it read, the skips of the
+    // two guards, and the counters since the start (animation frames, frames drawn, frames drawn while moving, shadow maps, wakes, guard steps); `busy` and `casters` are what the last
+    // frame's step found; hasFocus is only reported, nothing decides on it. pacingSeconds(n) are the last n finished seconds.
+    get pacing() { return { ...pacer.state, ...pacer.stats, busy, casters, hasFocus: document.hasFocus(), frameNo }; },
+    pacingSeconds(n = 60) { return { seconds: pacer.seconds(n), summary: pacer.summary(n) }; },
     get calls() { return renderer.info.render.calls; },
     get env() { return env.stats; },
     get walking() { return [...chars.values()].filter(c => c.mode === 'walk').map(c => c.id); },
@@ -2945,6 +3002,7 @@ export function createOfis(root, ctx, opts = {}) {
       resized = true;
       sync();
       lastT = 0;
+      pacer.wake(performance.now());
       cancelAnimationFrame(raf);
       raf = requestAnimationFrame(loop);
       lounge.show();
