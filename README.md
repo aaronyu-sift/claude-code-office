@@ -276,14 +276,16 @@ If your agents talk to each other through a local SQLite message board, the offi
 node server.js --chat-db ~/chat.db      # or CCO_CHAT_DB=~/chat.db, or "chatDb" in the config file
 ```
 
-The database is opened read-only with Node's built-in [`node:sqlite`](https://nodejs.org/api/sqlite.html) (Node 22.13 or newer; on an older Node the bridge stays off and logs one line). Nothing is ever written to it. The bridge reads two tables:
+The database is read through `chat-source.js` ([docs/chat-source.md](docs/chat-source.md)), which opens it read-only with Node's built-in [`node:sqlite`](https://nodejs.org/api/sqlite.html) (Node 22.13 or newer; on an older Node the bridge stays off and logs one line). Nothing is ever written to it, and it is asked by `seq` only, at most every 2 seconds and not at all while the file is unchanged. The reader uses a short contract and ignores everything else in the file, so it keeps working when the chat is upgraded:
 
 | Table | Columns it uses |
 |---|---|
-| `messages` | `seq` (increasing integer), `ts_ms` (epoch milliseconds), `channel`, `author`, `to_list` (comma-separated recipient names, empty for a channel post), `body` |
+| `messages` | `seq` (increasing integer, the primary key or indexed), `ts_ms` (epoch milliseconds), `channel`, `author`, `to_list` (comma-separated recipient names, empty for a channel post), `body`, `human` |
+| `agents` | `name`, `kind`, `last_seen_ms` |
 | `agent_keys` | `key` (`session:<Claude Code session id>`), `agent` (the board's name for that agent) |
+| `meta` | `k`, `v` (the row `schema_version` is shown on the Settings tab) |
 
-A board agent is matched to a session through `agent_keys`; without a row, to the session whose id, name or project equals the agent's name.
+A board agent is matched to a session through `agent_keys`; without a row, to the session whose id, name or project equals the agent's name. A database that misses part of the contract is reported as `unsupported` with a one-line reason, a missing file as `off`; `GET /api/config` has `chat: { state, schema }` and `GET /api/lounge` the recent board (the data of the lounge wall). `node tools/check-chat-contract.mjs <db>` (or `npm run chat:check -- <db>`) prints `OK` or what is missing.
 
 Independent of the bridge, the avatar tag of a working session shows its newest tool call with the description, for example `Bash · run the tests`, while it runs and for 20 seconds after.
 

@@ -127,7 +127,9 @@ const schemaOf = version => (/^\d{1,9}$/.test(version) ? Number(version) : (vers
 function inspect(db) {
   const problems = [];
   const have = {};
+  let statements = 0;                // how many queries this check ran (counted in stats.statements)
   for (const [table, cols] of Object.entries(CONTRACT)) {
+    statements++;
     const names = new Set(db.prepare(`PRAGMA table_info(${table})`).all().map(c => String(c.name).toLowerCase()));
     if (!names.size) { problems.push(`table ${table} is missing`); continue; }
     have[table] = true;
@@ -135,18 +137,20 @@ function inspect(db) {
     if (miss.length) { problems.push(`${table} lacks ${miss.join(', ')}`); have[table] = false; }
   }
   let meta = { version: '', identity: '' };
-  if (have.meta) meta = readMeta(db.prepare(SQL.meta).all());
+  if (have.meta) { statements++; meta = readMeta(db.prepare(SQL.meta).all()); }
   // the poll must be an index search by seq, or it would read the whole table on every call
   if (have.messages) {
     try {
+      statements++;
       const plan = db.prepare('EXPLAIN QUERY PLAN ' + SQL.rows).all(0).map(r => String(r.detail));
       if (!plan.some(d => /^SEARCH\b/.test(d)) || plan.some(d => /TEMP B-TREE|^SCAN\b/.test(d))) {
         problems.push('messages.seq is not the primary key or indexed (a poll would scan the table)');
       }
     } catch (e) { problems.push('the poll query does not run: ' + oneLine(e.message, 80)); }
   }
+  statements++;
   const cookie = db.prepare(SQL.cookie).get();
-  return { problems, version: meta.version, identity: meta.identity, schema: schemaOf(meta.version), cookie: String(cookie ? cookie.schema_version : '') };
+  return { statements, problems, version: meta.version, identity: meta.identity, schema: schemaOf(meta.version), cookie: String(cookie ? cookie.schema_version : '') };
 }
 
 // Check a database file against the contract without keeping anything open (tools/check-chat-contract.mjs, tests).
@@ -196,6 +200,7 @@ function createChatSource(dbPath, { log = console.error, now: clock = Date.now, 
   let shapeCookie = '', shapeVersion = '', identity = '';   // what the open connection was checked against
   let openIno = null;
   let shapeSig = '';            // file signature at the last open or shape check
+  let liveSig = null;           // the signature taken right after the last open
   let checkedAt = -Infinity;
   let retryAt = 0;
   let replacedFlag = false;     // the last open found another board (meta.db_id changed)
@@ -203,6 +208,7 @@ function createChatSource(dbPath, { log = console.error, now: clock = Date.now, 
   let closed = false;
   let lastPollAt = -Infinity;
   let lastSig = '';             // file signature taken before the last poll query that left nothing behind
+  let gateSeq = -2;             // the lastSeq that poll left the caller with (a caller that asks from another seq is never gated)
   let pending = false;          // the last poll was full: more rows are waiting, so do not gate on the file
   let keys = new Map();         // chat agent name -> [session ids]
   let keysAt = -Infinity;
@@ -245,7 +251,15 @@ function createChatSource(dbPath, { log = console.error, now: clock = Date.now, 
   }
 
   // Open the file and check it against the contract. Sets the state. Returns true when it can be read.
+  // Opening a WAL database can create its (empty) -wal and -shm files, so the signature is taken again afterwards: that one is the baseline.
   function attempt(t, sig) {
+    const ok = open1(t, sig);
+    liveSig = file ? sigOf() : null;
+    if (liveSig) { shapeSig = liveSig.key; if (ok) openIno = liveSig.ino; }
+    return ok;
+  }
+
+  function open1(t, sig) {
     closeDb();
     replacedFlag = false;
     if (!file) { set('off', null, 'no chat database configured'); retryAt = Infinity; return false; }
@@ -257,6 +271,7 @@ function createChatSource(dbPath, { log = console.error, now: clock = Date.now, 
     try {
       db = openReadOnly(file, busyMs);
       info = inspect(db);
+      stats.statements += info.statements;
     } catch (e) {
       closeDb();
       if (isBusy(e)) {
@@ -308,23 +323,21 @@ function createChatSource(dbPath, { log = console.error, now: clock = Date.now, 
   // `checked` says the database was looked at (opened, or its shape verified); `replaced` says it is another board now.
   function ready(t, sig) {
     started = true;
-    if (!file || closed) return { ok: false, checked: false, replaced: false };
+    const no = () => ({ ok: false, checked: false, replaced: false, sig });
+    if (!file || closed) return no();
     if (!sig) {                                                // the file is gone, or was never there
       if (db || t >= retryAt || cur.state !== 'off') attempt(t, null);
-      return { ok: false, checked: false, replaced: false };
+      return no();
     }
-    if (!db) {
-      if (t < retryAt && sig.key === shapeSig) return { ok: false, checked: false, replaced: false };
-      const ok = attempt(t, sig);
-      return { ok, checked: true, replaced: replacedFlag };
-    }
-    if (sig.ino !== openIno) { const ok = attempt(t, sig); return { ok, checked: true, replaced: replacedFlag }; }   // another file under that name
+    const reopen = () => { const ok = attempt(t, sig); return { ok, checked: true, replaced: replacedFlag, sig: liveSig || sig }; };
+    if (!db) return t < retryAt && sig.key === shapeSig ? no() : reopen();
+    if (sig.ino !== openIno) return reopen();                  // another file under that name
     const due = t - checkedAt >= CHECK_EVERY_MS;
-    if (sig.key === shapeSig && !due) return { ok: true, checked: false, replaced: false };
-    if (!stillRight(due)) { const ok = attempt(t, sig); return { ok, checked: true, replaced: replacedFlag }; }
+    if (sig.key === shapeSig && !due) return { ok: true, checked: false, replaced: false, sig };
+    if (!stillRight(due)) return reopen();
     shapeSig = sig.key;
     if (due) checkedAt = t;
-    return { ok: true, checked: due, replaced: false };
+    return { ok: true, checked: due, replaced: false, sig };
   }
 
   // a database error in the middle of a read: a busy file is retried, anything else drops the connection and says why
@@ -375,10 +388,10 @@ function createChatSource(dbPath, { log = console.error, now: clock = Date.now, 
       if (t >= lastPollAt && t - lastPollAt < POLL_MIN_MS) { stats.throttled++; out.throttled = true; return out; }
       lastPollAt = t;
       stats.polls++;
-      const sig = file ? sigOf() : null;
-      const r = ready(t, sig);
+      const r = ready(t, file ? sigOf() : null);
       if (!r.ok) return out;
-      if (!first && !pending && !r.checked && sig.key === lastSig) { stats.idle++; return out; }
+      const sig = r.sig;
+      if (!first && !pending && !r.checked && sig.key === lastSig && lastSeq === gateSeq) { stats.idle++; return out; }   // same file, same place: nothing can be new
       const sinceMs = Number.isFinite(opts.sinceMs) ? opts.sinceMs : 0;
       let raw;
       if (first) {
@@ -399,6 +412,7 @@ function createChatSource(dbPath, { log = console.error, now: clock = Date.now, 
         }
       }
       lastSig = sig.key;
+      gateSeq = out.lastSeq;
       if (cur.state === 'ok' && cur.reason) cur = { ...cur, reason: '' };
       if (out.rows.length) refreshKeys(t, 0);                                           // a session that just joined must map at once
     } catch (e) {
@@ -417,9 +431,9 @@ function createChatSource(dbPath, { log = console.error, now: clock = Date.now, 
     const limit = Math.max(1, Math.min(SNAPSHOT_MAX_ROWS, Math.floor(Number(opts.limit)) || SNAPSHOT_ROWS));
     const empty = () => ({ state: state(), now: t, sinceMs, messages: [], channels: [], agents: [], truncated: false, countsCapped: false });
     try {
-      const sig = file ? sigOf() : null;
-      const r = ready(t, sig);
+      const r = ready(t, file ? sigOf() : null);
       if (!r.ok) return empty();
+      const sig = r.sig;
       stats.snapshots++;
       let d;
       if (snap && snap.limit === limit && snap.sig === sig.key && Math.abs(sinceMs - snap.sinceMs) < SNAP_REUSE_MS && t - snap.at < CHECK_EVERY_MS) {
