@@ -174,9 +174,15 @@ test('building: adding a bay moves no earlier office, door, hub or hall, it only
   }
 });
 
-test('building: the reception (hall 0, the bar) is the same from the X on: nothing added later changes it', () => {
+test('building: the reception (hall 0, the bar) keeps its left end, its place and its lane from the X on; it only grows to the right, and not before the hexagon is full', () => {
   const x = buildingPlan(BAYS).halls[0];
-  for (let bays = BAYS; bays <= 31; bays++) assert.deepEqual(buildingPlan(bays).halls[0], { ...x, bays: 4 });
+  for (let bays = BAYS; bays <= 40; bays++) {
+    const bar = buildingPlan(bays).halls[0], area = buildingPlan(bays, { first: 7, last: 5 });
+    for (const f of ['row', 'z0', 'z1', 'lane', 'zr', 'x0', 'open']) assert.equal(bar[f], x[f], `${bays} bays: ${f}`);
+    assert.ok(bar.x1 >= x.x1, `${bays} bays: the bar only gets longer, to the right`);
+    assert.equal(area.areas[0].x, buildingPlan(BAYS, { first: 7, last: 5 }).areas[0].x, `${bays} bays: the add-on areas stay where they were`);
+    if (bays <= 10) assert.deepEqual(bar, { ...x, bays: bar.bays }, `${bays} bays: the hexagon leaves the bar as it is`);
+  }
 });
 
 test('building: a slot depends on its own bay only; sites come in bays of two and the hub takes one', () => {
@@ -195,12 +201,33 @@ test('building: a slot depends on its own bay only; sites come in bays of two an
   assert.equal(siteOfSlot(LOUNGE_SITE), LOUNGE_SITE + 1, 'the slot after the hub skips it');
   assert.equal(baysForSlot(officesIn(7) - 1), 7, 'the last office of seven bays needs the seventh');
   // the sequence of bays never repeats a place and each bay touches the building so far
+  // (past the table of fixed bays, 40 of them, the bar goes on to the right: that is tested too)
   const seen = new Set();
-  for (let i = 0; i < 40; i++) { const [k, c] = bayAt(i), key = k + '/' + c; assert.ok(!seen.has(key), 'bay ' + i + ' repeats ' + key); seen.add(key); }
-  for (let i = 1; i < 40; i++) {
+  for (let i = 0; i < 100; i++) { const [k, c] = bayAt(i), key = k + '/' + c; assert.ok(!seen.has(key), 'bay ' + i + ' repeats ' + key); seen.add(key); }
+  for (let i = 1; i < 100; i++) {
     const [k, c] = bayAt(i);
     const near = [...Array(i).keys()].some(j => { const [k2, c2] = bayAt(j); return (k2 === k && Math.abs(c2 - c) === 1) || (Math.abs(k2 - k) === 1 && Math.abs(c2 - c) <= 0.5); });
     assert.ok(near, `bay ${i} at row ${k}, column ${c} is joined to the building`);
+    // every row stays whole (one hall per row: its bays touch), and the bar never grows to its left
+    const row = [...Array(i + 1).keys()].map(bayAt).filter(([k2]) => k2 === k).map(([, c2]) => c2).sort((p, q) => p - q);
+    assert.ok(row.every((c2, n) => !n || Math.abs(c2 - row[n - 1] - 1) < 1e-9), `bay ${i}: row ${k} has a gap: ${row}`);
+    if (k === 0) assert.ok(c >= 0, 'the bar grows to the right only');
+  }
+});
+
+// the building before the X grown a row of five offices at a time: the plinth around its two-row blocks (a row left over has an open hall of 3.6 m)
+const oldRows = cells => {
+  const rows = cells / 5, pairs = Math.ceil(rows / 2), depth = pairs * PAIR_D + (pairs - 1) * GAP - (rows % 2 ? PAIR_D - (ROOM_D + HALL_GAP + 3.6) : 0);
+  return [{ x0: -WALL_T - PLINTH_M, x1: 5 * PITCH - GAP + WALL_T + PLINTH_M, z0: -WALL_T - PLINTH_M, z1: depth + WALL_T + PLINTH_M }];
+};
+
+test('growth: at every size the building fits the window better than the two rows of before did for as many chats, and never gets thin', () => {
+  for (let bays = BAYS; bays <= 31; bays++) {
+    const P = buildingPlan(bays), cells = Math.max(10, Math.ceil(P.cells.length / 5) * 5);
+    const was = fitZoom(projectedBox(oldRows(cells)), 1440, 900), now = fitZoom(projectedBox(P.plinth), 1440, 900);
+    assert.ok(now >= was * 1.05, `${bays} bays (${P.cells.length} offices): zoom ${was.toFixed(1)} -> ${now.toFixed(1)}`);
+    const b = projectedBox(P.plinth);
+    assert.ok(b.w / b.h > 1.3 && b.w / b.h < 2.4, `${bays} bays: the box is ${(b.w / b.h).toFixed(2)} wide for 1 high`);
   }
 });
 

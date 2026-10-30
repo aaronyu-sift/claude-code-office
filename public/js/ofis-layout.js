@@ -13,9 +13,9 @@
 //   The hub of the X (the second office of the bar's centre) is reserved for a lounge that is furnished later: it is a cell of the plan with no
 //   slot, drawn as an open plaza until then.
 //   Only more chats than offices expand the building, one bay (two offices) at a time, in a fixed order that keeps the shape compact: first the
-//   two arms widen to the width of the bar (north and south, left to right, a hexagon of 3 + 4 + 3 bays), then a row of four bays is added north
-//   and south, then a row of three, and so on, so earlier offices keep their place and only the halls of the rows that gain a bay grow. A bay
-//   goes away again after SHRINK_MS without a chat in it.
+//   two arms widen to the width of the bar (a hexagon of 3 + 4 + 3 bays, 19 offices), then the bar gets a fifth bay and the building grows to the
+//   north (see bayAt), so earlier offices keep their place and only the halls of the rows that gain a bay grow (the bar's hall, and so the
+//   entrance, only to the right). A bay goes away again after SHRINK_MS without a chat in it.
 //
 // To change the minimum: MIN_ROOMS below, or `?rooms=N` on the page address (2 to MAX_ROOMS), for example `/?scene=3d&rooms=6#ofis`.
 
@@ -55,18 +55,24 @@ export function minRoomsFrom(search, dflt = MIN_ROOMS) {
 // ------------------------------------------------------------ bays: the order the building is built in
 
 // A bay is [k, c]: row k of the building (0 is the bar, negative rows are north, positive rows south) and column c in bays (halves for the rows
-// that sit between two columns of the bar). The first six are the X; the next four widen its arms; after that rows of four and three bays are
-// added north and south alternately, a bay at a time from the middle outwards.
+// that sit between two columns of the bar). The first six are the X; the next four widen its arms (a hexagon of 3 + 4 + 3 bays, 19 offices).
+// After that every bay is the one that keeps the building's box on the screen smallest (found with tools/layout-growth.mjs: each step tries every
+// place that touches the building and keeps every row whole, and takes the one with the best mean fit zoom over 1440 x 900, 1920 x 1080 and
+// 1280 x 800 with the shelf card), with one rule more: the bar never grows to its left, because the add-on areas of the local module open onto
+// that end of its hall. So the bar gets a fifth bay, and then the building grows to the north, the side the screen has room for: a row of two
+// beside the arm, then rows that widen to both sides. It is a fixed table, not a search at run time, so a saved slot is the same office in every
+// browser. Past the table (more than 79 offices) the bar just gets longer to the right.
 const HEAD = [[0, 1], [0, 2], [-1, 1.5], [1, 1.5], [0, 0], [0, 3], [-1, 0.5], [1, 0.5], [-1, 2.5], [1, 2.5]];
-const ROW_COLS = { 4: [1, 2, 0, 3], 3: [1.5, 0.5, 2.5] };
+const GROWN = [
+  [0, 4], [-2, 1.5], [-1, -0.5], [-1, 3.5], [-2, 0.5], [-2, 2.5], [-1, -1.5], [-3, 1.5],
+  [-1, 4.5], [-2, -0.5], [-2, 3.5], [-3, 0.5], [-1, -2.5], [-3, 2.5], [-1, 5.5], [-2, -1.5],
+  [-4, 1.5], [-2, 4.5], [-3, -0.5], [-3, 3.5], [-4, 0.5], [-2, -2.5], [-4, 2.5], [-2, 5.5],
+  [-3, -1.5], [-5, 1.5], [-3, 4.5], [-4, -0.5], [-2, -3.5], [-5, 0.5],
+];
+const TABLE = [...HEAD, ...GROWN];
+const BAR_END = Math.max(...TABLE.filter(([k]) => k === 0).map(([, c]) => c));
 export function bayAt(i) {
-  if (i < HEAD.length) return HEAD[i];
-  let j = i - HEAD.length, k = 2;
-  for (;; k++) {
-    const cols = ROW_COLS[k % 2 ? 3 : 4];
-    if (j < 2 * cols.length) return [(j % 2 ? 1 : -1) * k, cols[j >> 1]];
-    j -= 2 * cols.length;
-  }
+  return i < TABLE.length ? TABLE[i] : [0, BAR_END + (i - TABLE.length) + 1];
 }
 // The second office of the second bay of the bar is the hub of the X. It is reserved for a lounge: a cell without a chat slot.
 export const LOUNGE_SITE = 3;
