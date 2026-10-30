@@ -357,7 +357,7 @@ export default {
     'lounge.src.live': 'Data: GET /api/lounge, the server’s read-only chat bridge (--chat-db), every 3 seconds while this view is on screen.',
     'lounge.src.demo': 'Data: the built-in demo script (?lounge=demo), not your agents.',
     'lounge.src.none': 'No data: this server has no /api/lounge endpoint.',
-    'lounge.src.hidden': 'The lounge is switched off (setting lounge=off): nothing is fetched. Use ?lounge=text or ?lounge=names to show it.',
+    'lounge.src.hidden': 'The lounge is switched off (setting lounge=off): nothing is fetched. Choose Text or Names only in the Agent lounge row of the Settings tab to show it.',
     'lounge.failed': 'Message board not answering',
     'lounge.failedHint': 'The server did not answer GET /api/lounge. Trying again every 3 seconds.',
     'lounge.failedHintAge': 'Last answer: {age} ago. Trying again every 3 seconds.',

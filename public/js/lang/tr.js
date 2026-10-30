@@ -337,7 +337,7 @@ export default {
     'lounge.src.live': 'Veri: GET /api/lounge, sunucunun salt okunur sohbet köprüsü (--chat-db); bu görünüm ekrandayken 3 saniyede bir yenilenir.',
     'lounge.src.demo': 'Veri: yerleşik demo senaryosu (?lounge=demo), sizin ajanlarınız değil.',
     'lounge.src.none': 'Veri yok: bu sunucuda /api/lounge uç noktası yok.',
-    'lounge.src.hidden': 'Salon kapalı (lounge=off ayarı): hiçbir şey çekilmiyor. Göstermek için ?lounge=text veya ?lounge=names kullanın.',
+    'lounge.src.hidden': 'Salon kapalı (lounge=off ayarı): hiçbir şey çekilmiyor. Göstermek için Ayarlar sekmesindeki Ajan salonu satırında Metin veya Yalnızca adlar seçin.',
     'lounge.failed': 'Mesaj panosu yanıt vermiyor',
     'lounge.failedHint': 'Sunucu GET /api/lounge isteğine yanıt vermedi. 3 saniyede bir yeniden deneniyor.',
     'lounge.failedHintAge': 'Son yanıt: {age} önce. 3 saniyede bir yeniden deneniyor.',

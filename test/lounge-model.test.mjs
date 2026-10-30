@@ -104,6 +104,12 @@ test('normalizePayload: a malformed answer is an answer that says off, never a t
   assert.equal(normalizePayload({ state: { state: 'unsupported', schema: 'weird', reason: 'no messages table' } }).state.reason, 'no messages table');
 });
 
+test('buildView: a lounge that is off lists no channels, though the last answer had some', () => {
+  const raw = payload([post()], { channels: { office: 3 } });
+  assert.deepEqual(view(raw).card.channels.map(c => c.name), ['office']);
+  assert.deepEqual(view(raw, { mode: 'off' }).card.channels, []);
+});
+
 test('normalizePayload: a field of the wrong type is ignored, the rest of the post is kept', () => {
   const n = normalizePayload(payload([
     { seq: '7', ts: '123', channel: 4, from: null, to: 'bob', text: 9 },

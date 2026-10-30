@@ -230,7 +230,7 @@ export function buildView(data, opts = {}) {
         : down && stale ? tt('lounge.src.stale', 'GET /api/lounge is not answering (an error, a timeout or a reply that is not JSON). The posts shown are from its last good answer; asking again every 3 seconds.')
           : down ? tt('lounge.src.failed', 'GET /api/lounge is not answering (an error, a timeout or a reply that is not JSON): asking again every 3 seconds.')
         : tt('lounge.src.live', 'Data: GET /api/lounge, the server’s read-only chat bridge (--chat-db), every 3 seconds while this view is on screen.');
-  const channels = Object.entries(d.channels).sort((a, b) => b[1] - a[1] || (a[0] < b[0] ? -1 : 1)).slice(0, 6).map(([name, n]) => ({ name, n, colour: chipColour(name) }));
+  const channels = hidden ? [] : Object.entries(d.channels).sort((a, b) => b[1] - a[1] || (a[0] < b[0] ? -1 : 1)).slice(0, 6).map(([name, n]) => ({ name, n, colour: chipColour(name) }));
   const card = { title, rows: cardRows, posts: inHour, channels, source: sourceLine, sign, namesOnly: mode === 'names', people: people.map(p => p.name), hidden };
 
   // what is painted on the wall: when this string changes the canvas is painted again (the ages are in it as text, so they repaint once a minute and not once a second)
