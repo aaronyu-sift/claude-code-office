@@ -1,6 +1,6 @@
 // QA of the walkers: nothing in the 3D scene appears or disappears inside a room (public/js/ofis.js, public/js/ofis-arrive.js). Headless Chrome with software WebGL in a throw-away
 // profile (harness3d.mjs), the server against a fake ~/.claude, one `CHECK <name> PASS|FAIL <detail>` line per check and a final `QA PASS` or `QA FAIL`.
-//   node tools/qa/office3d-walk-qa.mjs [--only load|calm|brief|leave|flap|rebuild|growout|seats|turnback|reseat|hidden|follow|settle|reduced] [--mutations [--mutation <words>|<more words>]] [--verify-mutations]
+//   node tools/qa/office3d-walk-qa.mjs [--only load|calm|brief|leave|flap|rebuild|growout|seats|turnback|reseat|readmit|hidden|follow|settle|reduced] [--mutations [--mutation <words>|<more words>]] [--verify-mutations]
 //
 // How it sees: the scene's recorder (s.rec, started the moment the scene exists: harness3d.mjs recordFromStart) has the creation, every frame and the removal of every figure, with the
 // frame's step. A check that changes the data itself does it in the page, on the store (a copy of a chat, a sub-agent, a status), and asks the scene to update (s.sync()), so that the
@@ -24,6 +24,10 @@
 //   3d-walk-turnback twelve jobs and a chat end while the person is inside the office, each a little deeper in than the one before: the walk back is the way it came in, clear of the furniture
 //   3d-walk-reseat  a sub-agent walking out of its seat is wanted again, a newcomer has taken that seat: it goes back along the way out and in along the route of another seat, not
 //                    straight through the table (a pair of seats of an arrangement where the straight line does cut through furniture)
+//   3d-walk-readmit a chat closes, another chat takes its office while its chief walks out, and the first chat is back: it gets another office. Three cases (one hall from inside the office,
+//                    another hall from the hall's lane, another hall from inside the office, with a sub-agent that is not wanted on the way out and a further chat that makes a second rebuild):
+//                    every reading of the chief is in the old office, outside, or in the new one, never in another office or the lounge, it crosses the walls of the two only at their doors,
+//                    keeps 0.2 m from their furniture, nobody jumps or is made again, and it ends on its new seat
 //   3d-walk-hidden   the Office view is left while people walk, a chat ends and another comes meanwhile; back in the view nobody jumps and the ended chat walks out instead of vanishing
 //   3d-walk-follow   the label, the balloon, the hover tooltip and the click card follow a walking figure, and the camera stays where it is
 //   3d-walk-settle   s.settle() ends every walk at once (QA hook), and nothing in the app calls it
@@ -1096,8 +1100,128 @@ async function runReseat(ctx) {
   } finally { await S.done(); }
 }
 
-const CHECKS = { load: runLoad, calm: runCalm, brief: runBrief, leave: runLeave, flap: runFlap, rebuild: runRebuild, growout: runGrowOut, seats: runSeats, turnback: runTurnBack, reseat: runReseat, hidden: runHidden, follow: runFollow, settle: runSettle, reduced: runReduced };
-const NAME = { load: '3d-walk-load', calm: '3d-walk-calm', brief: '3d-walk-brief', leave: '3d-walk-leave', flap: '3d-walk-flap', rebuild: '3d-walk-rebuild', growout: '3d-walk-growout', seats: '3d-walk-seats', turnback: '3d-walk-turnback', reseat: '3d-walk-reseat', hidden: '3d-walk-hidden', follow: '3d-walk-follow', settle: '3d-walk-settle', reduced: '3d-walk-reduced' };
+// ---- 3d-walk-readmit
+// A chat closes and its chief walks out of its office; another chat takes that office; the first chat is back (a resumed session) before the chief is out, and gets another office. The chief
+// is wanted in an office that is not the one it is walking out of, so its walk has to leave the old office by its door and never cross a wall of the offices between, nor their furniture, nor the
+// lounge (the straight line to the nearest point of the new route did, through two or three rooms): in one hall it goes back to the lane, along the lane to the new door and in; into another hall
+// it goes out to the entrance, along the front of the building to the other entrance and in. The people are read frame by frame against every office of the building and the lounge.
+const READMIT = [
+  { key: 'a', name: 'one hall, from inside the office, the chat that took the office closes again', before: [], after: [], old: 1, now: 2, where: 'room', sub: true, second: 'close', sameHall: true },
+  { key: 'b', name: 'another hall, from the lane, a further chat comes', before: ['f1', 'f2'], after: ['f4'], old: 3, now: 5, where: 'lane', sub: true, second: 'chat', sameHall: false },
+  { key: 'c', name: 'another hall, from inside the office, a further chat comes', before: ['f1'], after: [], old: 2, now: 3, where: 'room', second: 'chat', sameHall: false },
+];
+const insideBox = (r, x, z, m = 0.1) => x > r.X + m && x < r.X + r.W - m && z > r.Z + m && z < r.Z + r.D - m;
+async function readmitCase(ctx, c) {
+  const problems = [];
+  const S = await scenario3d(1, { tag: 'wreadmit' + c.key, root: ctx.root, width: 1100, height: 700, intercept: recordFromStart });
+  try {
+    const { page } = S;
+    if (!S.ready.ok) problems.push('the scene did not become ready');
+    await page.evaluate(HELPERS);
+    await qa(page, `for (const id of ${JSON.stringify(c.before)}) q.chat(id); q.chat('A'); ${c.sub ? "q.sub('A', 's1');" : ''} for (const id of ${JSON.stringify(c.after)}) q.chat(id); q.sync();`);
+    await ev(page, 's.settle()');
+    await sleep(900);
+    const off = await ev(page, 'o.office()');
+    const slotOf = (o, id) => (o.slots.find(x => x.id === id) || {}).slot;
+    if (slotOf(off, 'A') !== c.old) problems.push(`A has office ${slotOf(off, 'A')}, want ${c.old}`);
+    const oldBox = off.slots.find(x => x.slot === c.old), newBox0 = off.slots.find(x => x.slot === c.now);
+    if (!c.sameHall === (oldBox.hall === newBox0.hall)) problems.push(`the offices ${c.old} and ${c.now} are ${oldBox.hall === newBox0.hall ? 'in one hall' : 'in two halls'}: the case is not what it says`);
+    const roomOld = await roomOf(page, 'A'), seatA = await ev(page, 'o.seatOf("A")');
+    const lane = off.halls[oldBox.hall].lane, doorOld = roomOld.box.X + roomOld.arr.seats[0].walk[1][0];
+    await ev(page, 's.rec.take().length');
+    await qa(page, `q.remove('A'); q.sync();`);
+    // A walks out; the walk is read at the place the case wants it, not at a time
+    const at = await until(async () => {
+      const f = await ev(page, `o.figures().find(f => f.id === 'A')`);
+      if (!f || f.after !== 'gone' || f.mode !== 'walk') return null;
+      const inOld = insideBox(roomOld.box, f.x, f.z);
+      if (c.where === 'room') return inOld && Math.hypot(f.x - seatA.x, f.z - seatA.z) >= 1.6 ? f : null;
+      return !off.slots.some(r => insideBox(r, f.x, f.z)) && Math.abs(f.z - lane) < 0.3 && f.x > doorOld + 1 && f.x < off.entryX - 5 ? f : null;
+    }, 60000, 40);
+    if (!at) { problems.push(`A was never ${c.where === 'room' ? 'inside its office, walking out' : 'on the hall lane, walking out'}`); return [problems, '']; }
+    await qa(page, `q.chat('B'); q.sync();`);                                                      // B takes A's office
+    await qa(page, `q.chat('A'); ${c.sub ? "q.sub('A', 's1', 'done');" : ''} q.sync();`);          // A is back, wanted again: its office is taken, the lowest free one is another
+    const off2 = await ev(page, 'o.office()');
+    if (slotOf(off2, 'B') !== c.old) problems.push(`B has office ${slotOf(off2, 'B')}, want ${c.old} (A's old one)`);
+    if (slotOf(off2, 'A') !== c.now) problems.push(`A came back to office ${slotOf(off2, 'A')}, want ${c.now}`);
+    const roomNow = await roomOf(page, 'A');
+    await sleep(c.second === 'close' ? 600 : 1200);
+    if (c.second === 'close') {                                                                     // B closes: the old office is vacant again, and s1 is still walking out of it (its door must open for it)
+      await qa(page, `q.remove('B'); q.sync();`);
+      await gone(page, 'B', 30000);                                                                 // B's own person is out again: only s1 is left in the vacant office
+    }
+    if (c.second === 'close') {
+      const s1 = await ev(page, `o.figures().find(f => f.id === 's1')`);
+      if (!s1 || !insideBox(roomOld.box, s1.x, s1.z)) problems.push('the sub-agent left to leave was not inside the old office when its chat closed: the door proves nothing');
+    }
+    // a rebuild while A (and s1) are on their way: a further chat (it takes the lowest free office), or, where the old office is to stay vacant, the first chat falling asleep (it leaves its office)
+    await qa(page, c.second === 'close' ? `q.status(${JSON.stringify(off.slots.find(x => x.slot === 0).id)}, 'dormant'); q.sync();` : `q.chat('D'); q.sync();`);
+    let doorSamples = 0, doorOpen = 0, over = true;
+    const t0 = Date.now();
+    for (;;) {
+      const r = await ev(page, '({ doors: o.doors(), figs: o.figures().map(f => [f.id, f.mode, f.x, f.z]), walking: s.walking.length })');
+      if (c.second === 'close') for (const d of r.doors) {
+        if (!d.vacant || d.slot !== c.old || d.door !== 'back') continue;
+        if (r.figs.some(f => f[0] === 's1' && f[1] === 'walk' && Math.abs(f[2] - d.x) < 0.6 && Math.abs(f[3] - d.z) < 0.8)) { doorSamples++; if (d.open >= 0.3) doorOpen++; }
+      }
+      if (!r.walking) break;
+      if (Date.now() - t0 > 360000) { over = false; break; }
+      await sleep(100);
+    }
+    if (!over) problems.push('somebody was still walking after 6 minutes');
+    if (c.second === 'close') {
+      if (doorSamples < 2) problems.push(`only ${doorSamples} readings of the sub-agent in the doorway of the office that was vacant again (its door is hinged)`);
+      else if (doorOpen / doorSamples < 0.9) problems.push(`the door of the vacant office was open in ${doorOpen} of ${doorSamples} readings of the sub-agent left to leave in its doorway`);
+    }
+    await sleep(1500);
+    const st = await ev(page, '({ rec: s.rec.take(), sit: o.sitting() })');
+    const lists = byId(st.rec), l = (lists.get('A') || []).filter(e => e.k === 'frame' || e.k === 'remove' || e.k === 'create');
+    const frames = l.filter(e => e.k === 'frame' && e.vis !== false && e.mode !== 'seated');
+    if (l.some(e => e.k === 'remove' || e.k === 'create')) problems.push(`A was ${l.some(e => e.k === 'remove') ? 'removed' : 'made again'}: it must walk out of the old office and into the new one as one person`);
+    const L = off2.lounge, doors = { [c.old]: doorOld, [c.now]: roomNow.box.X + roomNow.arr.seats[0].walk[1][0] };
+    const regionOf = (x, z) => (L && insideBox(L, x, z) ? 'the lounge' : (() => { const r = off2.slots.find(q => insideBox(q, x, z)); return r ? `office ${r.slot}` : 'outside'; })());
+    const allowed = new Set(['outside', `office ${c.old}`, `office ${c.now}`]);
+    let prev = null, seen = new Set(), strays = new Set(), wrongDoor = [];
+    for (const e of frames) {
+      const reg = regionOf(e.x, e.z);
+      seen.add(reg);
+      if (!allowed.has(reg)) strays.add(reg);
+      if (prev && prev.reg !== reg) for (const [r, x] of Object.entries(doors)) if ((reg === `office ${r}` || prev.reg === `office ${r}`) && Math.abs((e.x + prev.x) / 2 - x) > 0.8) wrongDoor.push(`office ${r} entered or left at (${f1((e.x + prev.x) / 2)}, ${f1((e.z + prev.z) / 2)}), its door is at x ${f1(x)}`);
+      prev = { reg, x: e.x, z: e.z };
+    }
+    if (strays.size) problems.push(`A walked through ${[...strays].join(' and ')} on its way to office ${c.now}`);
+    problems.push(...wrongDoor.slice(0, 2));
+    if (!seen.has(`office ${c.old}`) || !seen.has(`office ${c.now}`)) problems.push(`A was not read in both offices (${[...seen].join(', ')})`);
+    const ca = crossings(l.filter(e => e.k === 'frame'), roomOld, 'chef', 'A in the old office'), cb = crossings(l.filter(e => e.k === 'frame'), roomNow, 'chef', 'A in the new office');
+    problems.push(...ca.bad, ...cb.bad, ...jumps(l.filter(e => e.k === 'frame')));
+    if (!frames.some(e => e.after === 'sit')) problems.push('A never turned back toward a seat');
+    const sp = st.sit.find(x => x.id === 'A'), seat = roomNow.arr.seats.find(x => x.key === 'chef');
+    if (!sp || sp.mode !== 'seated' || Math.hypot(sp.x - (roomNow.box.X + seat.pos[0]), sp.z - (roomNow.box.Z + seat.pos[1])) > 0.03) problems.push(`A does not sit on the chat's seat of office ${c.now} at the end (${sp ? sp.mode + ' ' + f1(sp.x) + ', ' + f1(sp.z) : 'not in the scene'})`);
+    if (c.sub) {                                                                                   // s1 was not wanted again: it walks out of the old office by its own route, to the old hall's entrance
+      const ls = (lists.get('s1') || []), fs = ls.filter(e => e.k === 'frame' && e.vis !== false), last = ls[ls.length - 1];
+      const stray = fs.map(e => regionOf(e.x, e.z)).filter(r => r !== 'outside' && r !== `office ${c.old}`);
+      if (!fs.length) problems.push('no readings of the sub-agent that was left to leave');
+      if (stray.length) problems.push(`the sub-agent left to leave walked through ${stray[0]}`);
+      if (!last || last.k !== 'remove' || Math.hypot(last.x - off.entryX, last.z - lane) > 1.3) problems.push(`the sub-agent left to leave was not removed at the entrance of the old hall (${last ? last.k + ' at ' + f1(last.x) + ', ' + f1(last.z) : 'no events'})`);
+      problems.push(...crossings(fs, roomOld, 0, 's1 in the old office').bad, ...jumps(fs));
+    }
+    problems.push(...(await books(page)));
+    if (errorsOf(page).length) problems.push(`console error: ${errorsOf(page)[0].slice(0, 120)}`);
+    return [problems, `${c.name} (office ${c.old} to ${c.now}, read ${c.where === 'room' ? 'inside the office' : 'on the lane'}): ${frames.length} readings of A in ${[...seen].join(', ')}, ${ca.inside + cb.inside} of them in the two offices, none within ${CLEAR} m of a piece, doors only, no jump, never made again, seated on the new seat`];
+  } finally { await S.done(); }
+}
+async function runReadmit(ctx) {
+  const problems = [], notes = [];
+  for (const c of READMIT) {
+    const [p, text] = await readmitCase(ctx, c);
+    problems.push(...p.map(x => `[${c.key}] ${x}`));
+    notes.push(text);
+  }
+  return [report('3d-walk-readmit', problems, notes.filter(Boolean).join('; '))];
+}
+
+const CHECKS = { load: runLoad, calm: runCalm, brief: runBrief, leave: runLeave, flap: runFlap, rebuild: runRebuild, growout: runGrowOut, seats: runSeats, turnback: runTurnBack, reseat: runReseat, readmit: runReadmit, hidden: runHidden, follow: runFollow, settle: runSettle, reduced: runReduced };
+const NAME = { load: '3d-walk-load', calm: '3d-walk-calm', brief: '3d-walk-brief', leave: '3d-walk-leave', flap: '3d-walk-flap', rebuild: '3d-walk-rebuild', growout: '3d-walk-growout', seats: '3d-walk-seats', turnback: '3d-walk-turnback', reseat: '3d-walk-reseat', readmit: '3d-walk-readmit', hidden: '3d-walk-hidden', follow: '3d-walk-follow', settle: '3d-walk-settle', reduced: '3d-walk-reduced' };
 
 // ---- mutations: break one line in a copy of the repo and expect the check that guards it to fail
 const MUTATIONS = [
@@ -1135,6 +1259,11 @@ const MUTATIONS = [
   { name: 'a walk out of an office cuts straight to the entrance', file: 'public/js/ofis.js', from: "startWalk(c, turnBack(c.route, c.route.length, c.root.position), 'gone');", to: "startWalk(c, [{ x: c.root.position.x, z: c.root.position.z }, { x: c.route[0].x, z: c.route[0].z }], 'gone');", fails: ['seats', 'leave'] },
   { name: 'a turn-back cuts straight to the entrance', file: 'public/js/ofis.js', from: "startWalk(c, c.path[0] === c.route[0] ? turnBack(c.path, c.pi, pos) : leadOut(c.route, pos, c.path, c.pi), 'gone');", to: "startWalk(c, [{ x: pos.x, z: pos.z }, { x: c.route[0].x, z: c.route[0].z }], 'gone');", fails: 'turnback' },
   { name: 'a person who is wanted at another seat goes straight to the nearest point of its route', file: 'public/js/ofis.js', from: 'way = rejoin(c.route, route, c.root.position, c.path, c.pi);', to: 'way = rejoin(null, route, c.root.position);', fails: 'reseat' },
+  // a chat that is back in another office while its person walks out of the old one (3d-walk-readmit)
+  { name: 'a chat that is back in another office is joined to it by the straight line from where the person stands', file: 'public/js/ofis-arrive.js', from: '  if (d < 1) {\n', to: "  if (d < 1) return compact([p, ...m.link, ...repath(newRoute, m.at, 'seat')]);\n  if (false) {\n", fails: 'readmit' },
+  { name: 'a person wanted in another hall is joined to it along the lane of its old hall', file: 'public/js/ofis-arrive.js', from: 'if (!sameHall(oldRoute, newRoute) || newRoute.length < 2) return', to: 'if (newRoute.length < 2) return', fails: 'readmit' },
+  { name: 'a person walking out of an office that is not its chat\'s now is put on the new office', file: 'public/js/ofis.js', from: "      if (out && c.route && c.cell !== room.slot) { exitVacated(c, null, true); continue; }", to: "", fails: 'readmit' },
+  { name: 'the door of a vacant office stays shut for a person of a chat that is in another office', file: 'public/js/ofis.js', from: "if (c.cell >= 0 && (!roomIds.has(c.roomId) || c.after === 'gone')) leavingSlots.add(c.cell);", to: "if (c.cell >= 0 && !roomIds.has(c.roomId)) leavingSlots.add(c.cell);", fails: 'readmit' },
   { name: 'a person is put on its seat from the stand point instead of walking onto it', file: 'public/js/ofis.js', edits: [['    for (const q of s.approach) p.push(q.clone());\n    p.push(s.pos.clone());', '    for (const q of s.approach) p.push(q.clone());'], ["    c.mode = 'seated'; c.after = null; c.th = c.seat ? c.seat.facing : -Math.PI / 2;", "    c.mode = 'seated'; c.after = null; c.th = c.seat ? c.seat.facing : -Math.PI / 2; if (c.seat) { c.root.position.x = c.seat.pos.x; c.root.position.z = c.seat.pos.z; }"]], fails: 'seats' },
   { name: 'a person gets up at the stand point of its seat, not on the seat', file: 'public/js/ofis.js', from: "    const stand = c.sit > 0.5;\n", to: "    const stand = c.sit > 0.5;\n    if (c.seat) c.root.position.set(c.seat.stand.x, 0, c.seat.stand.z);\n", fails: 'seats' },
   { name: 'every seat has the old fixed height of the hip', file: 'public/js/ofis.js', from: 'const seatHip = c => (c.seat && c.seat.hip) || PK_SEAT;', to: 'const seatHip = c => PK_SEAT;', fails: 'seats' },

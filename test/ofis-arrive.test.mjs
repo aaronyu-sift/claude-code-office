@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
   WALK, STAGGER_S, SPREAD_MAX_S, MIN_STAGGER_S, LOAD_BUDGET_S, CALM_QUEUE, PACE_MAX, RAMP_UNITS, RAMP_FLOOR,
-  pathLength, compact, rampFactor, etaSeconds, arrivalPlan, stepWalk, turnBack, nearestOnPath, repath, routeSig, dist, sharedUpTo, meet, leadOut, rejoin,
+  pathLength, compact, rampFactor, etaSeconds, arrivalPlan, stepWalk, turnBack, nearestOnPath, repath, routeSig, dist, sharedUpTo, sameHall, meet, leadOut, rejoin,
 } from '../public/js/ofis-arrive.js';
 
 const P = (x, z) => ({ x, z });
@@ -289,4 +289,89 @@ test('leadOut: out to the entrance along the route, or along the link until it m
   assert.deepEqual(out[out.length - 1], { x: 60, z: 2 });
   assert.ok(!crossesTable(out));
   assert.deepEqual(meet(ROUTE_B, P(18, 3), null, 0).link, [], 'on the route: no link');
+});
+
+// ---------------------------------------------------------------- a person wanted in ANOTHER office: out of the old room first, never through the wall between the two
+
+// three offices, seen from above. Hall 1: the lane z = 0 from the entrance (x 60); office A has its door at x 20 and office B at x 40, both below the lane (rooms at z 1.5 to 10, each a box of
+// thin walls with a gap for the door). Hall 2: the lane z = 30, office C with its door at x 35 above the lane (room at z 20 to 28.5). A person who sits at A and is wanted at B (or at C)
+// must leave A by A's door; the nearest-point repath goes straight through A's wall.
+const R_A = [P(60, 0), P(20, 0), P(20, 1), P(20, 3), P(16, 3), P(16, 8), P(12, 8)];
+const R_B = [P(60, 0), P(40, 0), P(40, 1), P(40, 3), P(44, 3), P(44, 8), P(48, 8)];
+const R_C = [P(60, 30), P(35, 30), P(35, 29), P(35, 27), P(30, 27), P(30, 22), P(26, 22)];
+const wallBox = (x0, x1, z0, z1, doorX) => {                                         // the thin walls of a room whose door gap is at doorX (on the wall at z0 or z1 nearest the lane)
+  const t = 0.1, w = [{ x0: x0 - t, x1: x0 + t, z0, z1 }, { x0: x1 - t, x1: x1 + t, z0, z1 }, { x0, x1, z0: z0 - t, z1: z0 + t }, { x0, x1, z0: z1 - t, z1: z1 + t }];
+  return w;
+};
+const gapWall = (x0, x1, z, doorX, half = 1) => [{ x0, x1: doorX - half, z0: z - 0.1, z1: z + 0.1 }, { x0: doorX + half, x1, z0: z - 0.1, z1: z + 0.1 }];
+const WALLS = [
+  ...gapWall(5, 25, 1.5, 20), ...wallBox(5, 25, 1.5, 10).filter((_, i) => i !== 2),     // office A: the wall on the lane side has a gap at its door (x 20)
+  ...gapWall(30, 50, 1.5, 40), ...wallBox(30, 50, 1.5, 10).filter((_, i) => i !== 2),   // office B (door x 40)
+  ...gapWall(10, 40, 28.5, 35), ...wallBox(10, 40, 20, 28.5).filter((_, i) => i !== 3), // office C (door x 35, its lane side is z 28.5)
+];
+const throughWall = path => {
+  for (let i = 1; i < path.length; i++) {
+    const a = path[i - 1], b = path[i], n = Math.max(1, Math.ceil(dist(a, b) / 0.05));
+    for (let k = 0; k <= n; k++) {
+      const x = a.x + (b.x - a.x) * k / n, z = a.z + (b.z - a.z) * k / n;
+      for (const w of WALLS) if (x > w.x0 && x < w.x1 && z > w.z0 && z < w.z1) return { x, z };
+    }
+  }
+  return null;
+};
+
+test('the three offices: each route keeps to its own doors, and the straight repath to the other office does cut through a wall', () => {
+  for (const r of [R_A, R_B, R_C]) assert.equal(throughWall(r), null, 'a route walks through its own door');
+  assert.ok(throughWall(repath(R_B, P(12, 8), 'seat')), 'from a seat at A straight to the nearest point of B: through the back wall of A');
+  assert.ok(throughWall(repath(R_C, P(12, 8), 'seat')));
+});
+
+test('sameHall: the offices of one hall share a lane, another hall has another', () => {
+  assert.equal(sameHall(R_A, R_B), true);
+  assert.equal(sameHall(R_A, R_A), true);
+  assert.equal(sameHall(R_A, R_C), false);
+  assert.equal(sameHall([P(1, 1)], R_A), false, 'a route of one point has no lane');
+  assert.equal(sharedUpTo(R_A, R_B), -1, 'two offices share nothing but the entrance');
+});
+
+test('rejoin: from the seat of one office to another office of the same hall it leaves by its door, takes the lane to the other door and goes in', () => {
+  const way = rejoin(R_A, R_B, P(12, 8));
+  assert.deepEqual(way.map(p => [p.x, p.z]), [[12, 8], [16, 8], [16, 3], [20, 3], [20, 1], [20, 0], [40, 0], [40, 1], [40, 3], [44, 3], [44, 8], [48, 8]]);
+  assert.equal(throughWall(way), null);
+  assert.deepEqual(way[way.length - 1], { x: 48, z: 8 }, 'and ends at the new seat');
+  // and the other way, from B to A, along the lane the other way round
+  assert.deepEqual(rejoin(R_B, R_A, P(48, 8)).map(p => [p.x, p.z]), [[48, 8], [44, 8], [44, 3], [40, 3], [40, 1], [40, 0], [20, 0], [20, 1], [20, 3], [16, 3], [16, 8], [12, 8]]);
+});
+
+test('rejoin: another office of the same hall, from the middle of the old office, its door, the lane and from where the walk out is past the new door', () => {
+  const inRoom = rejoin(R_A, R_B, P(16, 5));                                         // half way out of A, still inside the room
+  assert.deepEqual(inRoom.map(p => [p.x, p.z]), [[16, 5], [16, 3], [20, 3], [20, 1], [20, 0], [40, 0], [40, 1], [40, 3], [44, 3], [44, 8], [48, 8]]);
+  const lane = rejoin(R_A, R_B, P(30, 0));                                           // on the lane, between A's door and the entrance: past A, short of B's door
+  assert.deepEqual(lane.map(p => [p.x, p.z]), [[30, 0], [40, 0], [40, 1], [40, 3], [44, 3], [44, 8], [48, 8]]);
+  const past = rejoin(R_A, R_B, P(50, 0));                                           // on the lane beyond B's door: it turns round
+  assert.deepEqual(past.map(p => [p.x, p.z]), [[50, 0], [40, 0], [40, 1], [40, 3], [44, 3], [44, 8], [48, 8]]);
+  for (const w of [inRoom, lane, past]) assert.equal(throughWall(w), null);
+  const atDoor = rejoin(R_A, R_B, P(20, 0.5));                                       // in A's doorway
+  assert.deepEqual(atDoor.map(p => [p.x, p.z]), [[20, 0.5], [20, 0], [40, 0], [40, 1], [40, 3], [44, 3], [44, 8], [48, 8]]);
+});
+
+test('rejoin: an office of another hall is reached by the entrance: out along the old route, along the front of the building, in along the new route', () => {
+  const way = rejoin(R_A, R_C, P(12, 8));
+  assert.deepEqual(way.map(p => [p.x, p.z]), [[12, 8], [16, 8], [16, 3], [20, 3], [20, 1], [20, 0], [60, 0], [60, 30], [35, 30], [35, 29], [35, 27], [30, 27], [30, 22], [26, 22]]);
+  assert.equal(throughWall(way), null);
+  const lane = rejoin(R_A, R_C, P(30, 0));
+  assert.deepEqual(lane.map(p => [p.x, p.z]), [[30, 0], [60, 0], [60, 30], [35, 30], [35, 29], [35, 27], [30, 27], [30, 22], [26, 22]]);
+  assert.equal(throughWall(lane), null);
+  assert.ok(pathLength(way) > 100, 'it is a long way round, as it should be');
+});
+
+test('rejoin across offices: a figure that is on the link of such a walk and is put on a third route finishes the link first', () => {
+  const first = rejoin(R_A, R_C, P(12, 8));                                          // out of A, to the entrance, to C
+  const pos = P(16, 6);                                                              // on the first leg of its way out of A
+  const again = rejoin(R_C, R_B, pos, first, 1);                                     // C was only where it was going: now B (another hall, back to the first one)
+  assert.equal(throughWall(again), null, 'it does not cut from A to C or B');
+  assert.deepEqual(again[again.length - 1], { x: 48, z: 8 });
+  const leave = leadOut(R_C, pos, first, 1);                                         // its job ends on the way: it goes out to the entrance of the hall it was going to
+  assert.equal(throughWall(leave), null);
+  assert.deepEqual(leave[leave.length - 1], { x: 60, z: 30 });
 });

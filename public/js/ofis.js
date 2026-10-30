@@ -626,7 +626,7 @@ export function createOfis(root, ctx, opts = {}) {
     // an office whose chat has just left is vacant now, but its person may still be walking out of it: its door is a real one (it opens for the person) until the next rebuild
     const roomIds = new Set(list.map(it => it.id));
     const leavingSlots = new Set();
-    for (const c of chars.values()) if (!roomIds.has(c.roomId) && c.cell >= 0) leavingSlots.add(c.cell);
+    for (const c of chars.values()) if (c.cell >= 0 && (!roomIds.has(c.roomId) || c.after === 'gone')) leavingSlots.add(c.cell);
     const oldBySlot = new Map([...oldRooms.values(), ...oldVacant].map(r => [r.slot, r]));
     items.forEach(it => {
       const n0 = B.i.length / 3, f0 = floorJobs.length;
@@ -2060,7 +2060,8 @@ export function createOfis(root, ctx, opts = {}) {
     if (c.path) c.turnT = TURN_S;
   }
   // The other way round: the figure is on its way out and the chat (or the job) is back. It turns around and walks to its seat again, to the seat it left if that is still free (then back along
-  // the way out), else to another seat of the room (back along the way out to where the two routes part, then in along the other).
+  // the way out), else to another seat of the room (back along the way out to where the two routes part, then in along the other). A chat that has come back into ANOTHER office (its own was
+  // taken in the meantime) is led out of the old one first (to the hall's lane and along it to the new door, or to the entrance and in at the new one: rejoin), never across the rooms between.
   function comeBack(c, room) {
     let slot = -1;
     if (!c.main) {
@@ -2071,6 +2072,7 @@ export function createOfis(root, ctx, opts = {}) {
     c.slot = slot;
     if (slot >= 0) room.slotChar[slot] = c;
     c.route = route;
+    c.cell = room.slot;
     c.seat = seatFor(room, seatKey(c, slot));
     startWalk(c, way, 'sit');
     if (c.path) c.turnT = TURN_S;
@@ -2094,7 +2096,7 @@ export function createOfis(root, ctx, opts = {}) {
     if (out && !entryMoved) return;
     const pos = c.root.position;
     let path;
-    if (old) path = leadOut(routeFor(c, old, Math.max(0, Math.min(c.slotWas, old.cap - 1))), pos, c.path, c.pi);
+    if (old && old.slot === c.cell) path = leadOut(routeFor(c, old, Math.max(0, Math.min(c.slotWas, old.cap - 1))), pos, c.path, c.pi);
     else if (c.route) path = leadOut(c.route = rebaseRoute(c.route, c.cell), pos, c.path, c.pi);
     else {                                                // no route known: to the nearest hall lane, then to the entrance
       let lane = pos.z;
@@ -2115,6 +2117,7 @@ export function createOfis(root, ctx, opts = {}) {
       if (!room) { exitVacated(c, old, oldEntry !== world.entryX || (!!old && spot(old, oldHalls, oldEntry) !== spot(old, world.halls, world.entryX))); continue; }
       const same = !!old && spot(old, oldHalls, oldEntry) === spot(room, world.halls, world.entryX);
       const out = c.after === 'gone', walking = c.mode === 'walk' && c.path;
+      if (out && c.route && c.cell !== room.slot) { exitVacated(c, null, true); continue; }     // walking out of an office that is not the chat's now (the chat has come back into another one): out along that office's own route
       if (!c.main && !out && (c.slot < 0 || c.slot >= room.cap || room.slotChar[c.slot])) c.slot = room.slotChar.indexOf(null);
       const noSeat = !c.main && !out && c.slot < 0;
       if (!c.main && !out && c.slot >= 0) room.slotChar[c.slot] = c;

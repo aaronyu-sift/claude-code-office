@@ -10,7 +10,9 @@
 //                                 a rebuilt building, a seat that moved, a figure that comes back. The straight join is only right where nothing stands between the figure
 //                                 and the route (an empty hall); inside a coworking office use the two that follow
 //   rejoin(old, route, pos, path, pi)   a path from where a figure stands onto the way to a new seat: back along its old route to the last point the two routes share, then on along
-//                                 the new one, so a person wanted at another seat, a class that shrinks or a rebuild never cuts across a table
+//                                 the new one, so a person wanted at another seat, a class that shrinks or a rebuild never cuts across a table; for the seat of ANOTHER office the routes
+//                                 share nothing inside a room: back along the old route to the hall's lane, along the lane to the new door (one hall: `sameHall`) or out to the entrance
+//                                 and in along the new route from its own entrance (two halls), never through the wall between the two offices
 //   leadOut(route, pos, path, pi)  the same for a walk to the entrance: along the route to its start, and along the link that joins the route first when the figure is on one
 //                                 (`meet` finds where it meets the route, `sharedUpTo` the last point two routes of one office share)
 //   etaSeconds(len, pace)         the time a walk of that length takes with the ramps (the test of the 10 second budget)
@@ -152,6 +154,10 @@ export function sharedUpTo(a, b) {
   return d;
 }
 
+// Whether two routes run along the lane of one hall: their second point, the door's point on the lane, has the same z (the hall's lane is a straight line from the entrance, so the
+// stretch of the lane between two doors of one hall is part of both routes and is as clear as they are). Two offices of one hall have different doors but one lane; two halls have two lanes.
+export const sameHall = (a, b) => a.length > 1 && b.length > 1 && Math.abs(a[1].z - b[1].z) < SAME;
+
 // Where a figure that is not on `route` meets it: the figure stands on a link that joins the route (the rest of its current path, `path` from the point it walks to, `pi`), and `at` is
 // the first point of that rest that is on the route; `link` is the points to walk to get there. A figure that is on the route already has no link and `at` is where it stands.
 export function meet(route, pos, path, pi) {
@@ -168,14 +174,23 @@ export function leadOut(route, pos, path, pi) {
   return compact([{ x: pos.x, z: pos.z }, ...m.link, ...repath(route, m.at, 'entrance')]);
 }
 
-// A figure on `oldRoute` (or on a link that joins it) is put on `newRoute`, the route of another seat of the same office, and walks to the new seat: back along the old route to the
-// last point the two share, then along the new one. When it is still on the part they share (the hall, the door), or the routes are not those of one office, it goes on from the nearest
-// point of the new route, as repath does.
+// A figure on `oldRoute` (or on a link that joins it) is put on `newRoute`, the route of another seat, and walks to the new seat: back along the old route to the
+// last point the two share, then along the new one. When it is still on the part they share (the hall, the door) it goes on from the nearest point of the new route, as repath does.
+// Another office (the chat came back while its person was still walking out of the office it had, and another chat has taken that one) shares nothing inside a room, so the way goes
+// out of the old room first and never straight across: in the same hall, back along the old route to the lane, along the lane to the new door and in along the new route; in another
+// hall, out along the old route to the entrance, the short way along the front of the building to the new entrance (the two entrances are at the same x, outside every room) and in
+// along the new route from its start.
 export function rejoin(oldRoute, newRoute, pos, path = null, pi = 0) {
   const p = { x: pos.x, z: pos.z };
   if (!oldRoute || oldRoute.length < 2) return repath(newRoute, p, 'seat');
   const m = meet(oldRoute, pos, path, pi), n = nearestOnPath(oldRoute, m.at), d = sharedUpTo(oldRoute, newRoute);
-  if (d < 1 || n.d > 0.3 || n.i + 1 <= d) return compact([p, ...m.link, ...repath(newRoute, m.at, 'seat')]);
+  if (d < 1) {
+    if (!sameHall(oldRoute, newRoute) || newRoute.length < 2) return compact([...leadOut(oldRoute, pos, path, pi), ...newRoute].map(q => ({ x: q.x, z: q.z })));
+    const back = [];
+    if (n.d <= 0.3) for (let k = n.i; k >= 1; k--) back.push(oldRoute[k]);                // out of the old room to the lane (nothing to walk back when it is on the lane already)
+    return compact([p, ...m.link, ...(n.d <= 0.3 ? [n.q] : []), ...back, ...newRoute.slice(1)].map(q => ({ x: q.x, z: q.z })));
+  }
+  if (n.d > 0.3 || n.i + 1 <= d) return compact([p, ...m.link, ...repath(newRoute, m.at, 'seat')]);
   const back = [];
   for (let k = n.i; k >= d; k--) back.push(oldRoute[k]);
   return compact([p, ...m.link, n.q, ...back, ...newRoute.slice(d + 1)].map(q => ({ x: q.x, z: q.z })));
