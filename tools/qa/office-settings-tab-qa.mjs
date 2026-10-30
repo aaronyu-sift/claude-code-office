@@ -26,14 +26,14 @@ const args = process.argv.slice(2);
 const val = f => { const i = args.indexOf('--' + f); return i >= 0 ? args[i + 1] : undefined; };
 const only = val('only'), shotsDir = val('shots');
 if (shotsDir) mkdirSync(shotsDir, { recursive: true });
-const want = name => !only || only === 'settings-tab' || only === name;
+const want = name => !args.includes('--mutations') && (!only || only === 'settings-tab' || only === name);       // a mutation run only runs the checks inside its copies
 const results = [];
 function check(name, ok, detail) {
   results.push({ name, ok });
   console.log(`CHECK settings-tab-${name} ${ok ? 'PASS' : 'FAIL'} ${detail}`);
 }
 const same = (a, b) => JSON.stringify(a) === JSON.stringify(b);
-const stored = text => { try { return JSON.parse(text); } catch { return null; } };
+const stored = text => { try { return JSON.parse(text) || {}; } catch { return {}; } };       // nothing stored reads as an empty object, so a missing key is a failed part, not a crash
 
 // ---- helpers run in the page --------------------------------------------------------------------------------------------------------------------------------
 const waitFor = async (fn, ms = 20000, step = 150) => { const t0 = Date.now(); let r; while (Date.now() - t0 < ms) { r = await fn(); if (r) return r; await sleep(step); } return r; };
@@ -104,6 +104,8 @@ async function part(name, opts, body) {
   try {
     if (!S.ready.ok) throw new Error('3D scene did not become ready: ' + JSON.stringify(S.ready.last));
     await body(S);
+  } catch (e) {
+    check(name === 'projectpx' ? 'project-pixel' : name, false, `the check crashed: ${String(e && e.message || e).slice(0, 300)}`);       // a page that lacks what the check needs is a failure, not a missing result
   } finally { await S.done(); }
 }
 const offsite = reqs => reqs.filter(u => !/^(http:\/\/127\.0\.0\.1:\d+\/|data:|blob:|about:)/.test(u));
