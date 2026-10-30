@@ -221,6 +221,13 @@ test('looks: a building of 11 offices has every kind of seat somewhere, every ar
   }
 });
 
+test('looks: no two offices of a big building read the same (style, work part and soft part), and there is no office chair among the models', () => {
+  const looks = looksAll(buildingPlan(baysForOffices(40)).cells), seen = new Set();
+  assert.ok(looks.size >= 40);
+  for (const l of looks.values()) { const k = [l.style, l.work, l.soft].join(); assert.ok(!seen.has(k), `slot ${l.slot} reads like an earlier office (${k})`); seen.add(k); }
+  assert.ok(!('chair' in PROPS) && !('chairDesk' in PROPS) && !Object.values(PROPS).some(u => /chairDesk/.test(u)), 'the office chair is not in the manifest');
+});
+
 test('sampler: a random template is six numbers inside the room, or null when the parts do not fit; the same seed gives the same one', () => {
   const rand = () => { let a = 5; return () => { a = (a * 1664525 + 1013904223) >>> 0; return a / 4294967296; }; };
   const a = sampleTemplate('communal', 'corner', rand()), b = sampleTemplate('communal', 'corner', rand());

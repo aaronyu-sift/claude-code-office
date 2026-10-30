@@ -741,9 +741,10 @@ export function createOfis(root, ctx, opts = {}) {
     looks() {
       return [...world.rooms.values(), ...(world.vacant || [])].sort((a, b) => a.slot - b.slot).map(r => {
         const l = lookOf(r.look), d = decor.collected && decor.collected.rooms.get(r.id);
-        return { slot: r.slot, id: r.id, vacant: r.vacant, style: l.style, theme: r.look.theme, work: l.work, soft: l.soft, sig: d && d.sig, tris: d && d.tris, items: d && d.items, lit: decor.litOf(r.slot) };
+        return { slot: r.slot, id: r.id, vacant: r.vacant, style: l.style, theme: r.look.theme, work: l.work, soft: l.soft, sig: d && d.sig, tris: d && d.tris, items: d && d.items, models: d && d.models, lit: decor.litOf(r.slot) };
       });
     },
+    lit(slot) { return decor.litOf(slot); },                                  // the light of a slot's room now, 0..1 (it eases when a chat takes the slot or leaves)
     // the arrangement of one office: the seats (kind, place, facing, stand point), the walks the people take to them (what pathFor gives) and the furniture they must keep clear of
     arrange(id) {
       const r = world.rooms.get(id) || (world.vacant || []).find(v => v.id === id);

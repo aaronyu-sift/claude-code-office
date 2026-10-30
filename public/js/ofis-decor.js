@@ -15,13 +15,20 @@
 // rooms (three more draw calls for the whole building) and the shaders do not change when a room is added or selected.
 import * as THREE from 'three';
 import { makePalette } from './ofis-rig.js';
-import { STYLES, MODEL_SIZE, SCALE, paletteSpec, footprint, TONES } from './ofis-styles.js';
+import { STYLES, MODEL_SIZE, SCALE, paletteSpec, footprint, TONES, shadeHex } from './ofis-styles.js';
 import { levels, flicker, paneColour, createFollower, createSwitches } from './ofis-light.js';
 import { rot } from './ofis-geom.js';
 import { CYCLE } from './motion.js';
 
 const VIEW = new THREE.Vector3(1, 0.9, 1).normalize();              // the camera's direction (ofis.js VIEW): glow sprites face it
 const FRAME = { study: '#6b4630', lab: '#e9eef3', garden: '#f3efe6', library: '#3d2a1e', studio: '#fbfaf6', cafe: '#fff4dc' };
+const lumOf = hex => { const n = parseInt(hex.slice(1, 7), 16); return (0.2126 * ((n >> 16) & 255) + 0.7152 * ((n >> 8) & 255) + 0.0722 * (n & 255)) / 255; };
+// A table has to read against the floor it stands on: a wood about as light as the floor is lifted on a dark floor and darkened on a light one, until the two differ by `gap` in lightness.
+export function against(col, floor, gap = 0.2) {
+  const up = lumOf(floor) < 0.5;
+  for (let t = 0; t <= 0.6; t += 0.05) { const c = t ? shadeHex(col, up ? t : -t) : col; if (Math.abs(lumOf(c) - lumOf(floor)) >= gap) return c; }
+  return shadeHex(col, up ? 0.6 : -0.6);
+}
 const GLOW_GAIN = 0.8, POOL_GAIN = 0.55;                            // how much of a tone's colour a glow and a pool add at full night
 
 // ------------------------------------------------------------ floor patterns (grey, multiplied with the floor's vertex colours)
@@ -132,7 +139,7 @@ export function createDecor({ atmosphere, aniso = 4 } = {}) {
 
     // one occupied office. ctx: { B (the Batch), kit ({ GEO, PAL, PK, AS, POSTERS, BOOKS, POLISH, shade }), X, Z, W, D, plan, style, theme, color (the chat's colour), rng, top (chief desk height), roomId }
     furnish(ctx) {
-      const { B, kit, X, Z, plan, style: st, color, rng: r, roomId, slot, screens } = ctx;
+      const { B, kit, X, Z, plan, style: st, theme, color, rng: r, roomId, slot, screens } = ctx;
       const { GEO, PAL, PK, AS, POSTERS, BOOKS, shade } = kit;
       const b = (x, y, z, w, h, d, col, ry) => B.box(X + x, y, Z + z, w, h, d, col, ry);
       const pt = (geo, x, y, z, sx, sy, sz, col, ry, rx, rz) => B.put(geo, X + x, y, Z + z, sx, sy, sz, col, ry, rx, rz);
@@ -165,7 +172,7 @@ export function createDecor({ atmosphere, aniso = 4 } = {}) {
         switch (it.k) {
           case 'm': case 'lamp': case 'rug': model(it); break;
           case 'table': {                                            // a table the pack has no model for: a rounded slab on legs of its own kind (ofis-arrange.js)
-            const col = st.pack.wood, leg = shade(st.pack.metal, -0.28), top = it.h, ry = it.ry || 0, under = shade(col, -0.3);
+            const col = against(st.pack.wood, theme.floor), leg = shade(st.pack.metal, -0.28), top = it.h, ry = it.ry || 0, under = shade(col, -0.3);
             const at = (lx, lz) => { const [dx, dz] = rot(lx, lz, ry); return [it.x + dx, it.z + dz]; };
             if (it.shape === 'ell') {
               pt(GEO.cyl, it.x, top - 0.025, it.z, it.w, 0.05, it.d, col, ry);
@@ -363,7 +370,7 @@ export function createDecor({ atmosphere, aniso = 4 } = {}) {
       const drawn = plan.items.map(it => [it.k, it.m || it.shape || it.kind || '', +(it.x || 0).toFixed(2), +(it.z || 0).toFixed(2), +(it.ry || 0).toFixed(2), it.seat == null ? '' : it.seat].join(':'));
       let h = 0x811c9dc5;
       for (const ch of drawn.join('|')) h = Math.imul(h ^ ch.charCodeAt(0), 0x01000193) >>> 0;
-      build.rooms.set(roomId, { style: st.id, slot, windows: plan.windows.length, lights: plan.lights.length, items: drawn.length, sig: h.toString(16), tris: B.i.length / 3 - tris0, arrangement: plan.look ? plan.look.work + '+' + plan.look.soft : null });
+      build.rooms.set(roomId, { style: st.id, slot, windows: plan.windows.length, lights: plan.lights.length, items: drawn.length, sig: h.toString(16), tris: B.i.length / 3 - tris0, models: [...new Set(plan.items.map(i => i.m).filter(Boolean))].sort(), arrangement: plan.look ? plan.look.work + '+' + plan.look.soft : null });
     },
 
     // the light of a slot's room: on while a chat is in it, off while nobody is (ofis.js lightsFor). The number eases over SWITCH_MS (ofis-light.js createSwitches)

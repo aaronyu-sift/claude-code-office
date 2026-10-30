@@ -5,8 +5,8 @@
 //
 //   3d-room-life  four scenes: 22:00 with 6 chats (5 offices with a chat, one asleep), 13:00 with 3 chats, 22:00 with 3 chats and prefers-reduced-motion, and
 //     22:00 with 4 chats that all work in one folder (their rooms must still differ: the style is the chat's, not the project's)
-//     - every office with a chat has a window and a lamp (and no vacant office has a lamp); the plan the scene was given is the style the office was drawn in
-//     - two offices differ in style, and the pictures differ (the mean colour of the middle of the office), also when their chats share one folder (scene 4)
+//     - every office with a chat has a window and a lamp; so has every vacant office (it is the same room), but its lamps are dark and its windows the night sky at 22:00; the plan the scene was given is the style the office was drawn in
+//     - two offices differ in style, and the pictures differ (the mean colour of the middle of the office), also when their chats share one folder (scene 4: the look is the slot's, not the chat's or the folder's)
 //     - the lamps glow at 22:00 and not at 13:00: the colour that went to the GPU, and the pixels around the lamp with and without the living part
 //     - the windows show the sky by day and a warm light at night
 //     - the living part is 3 draw calls, the building is inside the typical budget of 3d-vacant (office3d-qa.mjs), nothing leaves 127.0.0.1
@@ -24,8 +24,8 @@ const args = process.argv.slice(2);
 const val = f => { const i = args.indexOf('--' + f); return i >= 0 ? args[i + 1] : undefined; };
 const shotsDir = val('shots');
 
-// the budget of the building as it is used (3 chats in 10 offices): the same numbers as TYPICAL in office3d-qa.mjs
-const TYPICAL = { calls: 70, tris: 126000 };
+// the budget of the building as it is used (3 chats in the 11 offices of the X): the same numbers as TYPICAL in office3d-qa.mjs
+const TYPICAL = { calls: 76, tris: 161000 };
 const LIFE = {
   addedCalls: 3,          // panes, bulbs and flames, glows and pools: one instanced mesh each
   glowNight: 0.6,         // the colour of a lamp's glow at 22:00 (1 is full) and the most it may have at 13:00
@@ -92,10 +92,11 @@ async function observe({ tag, n, query, reducedMotion = false, root, pictures = 
     if (noLamp.length) bad(`${noLamp.length} of ${rooms.length} offices have no lamp (${noLamp.map(r => r.project).join(', ')})`);
     const wrongStyle = rooms.filter(r => !life.rooms[r.id] || life.rooms[r.id].style !== styles[r.id]);
     if (wrongStyle.length) bad(`${wrongStyle.length} offices were drawn in another style than the scene says (${wrongStyle.map(r => `${r.project}: ${(life.rooms[r.id] || {}).style} / ${styles[r.id]}`).join(', ')})`);
-    const strays = Object.keys(life.byRoom).filter(id => !ids.has(id));
-    if (strays.length) bad(`light sources in rooms that have no chat: ${strays.join(', ')}`);
-    const vacantLit = life.panes - life.windows - life.screens;                            // the dark panes of the vacant offices
-    out.vacantPanes = vacantLit;
+    // a vacant office is the slot's own room with the lights off: it has its windows and lamps like an office with a chat (the same furniture), and at night its lamps are dark and its windows are the night sky
+    const vacantIds = Object.keys(life.byRoom).filter(id => !ids.has(id));
+    out.vacant = { offices: vacantIds.length };
+    const vacantNoLamp = vacantIds.filter(id => !(life.byRoom[id] || []).includes('lamp'));
+    if (vacantNoLamp.length) bad(`${vacantNoLamp.length} vacant offices have no lamp (a vacant office is furnished like the room a chat gets)`);
 
     // the colour that went to the GPU: the lamps and the windows
     const glows = rooms.map(r => life.lampGlow[r.id]);
@@ -106,6 +107,17 @@ async function observe({ tag, n, query, reducedMotion = false, root, pictures = 
     const night = /22:00/.test(query);
     const skyBad = rooms.filter((r, i) => { const p = out.panes[i]; return !p || (night ? !(p[0] > p[2] + 0.4) : !(p[2] > p[0] + 0.2)); });
     if (skyBad.length) bad(`${skyBad.length} windows show the wrong thing for ${night ? '22:00 (want a warm light)' : '13:00 (want the sky)'}: ${out.panes.map(p => p && p.join('/')).join(' ')}`);
+    // the vacant offices: dark lamps (the colour that went to the GPU) and dark windows at night; by day the same sky as every window
+    out.vacant.glows = vacantIds.map(id => life.lampGlow[id]);
+    out.vacant.panes = vacantIds.map(id => life.paneRGB[id]);
+    if (night) {
+      const lit = vacantIds.filter((id, i) => !(out.vacant.glows[i] <= 0.001)), warm = vacantIds.filter((id, i) => { const p = out.vacant.panes[i]; return !p || p[0] > p[2]; });
+      if (lit.length) bad(`${lit.length} vacant offices have a lit lamp at 22:00 (glow ${out.vacant.glows.join(' ')}, want 0)`);
+      if (warm.length) bad(`${warm.length} vacant offices have a warm window at 22:00 (${out.vacant.panes.map(p => p && p.join('/')).join(' ')}, want the night sky)`);
+    } else {
+      const dark = vacantIds.filter((id, i) => { const p = out.vacant.panes[i]; return !p || !(p[2] > p[0] + 0.2); });
+      if (dark.length) bad(`${dark.length} vacant offices do not show the sky at 13:00 (${out.vacant.panes.map(p => p && p.join('/')).join(' ')})`);
+    }
 
     // the budget, with the camera where the scene put it (the whole building): the living part is three draw calls, the whole building is inside the budget of the building as it is used (3 chats)
     const withLife = await page.evaluate(o3('o.draw()'));
@@ -215,7 +227,7 @@ const D = 'public/js/ofis-decor.js', L = 'public/js/ofis-light.js', ST = 'public
 const MUTATIONS = [
   { name: 'no window is drawn: the pane of a window is never made', file: D, from: "      const pane = (wall, a, y, w, h, extra = {}) => build.panes.push(", to: "      const pane = (wall, a, y, w, h, extra = {}) => extra.kind === 'window' ? 0 : build.panes.push(", scenes: ['night'] },
   { name: 'no lamp: the light sources of a plan are not collected', file: D, from: "      for (const l of plan.lights) build.lights.push(", to: "      for (const l of plan.lights.filter(l => l.kind !== 'lamp')) build.lights.push(", scenes: ['night'] },
-  { name: 'the style is the project\'s again: chats in one folder share a style', file: O, from: 'const style = styleAt(styleOf.get(it.id) ?? hash(it.id));', to: 'const style = styleAt(hash((a && a.project) || it.id));', scenes: ['folder'] },
+  { name: 'the look is the project\'s again: chats in one folder share a style', file: O, from: 'const look = world.looks.get(it.slot);', to: 'const look = world.looks.get(it.vacant ? it.slot : hash(a.project) % world.looks.size);', scenes: ['folder'] },
   { name: 'every office gets the same style', file: ST, from: 'export const styleAt = i => STYLES[STYLE_IDS[((i % N) + N) % N]];', to: 'export const styleAt = i => STYLES[STYLE_IDS[0]];', scenes: ['night'] },
   { name: 'the lamps glow in the daytime', file: L, from: '  const L = LEVEL[kind] || LEVEL.lamp;\n', to: "  if (kind === 'lamp') return { bulb: 1, glow: 1, pool: 1 };\n  const L = LEVEL[kind] || LEVEL.lamp;\n", scenes: ['day'] },
   { name: 'the lamps never light: the light follows a night that never comes', file: D, from: "const v = follower.v, k = v[0], reduced = follower.reduced;", to: "const v = follower.v, k = 0, reduced = follower.reduced;", scenes: ['night'] },
@@ -225,7 +237,8 @@ const MUTATIONS = [
   { name: 'the flicker is three times as strong', file: L, from: 'candle: 0.07', to: 'candle: 0.3', scenes: ['night'] },
   { name: 'the flicker never moves', file: L, from: 'if (reduced) return 1;', to: 'if (true) return 1;', scenes: ['night'] },
   { name: 'every lamp is its own mesh: 40 more draw calls', file: D, from: "      out.lights = lights;\n", to: "      out.lights = lights;\n      for (let i = 0; i < 40; i++) g.add(new THREE.Mesh(new THREE.BoxGeometry(0.01, 0.01, 0.01), new THREE.MeshBasicMaterial()));\n", scenes: ['day'] },
-  { name: 'a vacant office gets a lamp', file: D, from: "    furnishVacant({ B, X, Z, W, door }) {", to: "    furnishVacant({ B, X, Z, W, door }) {\n      build.lights.push({ kind: 'lamp', x: X + 2, y: 0.8, z: Z + 2, r: 0.5, pool: 0.8, floorY: 0, tone: 'warm', phase: 0.1, room: 'vacant-lamp', style: 'vacant' });", scenes: ['night'] },
+  { name: 'a vacant office has its lamps and windows lit at night', file: O, from: 'for (const it of items) decor.setLit(it.slot, !it.vacant, instant);', to: 'for (const it of items) decor.setLit(it.slot, true, instant);', scenes: ['night'] },
+  { name: 'a vacant office has no lamp: it is furnished without its lights', file: D, from: "      for (const l of plan.lights) build.lights.push(", to: "      for (const l of plan.lights.filter(l => roomId.startsWith('vacant') ? l.kind === 'screen' : true)) build.lights.push(", scenes: ['night'] },
 ];
 
 async function runMutations() {

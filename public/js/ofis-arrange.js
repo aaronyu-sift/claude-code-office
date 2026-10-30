@@ -405,7 +405,6 @@ export function composeRoom(spec) {
 
 // ------------------------------------------------------------ the dressing: what a style adds to an arrangement
 
-const WALL_KINDS = new Set(['win', 'clock', 'pics', 'screen', 'wb', 'sconce', 'bulbs']);
 function rng(seed) { let a = seed | 0; return () => { a = (a + 0x6d2b79f5) | 0; let t = Math.imul(a ^ (a >>> 15), 1 | a); t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t; return ((t ^ (t >>> 14)) >>> 0) / 4294967296; }; }
 const shuffled = (list, r) => { const a = list.slice(); for (let i = a.length - 1; i > 0; i--) { const j = (r() * (i + 1)) | 0; [a[i], a[j]] = [a[j], a[i]]; } return a; };
 
@@ -460,7 +459,7 @@ function dress(base, door, style, rand) {
     return true;
   };
   for (const w of base.windows) takeWall({ ...w });                // the arrangement's windows first (a bench stands against them), then the style's own wall pieces
-  for (const it of STYLES[style].items.filter(i => WALL_KINDS.has(i.k))) takeWall({ ...it });
+  for (const it of STYLES[style].walls) takeWall({ ...it });
   if (!items.some(it => it.k === 'win')) takeWall({ k: 'win', wall: 'w', c: 3.4, w: 1.4, h: 1.0, y0: 1.0 }) || takeWall({ k: 'win', wall: 'n', c: 9.0, w: 1.2, h: 1.0, y0: 1.0 });
   const blocksWall = (it, bb) => {
     const h = heightOfPiece(it);
@@ -564,19 +563,23 @@ export function looksAll(cells) {
   if (looksCache.has(cells)) return looksCache.get(cells);
   const slots = cells.map(c => c.slot).filter(s => s != null && s >= 0).sort((a, b) => a - b);
   const out = new Map(), use = { style: new Array(STYLE_IDS.length).fill(0), theme: new Array(THEMES_N).fill(0), work: new Array(WORK_IDS.length).fill(0), soft: new Array(SOFT_IDS.length).fill(0) };
-  const pick = (n, banned, uses, pref) => {
+  // the choice for one slot: not what a lower neighbour has (banned), not a combination an earlier office already has (avoid), then the one used least, then the one its hash points at
+  const pick = (n, banned, uses, pref, avoid = () => false) => {
     let best = -1, bc = Infinity;
-    for (let i = 0; i < n; i++) { const v = (pref + i) % n; if (banned.has(v)) continue; const c = uses[v] * 100 + i; if (c < bc) { bc = c; best = v; } }
+    for (let i = 0; i < n; i++) { const v = (pref + i) % n; if (banned.has(v)) continue; const c = (avoid(v) ? 1e4 : 0) + uses[v] * 100 + i; if (c < bc) { bc = c; best = v; } }
     if (best < 0) best = pref % n;                               // cannot happen with at most five lower neighbours
     uses[best]++;
     return best;
   };
+  const pairs = new Set(), triples = new Set();                  // (style, work) and (style, work, soft) as they are taken: no two offices read the same until all 144 looks are used
   for (const slot of slots) {
     const lower = neighbourSlots(slot, cells).filter(s => s < slot).map(s => out.get(s)).filter(Boolean);
     const style = pick(STYLE_IDS.length, new Set(lower.map(l => l.style)), use.style, hash('style:' + slot));
     const theme = pick(THEMES_N, new Set(lower.map(l => l.theme)), use.theme, hash('theme:' + slot));
-    const work = pick(WORK_IDS.length, new Set(lower.map(l => l.work)), use.work, hash('work:' + slot));
-    const soft = pick(SOFT_IDS.length, new Set(), use.soft, hash('soft:' + slot));
+    const work = pick(WORK_IDS.length, new Set(lower.map(l => l.work)), use.work, hash('work:' + slot), v => pairs.has(style + ':' + v));
+    pairs.add(style + ':' + work);
+    const soft = pick(SOFT_IDS.length, new Set(), use.soft, hash('soft:' + slot), v => triples.has(style + ':' + work + ':' + v));
+    triples.add(style + ':' + work + ':' + soft);
     out.set(slot, { slot, style, theme, work, soft, seed: hash('seed:' + slot) });
   }
   looksCache.set(cells, out);
