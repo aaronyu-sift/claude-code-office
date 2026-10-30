@@ -50,7 +50,7 @@ function build() {
       row('time', {
         label: msg('set.time'), help: msg('st.time.help'),
         control: seg('st-time-mode', 'time', `<button type="button" data-v="auto" aria-pressed="true">${esc(msg('set.timeAuto'))}</button><button type="button" data-v="fixed" aria-pressed="false">${esc(msg('set.timeFixed'))}</button>`),
-        extra: `<div class="st-time" hidden><input type="range" id="st-time" min="0" max="1435" step="5" value="720" aria-label="${esc(msg('set.time'))}"><output id="st-time-out" for="st-time">12:00</output></div>`,
+        extra: `<div class="st-time" hidden><input type="range" id="st-time" min="0" max="1435" step="5" value="720" aria-valuetext="12:00" aria-label="${esc(msg('set.time'))}"><output id="st-time-out" for="st-time">12:00</output></div>`,
       }) +
       row('season', { label: msg('set.season'), help: msg('st.season.help'), labelFor: 'st-season', control: select('season', OPTIONS.season) }) +
       row('hemisphere', { label: msg('set.hemisphere'), help: msg('st.hemisphere.help'), labelFor: 'st-hemisphere', control: select('hemisphere', OPTIONS.hemisphere) }) +
@@ -77,6 +77,8 @@ export function createSettingsTab(root, { hub, running = () => '3d', loadConfig 
   root.innerHTML = build();
   const page = root.querySelector('.st'), q = sel => root.querySelector(sel);
   const time = q('#st-time'), timeOut = q('#st-time-out'), timeRow = q('.st-time');
+  // the clock time is what a screen reader says for the slider, not the minutes after midnight that its value counts
+  const showTime = text => { timeOut.textContent = text; time.setAttribute('aria-valuetext', text); };
 
   function source(key, kind, param) {
     const el = q(`[data-src="${key}"]`);
@@ -100,7 +102,7 @@ export function createSettingsTab(root, { hub, running = () => '3d', loadConfig 
     q('#st-reload').hidden = unkept;
     for (const b of q('#st-time-mode').querySelectorAll('button')) b.setAttribute('aria-pressed', String(b.dataset.v === (fixed ? 'fixed' : 'auto')));
     timeRow.hidden = !fixed || !rows.includes('time');
-    if (fixed) { time.value = String(minutesOf(s.time)); timeOut.textContent = s.time; }
+    if (fixed) { time.value = String(minutesOf(s.time)); showTime(s.time); }
     q('#st-season').value = s.season; q('#st-hemisphere').value = s.hemisphere; q('#st-weather').value = s.weather;
     fillShelf(q('#st-shelf'), s.shelf);
     q('#st-project').checked = s.project === 'on';
@@ -129,7 +131,7 @@ export function createSettingsTab(root, { hub, running = () => '3d', loadConfig 
     const b = e.target.closest('button[data-v]');
     if (b) hub.set('time', b.dataset.v === 'auto' ? 'auto' : fixedNow());
   });
-  time.addEventListener('input', () => { timeOut.textContent = fmtClock(+time.value); hub.set('time', fmtClock(+time.value)); });
+  time.addEventListener('input', () => { const t = fmtClock(+time.value); showTime(t); hub.set('time', t); });
   for (const key of ['season', 'hemisphere', 'weather']) q('#st-' + key).addEventListener('change', e => hub.set(key, e.target.value));
   q('#st-shelf').addEventListener('change', e => hub.set('shelf', +e.target.value));
   q('#st-project').addEventListener('change', e => hub.set('project', e.target.checked ? 'on' : 'off'));

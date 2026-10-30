@@ -73,3 +73,13 @@ test('markup: the popover has a project switch in its own row, after the shelf; 
   assert.ok(html.indexOf('data-row="shelf"') < html.indexOf('data-row="project"'));
   assert.match(html, /<section id="view-settings" class="view view-settings" role="tabpanel" aria-labelledby="tab-settings" hidden><\/section>/);
 });
+
+test('the time sliders say the clock time to a screen reader: both carry aria-valuetext in their markup and keep it with the clock text (the page checks the live values)', () => {
+  assert.match(html, /<input type="range" id="set-time"[^>]*aria-valuetext="12:00"/);
+  const tab = readFileSync(here('../public/js/settings-tab.js'), 'utf8'), panel = readFileSync(here('../public/js/settings-panel.js'), 'utf8');
+  assert.match(tab, /<input type="range" id="st-time"[^>]*aria-valuetext="12:00"/);
+  for (const [name, src] of [['tab', tab], ['popover', panel]]) {
+    assert.match(src, /setAttribute\('aria-valuetext', text\)/, `${name}: the one place that writes the clock text writes the valuetext with it`);
+    assert.equal((src.match(/\b(timeOut|out)\.textContent = /g) || []).length, 1, `${name}: the clock text is written in that one place only, so never without the valuetext`);
+  }
+});

@@ -71,11 +71,11 @@ const SNAP = `(() => {
     rows: all('#view-settings .st-row[data-row]').filter(r => shown(r)).map(r => r.dataset.row),
     helps: all('#view-settings .st-row[data-row]').filter(r => shown(r)).every(r => (r.querySelector('.st-help') || {}).textContent),
     src: Object.fromEntries(['scene', 'time', 'season', 'hemisphere', 'weather', 'shelf', 'project', 'camera'].map(k => [k, src(k)])),
-    tab: { scene: pressedOf('#st-scene'), timeMode: pressedOf('#st-time-mode'), slider: q('#st-time').value, sliderOut: q('#st-time-out').textContent, sliderShown: shown(q('.st-time')), season: q('#st-season').value, hemi: q('#st-hemisphere').value,
+    tab: { scene: pressedOf('#st-scene'), timeMode: pressedOf('#st-time-mode'), slider: q('#st-time').value, sliderOut: q('#st-time-out').textContent, sliderText: q('#st-time').getAttribute('aria-valuetext'), sliderShown: shown(q('.st-time')), season: q('#st-season').value, hemi: q('#st-hemisphere').value,
       weather: q('#st-weather').value, shelf: q('#st-shelf').value, shelfOpts: [...q('#st-shelf').options].map(o => o.value).join(), project: q('#st-project').checked, sample: q('.st-sample').dataset.on,
       camera: pressedOf('#st-camera'), pending: shown(q('.st-pending')), noteReduced: shown(q('[data-note="reduced"]')) },
     pop: { wrapShown: !!pop && !pop.hidden, open: !q('#set-pop').hidden, season: q('#set-season').value, hemi: q('#set-hemisphere').value, weather: q('#set-weather').value, shelf: q('#set-shelf').value,
-      project: q('#set-project').checked, timeMode: pressedOf('#set-time-mode'), sliderOut: q('#set-time-out').textContent, rows: all('#set-pop .set-row[data-row]').filter(r => shown(r)).map(r => r.dataset.row) },
+      project: q('#set-project').checked, timeMode: pressedOf('#set-time-mode'), sliderOut: q('#set-time-out').textContent, sliderText: q('#set-time').getAttribute('aria-valuetext'), rows: all('#set-pop .set-row[data-row]').filter(r => shown(r)).map(r => r.dataset.row) },
     store: off ? off.settings.get() : px ? px.settings : null, from: off ? off.settings.from() : px ? px.settingsFrom : null, engine: off ? '3d' : px ? 'pixel' : null,
     dataScene: v && v.dataset.scene || null,
     stored: (() => { try { return localStorage.getItem('ajan-ofisi.settings'); } catch { return 'THROWS'; } })(),
@@ -212,6 +212,8 @@ if (want('store')) {
     const inStore = k => a.store[k] === E[k];
     if (!(Object.keys(E).every(inStore) && a.engine === '3d')) bad.push(`3D store after the tab's changes: ${JSON.stringify(a.store)}`);
     if (!(a.pop.season === 'winter' && a.pop.hemi === 'south' && a.pop.weather === 'rain' && a.pop.shelf === '20' && a.pop.project === true && a.pop.timeMode === 'fixed' && a.pop.sliderOut === '22:00')) bad.push(`the popover did not follow the tab at once: ${JSON.stringify(a.pop)}`);
+    // a screen reader says the clock time for the slider (aria-valuetext), not the minutes after midnight that the slider's value counts, in the tab and in the popover
+    if (!(a.tab.sliderText === '22:00' && a.tab.sliderText === a.tab.sliderOut && a.pop.sliderText === '22:00' && a.pop.sliderText === a.pop.sliderOut)) bad.push(`the time slider says ${JSON.stringify({ tab: a.tab.sliderText, tabOut: a.tab.sliderOut, pop: a.pop.sliderText, popOut: a.pop.sliderOut })} to a screen reader, not 22:00`);
     const st = stored(a.stored);
     if (!(st && Object.keys(E).every(k => st[k] === E[k]) && !('scene' in st))) bad.push(`stored: ${a.stored}`);
     if (!(a.tab.sample === 'true' && a.tab.project === true && a.src.season.from === 'stored' && a.src.project.text === 'Saved in this browser' && a.mark === mark)) bad.push(`the tab itself: ${JSON.stringify({ tab: a.tab, src: a.src.season, mark: a.mark })}`);
@@ -228,7 +230,9 @@ if (want('store')) {
     await click(page, '#set-pop .toggle span'); await sleep(400);                       // the project switch of the popover: off again
     const built = await waitFor(async () => { const r = await envOf(); return r.env.builtSeason === 'autumn' && r.atm.season === 'autumn' && r.atm.weather === 'snow' ? r : null; }, 40000);     // the scene is drawing now: it rebuilds for the new season
     if (!built) bad.push(`the visible 3D scene did not follow the popover: ${JSON.stringify(await envOf())}`);
+    await range(page, '#set-time', 435); await sleep(300);                                // the popover's own slider: 07:15, which the tab's slider and both clock texts must say too
     const c = await snap(page);                                                           // still on the Office view: the tab is hidden, its controls are not stale
+    if (!(c.pop.sliderText === '07:15' && c.pop.sliderOut === '07:15' && c.tab.sliderText === '07:15' && c.tab.slider === '435' && c.store.time === '07:15')) bad.push(`the popover's slider: ${JSON.stringify({ pop: c.pop.sliderText, popOut: c.pop.sliderOut, tab: c.tab.sliderText, tabSlider: c.tab.slider, store: c.store.time })}`);
     if (!(c.tab.season === 'autumn' && c.tab.weather === 'snow' && c.tab.hemi === 'north' && c.tab.shelf === '5' && c.tab.project === false && c.tab.sample === 'false')) bad.push(`the tab did not follow the popover at once: ${JSON.stringify(c.tab)}`);
     await click(page, '#tab-settings'); await sleep(500);
     const d = await snap(page);
@@ -527,6 +531,8 @@ const MUTATIONS = [
   { name: 'the camera row shows in the 3D scene', file: 'public/js/office-settings.js', from: "export const tabRowsOf = office => ['scene', ...rowsOf(office)];", to: "export const tabRowsOf = office => TAB_ROWS;", fails: ['open'] },
   { name: 'the tab does not follow a change made in the popover', file: 'public/js/settings-tab.js', from: 'hub.on(refresh);', to: '', fails: ['store'] },
   { name: 'the popover does not follow a change made in the tab', file: 'public/js/settings-panel.js', from: 'hub.on(refresh);', to: '', fails: ['store'] },
+  { name: 'the tab\'s time slider says minutes to a screen reader', file: 'public/js/settings-tab.js', from: "time.setAttribute('aria-valuetext', text);", to: '', fails: ['store'] },
+  { name: 'the popover\'s time slider says minutes to a screen reader', file: 'public/js/settings-panel.js', from: "slider.setAttribute('aria-valuetext', text);", to: '', fails: ['store'] },
   { name: 'a change in the tab does not reach the scene', file: 'public/js/settings-tab.js', from: "for (const key of ['season', 'hemisphere', 'weather']) q('#st-' + key).addEventListener('change', e => hub.set(key, e.target.value));", to: "for (const key of ['season', 'hemisphere', 'weather']) q('#st-' + key).addEventListener('change', () => refresh());", fails: ['store'] },
   { name: 'an address that names a setting does not follow the control', file: 'public/js/main.js', from: "const search = urlAfterChange(location.search, key, value);\n  if (search != null)", to: "const search = null;\n  if (search != null)", fails: ['store'] },
   { name: 'the address is ignored by the scene choice', file: 'public/js/office-settings.js', from: 'return merge(storage ? loadSettings(storage) : {}, officeQuery(search)).values.scene;', to: 'return merge(storage ? loadSettings(storage) : {}, {}).values.scene;', fails: ['scene'] },

@@ -20,6 +20,8 @@ export function createSettingsPanel({ wrap, hub }) {
   const season = wrap.querySelector('#set-season'), hemi = wrap.querySelector('#set-hemisphere'), weather = wrap.querySelector('#set-weather'), shelf = wrap.querySelector('#set-shelf');
   const project = wrap.querySelector('#set-project'), note = wrap.querySelector('#set-note');
 
+  // the clock time is what a screen reader says for the slider, not the minutes after midnight that its value counts
+  const showTime = text => { out.textContent = text; slider.setAttribute('aria-valuetext', text); };
   function refresh() {
     const o = hub.office(), s = hub.settings();
     if (!o || !s) return;
@@ -27,7 +29,7 @@ export function createSettingsPanel({ wrap, hub }) {
     for (const row of wrap.querySelectorAll('.set-row[data-row]')) row.hidden = !rows.includes(row.dataset.row);
     for (const b of timeMode.querySelectorAll('button')) b.setAttribute('aria-pressed', String(b.dataset.v === (fixed ? 'fixed' : 'auto')));
     timeRow.hidden = !fixed || !rows.includes('time');
-    if (fixed) { slider.value = String(minutesOf(s.time)); out.textContent = s.time; }
+    if (fixed) { slider.value = String(minutesOf(s.time)); showTime(s.time); }
     season.value = s.season; hemi.value = s.hemisphere; weather.value = s.weather; fillShelf(shelf, s.shelf); project.checked = s.project === 'on';
     const notes = [];
     if (s.weather !== 'off' && matchMedia('(prefers-reduced-motion: reduce)').matches) notes.push(msg('set.note.reduced'));
@@ -50,7 +52,7 @@ export function createSettingsPanel({ wrap, hub }) {
     hub.set('time', b.dataset.v === 'auto' ? 'auto' : fixedNow());
     refresh();
   });
-  slider.addEventListener('input', () => { out.textContent = fmtClock(+slider.value); hub.set('time', fmtClock(+slider.value)); });
+  slider.addEventListener('input', () => { const t = fmtClock(+slider.value); showTime(t); hub.set('time', t); });
   season.addEventListener('change', () => { hub.set('season', season.value); refresh(); });
   hemi.addEventListener('change', () => { hub.set('hemisphere', hemi.value); refresh(); });
   weather.addEventListener('change', () => { hub.set('weather', weather.value); refresh(); });
