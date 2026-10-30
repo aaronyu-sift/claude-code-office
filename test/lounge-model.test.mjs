@@ -168,6 +168,56 @@ test('the signs have a Turkish text too, and the placeholders survive', () => {
   assert.equal(buildView(normalizePayload(payload([post({ ts: NOW - 5e3 })])), { now: NOW, t: tt }).wall.rows[0].age, 'şimdi');
 });
 
+test('a failed request is not an off board: no good answer says "not answering", old posts stay but are marked, a blip changes nothing', () => {
+  const ok = normalizePayload(payload([post({ ts: NOW - 20e3 })]));
+  // the first request fails: the board must not say it is off, and must not send a working server to --chat-db
+  const never = buildView(null, { now: NOW, t, status: 'failed' });
+  assert.equal(never.state, 'failed'); assert.equal(never.sign.tone, 'warn');
+  assert.equal(never.sign.text, 'Message board not answering'); assert.match(never.sign.hint, /GET \/api\/lounge/); assert.doesNotMatch(never.sign.hint, /--chat-db/);
+  assert.deepEqual(never.wall.rows, []); assert.deepEqual(never.people, []); assert.deepEqual(never.card.rows, []);
+  assert.match(never.card.source, /not answering/); assert.doesNotMatch(never.card.source, /no \/api\/lounge endpoint|every 3 seconds while this view/);
+  assert.equal(buildView(null, { now: NOW, t, status: 'nofile' }).sign.text, 'Agent message board is off', 'a 404 is still an off board');
+  // one missed poll is a blip: the wall stays as it was
+  const blip = buildView(ok, { now: NOW, t, status: 'failed', lastOkMs: NOW - 4e3 });
+  assert.equal(blip.state, 'ok'); assert.equal(blip.stale, false); assert.equal(blip.sign.text, '1 post in the last hour'); assert.equal(blip.wall.rows.length, 1);
+  assert.equal(blip.key, buildView(ok, { now: NOW, t, status: 'ok', lastOkMs: NOW }).key, 'a blip repaints nothing');
+  // down for more than a few polls with old posts: they stay, marked as old, with the age of the last good answer
+  const stale = buildView(ok, { now: NOW, t, status: 'failed', lastOkMs: NOW - 25e3 });
+  assert.equal(stale.state, 'ok'); assert.equal(stale.stale, true); assert.equal(stale.wall.rows.length, 1); assert.equal(stale.card.rows.length, 1);
+  assert.equal(stale.sign.tone, 'warn'); assert.equal(stale.sign.text, 'Old posts: last answer under 1m ago'); assert.equal(stale.sign.latest, '', 'old posts are not the headline');
+  assert.match(stale.card.source, /last good answer/); assert.notEqual(stale.key, blip.key);
+  assert.equal(buildView(ok, { now: NOW, t, status: 'failed', lastOkMs: NOW - 180e3 }).sign.text, 'Old posts: last answer 3m ago');
+  assert.equal(buildView(ok, { now: NOW, t, status: 'failed', lastOkMs: NOW - LIMITS.staleMs }).stale, false, 'exactly the limit is still a blip');
+  // down for so long that the posts are over an hour old: not a quiet board, a board that does not answer
+  const long = buildView(ok, { now: NOW + 2 * 3600e3, t, status: 'failed', lastOkMs: NOW });
+  assert.equal(long.state, 'failed'); assert.equal(long.quiet, false); assert.equal(long.sign.text, 'Message board not answering'); assert.equal(long.sign.hint, 'Last answer: 2h ago. Trying again every 3 seconds.');
+  // an unsupported answer in hand, or a quiet one, then a failure: it does not answer
+  assert.equal(buildView(normalizePayload({ state: { state: 'unsupported' } }), { now: NOW, t, status: 'failed', lastOkMs: NOW - 60e3 }).state, 'failed');
+  assert.equal(buildView(normalizePayload(payload([post({ ts: NOW - 2 * 3600e3 })])), { now: NOW, t, status: 'failed', lastOkMs: NOW - 60e3 }).state, 'failed', 'a quiet board that does not answer');
+  // the answer comes back; the lounge switched off
+  assert.equal(buildView(ok, { now: NOW, t, status: 'ok', lastOkMs: NOW }).stale, false);
+  const off = buildView(ok, { now: NOW, t, status: 'failed', lastOkMs: NOW - 60e3, mode: 'off' });
+  assert.equal(off.state, 'hidden'); assert.equal(off.stale, false);
+  // the Turkish text, and English without a lookup
+  const tt = lookup(tr);
+  assert.equal(buildView(null, { now: NOW, t: tt, status: 'failed' }).sign.text, 'Mesaj panosu yanıt vermiyor');
+  assert.equal(buildView(ok, { now: NOW, t: tt, status: 'failed', lastOkMs: NOW - 180e3 }).sign.text, 'Eski mesajlar: son yanıt 3m önce');
+  assert.equal(buildView(null, { now: NOW, status: 'failed' }).sign.text, 'Message board not answering');
+});
+
+test('the sign carries the newest post: who and the text in 60 characters; only who in the mode names; nothing for a sign with no posts', () => {
+  const posts = [post({ seq: 1, ts: NOW - 30e3, text: 'old one' }), post({ seq: 2, ts: NOW - 5e3, from: 'carol', to: ['dave'], text: 'word '.repeat(30) })];
+  const v = view(payload(posts));
+  assert.match(v.sign.latest, /^carol to dave: word word/);
+  assert.ok(Array.from(v.sign.latest.slice('carol to dave: '.length)).length <= LIMITS.signText && v.sign.latest.endsWith('…'));
+  assert.equal(view(payload(posts), { mode: 'names' }).sign.latest, 'carol to dave');
+  assert.equal(view(payload(posts), { mode: 'off' }).sign.latest, '');
+  assert.equal(view(payload([])).sign.latest, '');
+  assert.equal(view(payload([post({ ts: NOW - 2 * 3600e3 })])).sign.latest, '');
+  assert.equal(buildView(null, { now: NOW, t }).sign.latest, '');
+  assert.equal(view(payload([post({ text: 'a\u202Eb\u0007c' })])).sign.latest, 'alice to bob: abc', 'cleaned like every text');
+});
+
 test('without a message lookup the signs still read in English', () => {
   const v = buildView(null, { now: NOW });
   assert.equal(v.sign.text, 'Agent message board is off');

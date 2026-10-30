@@ -81,6 +81,22 @@ test('paint: a board without posts says its sign: off with its hint, unsupported
   }
 });
 
+test('paint: a board that stopped answering says so: no answer yet is a warning sign, old posts stay dimmed under a warning line', () => {
+  const none = recorder();
+  paintWall(none.g, buildView(null, { now: NOW, mode: 'text', status: 'failed' }));
+  assert.ok(none.log.texts.includes('Message board not answering'), JSON.stringify(none.log.texts));
+  assert.ok(none.log.texts.some(s => /GET \/api\/lounge/.test(s)) && !none.log.texts.some(s => /chat-db/.test(s)), 'it does not send the server to --chat-db');
+  const data = normalizePayload({ state: { state: 'ok' }, messages: [{ seq: 1, ts: NOW - 20e3, channel: 'ops', from: 'a', to: ['b'], text: 'the last good answer' }] });
+  const fresh = recorder(), old = recorder();
+  paintWall(fresh.g, buildView(data, { now: NOW, mode: 'text', status: 'ok', lastOkMs: NOW }));
+  paintWall(old.g, buildView(data, { now: NOW, mode: 'text', status: 'failed', lastOkMs: NOW - 40e3 }));
+  const at = (r, s) => r.log.alpha[r.log.texts.indexOf(s)];
+  assert.equal(at(fresh, 'the last good answer'), 1);
+  assert.equal(at(old, 'the last good answer'), 0.5, 'old news is dimmed');
+  assert.ok(old.log.texts.includes('the last good answer') && old.log.texts.some(s => /^Old posts: last answer/.test(s)), JSON.stringify(old.log.texts));
+  assert.equal(at(old, old.log.texts.find(s => /^Old posts/.test(s))), 1, 'the warning line itself is not dimmed');
+});
+
 test('paint: a post that arrives fades in while the others move up, and at rest everything is drawn at full strength', () => {
   const view = demoView(), seq = view.wall.rows.at(-1).seq;
   const rest = recorder(), start = recorder(), mid = recorder();

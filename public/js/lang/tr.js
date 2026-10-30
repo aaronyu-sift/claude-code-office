@@ -308,6 +308,13 @@ export default {
     'lounge.src.demo': 'Veri: yerleşik demo senaryosu (?lounge=demo), sizin ajanlarınız değil.',
     'lounge.src.none': 'Veri yok: bu sunucuda /api/lounge uç noktası yok.',
     'lounge.src.hidden': 'Salon kapalı (lounge=off ayarı): hiçbir şey çekilmiyor. Göstermek için ?lounge=text veya ?lounge=names kullanın.',
+    'lounge.failed': 'Mesaj panosu yanıt vermiyor',
+    'lounge.failedHint': 'Sunucu GET /api/lounge isteğine yanıt vermedi. 3 saniyede bir yeniden deneniyor.',
+    'lounge.failedHintAge': 'Son yanıt: {age} önce. 3 saniyede bir yeniden deneniyor.',
+    'lounge.stale': 'Eski mesajlar: son yanıt {age} önce',
+    'lounge.ago.under': 'bir dakikadan az',
+    'lounge.src.failed': 'GET /api/lounge yanıt vermiyor (hata, zaman aşımı ya da JSON olmayan bir yanıt): 3 saniyede bir yeniden deneniyor.',
+    'lounge.src.stale': 'GET /api/lounge yanıt vermiyor (hata, zaman aşımı ya da JSON olmayan bir yanıt). Gösterilen mesajlar son iyi yanıttan; 3 saniyede bir yeniden deneniyor.',
 
     // raf (uyuyan veya kapanan sohbetler) ve ayrıntı paneli
     'status.closed': 'Kapalı',

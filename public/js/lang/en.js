@@ -328,6 +328,13 @@ export default {
     'lounge.src.demo': 'Data: the built-in demo script (?lounge=demo), not your agents.',
     'lounge.src.none': 'No data: this server has no /api/lounge endpoint.',
     'lounge.src.hidden': 'The lounge is switched off (setting lounge=off): nothing is fetched. Use ?lounge=text or ?lounge=names to show it.',
+    'lounge.failed': 'Message board not answering',
+    'lounge.failedHint': 'The server did not answer GET /api/lounge. Trying again every 3 seconds.',
+    'lounge.failedHintAge': 'Last answer: {age} ago. Trying again every 3 seconds.',
+    'lounge.stale': 'Old posts: last answer {age} ago',
+    'lounge.ago.under': 'under 1m',
+    'lounge.src.failed': 'GET /api/lounge is not answering (an error, a timeout or a reply that is not JSON): asking again every 3 seconds.',
+    'lounge.src.stale': 'GET /api/lounge is not answering (an error, a timeout or a reply that is not JSON). The posts shown are from its last good answer; asking again every 3 seconds.',
 
     // shelf (chats asleep or closed) and the details panel
     'status.closed': 'Closed',

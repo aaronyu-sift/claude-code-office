@@ -8,6 +8,7 @@
 //     opts.progress (0..1)      how far the arrival of new posts has come (1: at rest): the posts that are new fade in, the others move up by the room they make
 //     opts.added (Set of seq)   the posts that are new in this paint
 //     opts.night (0..1)         how far the night is on: the panel is a little brighter against a dark sky
+//   view.stale                  the board has stopped answering and these posts are the last good answer: the rows are dimmed and the header line is in the warning colour
 import { clipChars } from './lounge-model.js';
 
 export const CANVAS = Object.freeze({ w: 2048, h: 688 });
@@ -37,6 +38,7 @@ const BASE = { text: 44, line: 50, who: 34, chip: 25, age: 28, pad: 14 };
 const X = { chip: 44, who: 292, text: 800, ageRight: CANVAS.w - 44 };            // the columns
 const TOP = 78, BOTTOM = 20;                                                        // the header and the bottom margin
 const MIN_SCALE = 0.55;
+const STALE_ALPHA = 0.5;                                                            // the rows of a board that has stopped answering: old news, dimmed
 
 const rgba = (hex, a) => { const n = parseInt(hex.slice(1), 16); return `rgba(${n >> 16 & 255}, ${n >> 8 & 255}, ${n & 255}, ${a})`; };
 const roundRect = (g, x, y, w, h, r) => {
@@ -75,7 +77,7 @@ export function paintWall(g, view, { progress = 1, added = null, night = 0 } = {
   if ('letterSpacing' in g) g.letterSpacing = '0px';
   const list = view.wall.rows;
   if (view.state === 'ok' && list.length && view.sign.text) {
-    g.font = `500 26px ${SANS}`; g.fillStyle = INK.muted; g.textAlign = 'right';
+    g.font = `500 26px ${SANS}`; g.fillStyle = view.stale ? INK.warn : INK.muted; g.textAlign = 'right';
     say(view.sign.text, X.ageRight, 50);
     g.textAlign = 'left';
   }
@@ -102,7 +104,7 @@ export function paintWall(g, view, { progress = 1, added = null, night = 0 } = {
   g.beginPath(); g.rect(10, TOP - 6, W - 20, H - TOP - 8); g.clip();
   let y = H - BOTTOM - total;
   list.forEach((r, i) => {
-    const h = heights[i], newer = isNew(r), alpha = newer ? progress : 1, dy = newer ? (1 - progress) * 14 * k : shift;
+    const h = heights[i], newer = isNew(r), alpha = (newer ? progress : 1) * (view.stale ? STALE_ALPHA : 1), dy = newer ? (1 - progress) * 14 * k : shift;
     const yy = y + dy, line = BASE.line * k, base = yy + (h - BASE.pad * k - (Math.max(1, r.lines.length) - 1) * line) / 2 + BASE.text * k * 0.36 - 2;
     rows.push({ seq: r.seq, y: yy, h });
     // the channel chip

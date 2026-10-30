@@ -37,22 +37,21 @@ export function createLounge(host) {
   const reducedNow = () => !!(decor.follower && decor.follower.reduced);
 
   // ---- the data and the view
-  let data = null, status = 'none', view = null, viewAt = -1e9, dirty = true, visible = false, lastOn = false;
+  let data = null, status = 'none', lastOkMs = null, view = null, viewAt = -1e9, dirty = true, visible = false, lastOn = false;
   const clockNow = () => (src.source === 'demo' ? Date.now() : store.now());
   const sessionIds = () => { try { return store.mains().map(a => a.id); } catch { return []; } };
   const read = src.source === 'demo' ? createDemoSource({ now: Date.now, sessions: sessionIds }) : fetchReader({ baseURI: typeof document !== 'undefined' ? document.baseURI : undefined });
-  const poller = createPoller({
-    read, now: () => performance.now(), canPoll: () => canPoll(),
-    onData(res) {
-      status = res.status;
-      if (res.status === 'ok') data = normalizePayload(res.payload);
-      else if (res.status === 'nofile') data = normalizePayload({ state: { state: 'off', reason: 'no endpoint' } });
-      dirty = true;
-    },
-  });
+  // an answer of the poll. A failed one (an error, a timeout, a reply that is not JSON) keeps the last good data and when it was: the view says "not answering" and dims old posts, it never says "off"
+  function onData(res) {
+    status = res.status;
+    if (res.status === 'ok') { data = normalizePayload(res.payload); lastOkMs = clockNow(); }
+    else if (res.status === 'nofile') { data = normalizePayload({ state: { state: 'off', reason: 'no endpoint' } }); lastOkMs = null; }
+    dirty = true;
+  }
+  const poller = createPoller({ read, now: () => performance.now(), canPoll: () => canPoll(), onData });
   function makeView() {
     const pending = src.source === 'live' && status === 'none';                          // nothing has answered yet: a dark panel, not a sign that says "off"
-    return buildView(data, { now: clockNow(), mode: pending ? 'off' : mode(), source: src.source, t: msg, sessionInfo: host.sessionInfo, status });
+    return buildView(data, { now: clockNow(), mode: pending ? 'off' : mode(), source: src.source, t: msg, sessionInfo: host.sessionInfo, status, lastOkMs });
   }
 
   // ---- where it stands
@@ -194,15 +193,17 @@ export function createLounge(host) {
     const b = plan.board, show = mode() !== 'off';
     sign.want = show;
     sign.pos.set(cell.X + b.cu, b.y0 + b.h + 0.34, cell.Z + b.cv);
-    const html = `<div class="of-lsign ${esc(view.sign.tone)}"><i></i><b>${esc(view.sign.title)}</b><span>${esc(view.sign.text)}</span></div>`;
-    if (html !== signHtml) { signHtml = html; host.setLabel(sign, html); sign.el.setAttribute('aria-label', `${view.sign.title}: ${view.sign.text}. ${msg('lounge.open')}`); sign.el.title = msg('lounge.open'); }
+    // the sign is the one surface that is readable at every zoom (the wall's own text needs about four times the fit zoom): it carries the newest post when there is one
+    const line = view.sign.latest || view.sign.text;
+    const html = `<div class="of-lsign ${esc(view.sign.tone)}"><i></i><b>${esc(view.sign.title)}</b><span>${esc(line)}</span></div>`;
+    if (html !== signHtml) { signHtml = html; host.setLabel(sign, html); sign.el.setAttribute('aria-label', `${view.sign.title}: ${line}. ${msg('lounge.open')}`); sign.el.title = msg('lounge.open'); }
   }
 
   // ---- the strip of light under the wall: the ambient pulse of the posts of the last minute
   function stepPulse(T) {
     const night = decor.follower ? decor.follower.k : 0;
-    const on = view.state === 'ok' || view.state === 'unsupported';
-    const base = view.state === 'ok' ? (view.quiet ? 0.08 : 0.16) : view.state === 'unsupported' ? 0.12 : 0;
+    const on = view.state === 'ok' || view.state === 'unsupported' || view.state === 'failed';
+    const base = view.state === 'ok' ? (view.quiet ? 0.08 : 0.16) : view.state === 'unsupported' || view.state === 'failed' ? 0.12 : 0;
     const level = view.state === 'ok' ? view.activity.level : 0;
     const amp = level * 0.55;
     const v = on ? base + (reducedNow() ? amp : amp * (0.62 + 0.38 * wave(T * 1000, LOOP.slow))) : 0;
@@ -214,9 +215,10 @@ export function createLounge(host) {
     }
   }
 
-  // the face of the wall is drawn only while the board has something to show: posts, a quiet board, or an unsupported one. A board that is off (no endpoint, no --chat-db, the setting off, or
-  // nothing has answered yet) keeps its dark frame, which is in the batch, and says so in the sign over it and in the card: a lounge with nothing to say adds no draw call to the building
-  const boardShown = () => !!view && (view.state === 'ok' || view.state === 'unsupported');
+  // the face of the wall is drawn only while the board has something to show: posts, a quiet board, an unsupported one, or one that does not answer. A board that is off (no endpoint, no
+  // --chat-db, the setting off, or nothing has answered yet) keeps its dark frame, which is in the batch, and says so in the sign over it and in the card: a lounge with nothing to say
+  // adds no draw call to the building
+  const boardShown = () => !!view && (view.state === 'ok' || view.state === 'unsupported' || view.state === 'failed');
 
   // ---- the build
   let visibleParts = true, parts = [];                                                  // parts: everything the lounge added to the building group (not the invisible boxes that are clicked)
@@ -316,6 +318,12 @@ export function createLounge(host) {
     if (part !== 'building') for (const P of folk.values()) P.c.root.visible = v;
   }
 
+  // ---- verification only
+  // answer the poll by hand: the QA churns people through the lounge without waiting for the 3 second cadence (the same path as a real answer)
+  const feed = payload => onData({ status: 'ok', http: 200, payload });
+  // cheap (the snapshot reads the canvas back): is a post fading in, and how often the wall was painted
+  const paintState = () => ({ animating: !!painted.anim, count: painted.count });
+
   // ---- verification only (root.__ofis3d.lounge): what the lounge shows and costs right now
   function inkCount() {
     const d = g2d.getImageData(0, 0, CANVAS.w, CANVAS.h).data;
@@ -325,7 +333,7 @@ export function createLounge(host) {
   }
   function snapshot() {
     return {
-      mode: mode(), source: src.source, state: view ? view.state : null, status, sign: view ? view.sign : null, quiet: view ? view.quiet : null,
+      mode: mode(), source: src.source, state: view ? view.state : null, status, sign: view ? view.sign : null, quiet: view ? view.quiet : null, stale: view ? view.stale : null,
       wall: view ? view.wall.rows.map(r => ({ seq: r.seq, chip: r.chip, who: r.who, lines: r.lines, age: r.age })) : [],
       people: peopleList().map(P => ({ key: P.key, name: P.name, session: P.session, seat: P.seatId, pose: P.c.force.pose, out: P.out, scale: +P.c.force.scale.toFixed(3), x: +P.c.root.position.x.toFixed(2), z: +P.c.root.position.z.toFixed(2), label: P.label.shown, labelText: P.label.el.textContent })),
       paint: { count: painted.count, texts: painted.texts, scale: painted.scale, rows: painted.rows.length, animating: !!painted.anim, key: painted.key },
@@ -339,7 +347,7 @@ export function createLounge(host) {
   }
 
   return {
-    build, step, show, hide, setVisible, snapshot, click, openCard, closeCard, tipHtml, hoverPos,
+    build, step, show, hide, setVisible, snapshot, click, openCard, closeCard, tipHtml, hoverPos, feed, paintState,
     // the building has no hub cell (a layout without a lounge): nothing is drawn and nothing is polled
     clear() { if (!cell) return; cell = null; for (const [k, P] of [...folk]) { host.person.remove(P.c); host.dropLabel(P.label); folk.delete(k); } if (sign) sign.want = false; card.close(); poller.kick(); },
     touch() { dirty = true; },

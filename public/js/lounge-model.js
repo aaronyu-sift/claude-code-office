@@ -6,7 +6,9 @@
 //                              characters (grapheme clusters, never bytes and never half a surrogate pair) with an ellipsis that counts inside `max`
 //   normalizePayload(raw)      the answer of the endpoint as { state: { state, schema, reason }, messages, channels, agents }; every field may be missing and a field of
 //                              the wrong type is ignored, nothing here throws
-//   buildView(data, opts)      the view: sign, wall rows, people, activity, card rows, and `key` (changes exactly when what is painted changes)
+//   buildView(data, opts)      the view: sign, wall rows, people, activity, card rows, and `key` (changes exactly when what is painted changes). When the endpoint fails (a 500, a
+//                              timeout, an answer that is not JSON) the board is `failed`, not `off`: with no good answer in hand it says "not answering", with old posts in hand it keeps
+//                              them, dimmed (`view.stale`), once the last good answer is older than `staleMs`
 //   ageText(ms), splitLines(text), chipColour(name), personColour(name)
 //
 // The endpoint (built by the chat-source agent, not yet merged when this was written):
@@ -25,6 +27,8 @@ export const LIMITS = Object.freeze({
   quietMs: 60 * 60e3,          // quiet: no post for an hour
   pulseMs: 60e3,               // activity: the posts of the last minute
   pulseFull: 6,                // this many posts in a minute is the full pulse
+  staleMs: 10e3,               // the endpoint has not answered for this long (a few polls): the posts on the wall are old news and are shown so
+  signText: 60,                // characters of the newest post on the sign over the wall
   name: 24, channel: 20, session: 80, reason: 160, schema: 40,
   inMessages: 200,             // of a long answer only the newest ones are read
   inAgents: 100, inChannels: 50, inTo: 12,
@@ -146,7 +150,7 @@ const T0 = (t, key, p, fallback) => { try { const v = typeof t === 'function' ? 
 
 // data: normalizePayload's result, or null when nothing has arrived yet (then the state is `off`); a raw answer is normalized first
 // opts: { now (epoch ms), mode ('text' | 'names' | 'off'), source ('live' | 'demo'), t (message lookup), sessionInfo(id) -> { name, color } | null (the Office's own chat, or null when it is not there),
-//         status ('none' | 'ok' | 'nofile' | 'failed': how the last request went, for the source line) }
+//         status ('none' | 'ok' | 'nofile' | 'failed': how the last request went), lastOkMs (epoch ms of the last answer that worked, or null) }
 export function buildView(data, opts = {}) {
   const now = num(opts.now) ?? 0, mode = opts.mode === 'names' || opts.mode === 'off' ? opts.mode : 'text', source = opts.source === 'demo' ? 'demo' : 'live', t = opts.t;
   const info = typeof opts.sessionInfo === 'function' ? id => { try { return opts.sessionInfo(id); } catch { return null; } } : () => null;
@@ -154,19 +158,29 @@ export function buildView(data, opts = {}) {
   const title = tt('lounge.title', 'Agent lounge');
   const hidden = mode === 'off';
   const d = data && data.normalized === true ? data : normalizePayload(data);           // anything else is read as an answer of the endpoint
-  const state = hidden ? 'hidden' : d.state.state;
+  const lastOk = num(opts.lastOkMs), failedNow = opts.status === 'failed';
+  const downMs = failedNow && lastOk != null ? Math.max(0, now - lastOk) : null;        // how long the endpoint has not answered (null: it never did)
+  const down = failedNow && (downMs == null || downMs > LIMITS.staleMs);              // one missed poll is a blip: the wall stays as it was
+  const oldPosts = d.state.state === 'ok' && d.messages.some(m => m.ts && now - m.ts <= LIMITS.quietMs);
+  const stale = !hidden && down && oldPosts;                                           // old posts still on the wall, dimmed
+  const state = hidden ? 'hidden' : down && !oldPosts ? 'failed' : d.state.state;       // nothing to keep showing: the board says it does not answer
   const msgs = state === 'ok' ? d.messages : [];
   const inHour = msgs.filter(m => m.ts && now - m.ts <= LIMITS.quietMs).length;
   const quiet = state === 'ok' && inHour === 0;
   const nowLabel = tt('lounge.now', 'now');
+  const downAge = downMs == null ? '' : ageText(downMs, tt('lounge.ago.under', 'under 1m'));
 
   // sign: what the board says when it has no posts to show, and the line over it
-  const sign = { title, show: !hidden, tone: 'ok', text: '', hint: '' };
+  const sign = { title, show: !hidden, tone: 'ok', text: '', hint: '', latest: '' };
   if (state === 'off') { sign.tone = 'off'; sign.text = tt('lounge.off', 'Agent message board is off'); sign.hint = tt('lounge.offHint', 'Start the server with --chat-db <file> to show it.'); }
   else if (state === 'unsupported') {
     sign.tone = 'warn'; sign.text = tt('lounge.unsupported', 'Message board format not recognised');
     sign.hint = d.state.reason || (d.state.schema ? tt('lounge.schema', 'Schema: {schema}', { schema: d.state.schema }) : '');
+  } else if (state === 'failed') {
+    sign.tone = 'warn'; sign.text = tt('lounge.failed', 'Message board not answering');
+    sign.hint = downAge ? tt('lounge.failedHintAge', `Last answer: ${downAge} ago. Trying again every 3 seconds.`, { age: downAge }) : tt('lounge.failedHint', 'The server did not answer GET /api/lounge. Trying again every 3 seconds.');
   } else if (quiet) { sign.tone = 'quiet'; sign.text = tt('lounge.quiet', 'No posts in the last hour'); }
+  else if (stale) { sign.tone = 'warn'; sign.text = tt('lounge.stale', `Old posts: last answer ${downAge} ago`, { age: downAge }); }
   else if (state === 'ok') sign.text = tt('lounge.posts', `${inHour} posts in the last hour`, { n: inHour });
 
   const shaped = (m, limit, lines) => {
@@ -181,6 +195,9 @@ export function buildView(data, opts = {}) {
   // the wall: the last posts, newest at the bottom (none when the board has a sign to show instead, or the lounge is off)
   const showRows = state === 'ok' && !quiet;
   const wallRows = showRows ? msgs.slice(-LIMITS.wallRows).map(m => shaped(m, LIMITS.wallText, true)) : [];
+  // the newest post on the sign over the wall: the pill is the one surface of the lounge that stays readable at any zoom, so it carries the headline (not while the posts are old news)
+  const newest = wallRows.at(-1);
+  if (newest && !stale) sign.latest = newest.text ? `${newest.who}: ${clipChars(newest.text, LIMITS.signText)}` : newest.who;
 
   // the people: whoever posted in the last ten minutes (or was seen), the freshest first, at most six, each tied to its Office chat when it has one
   const seen = new Map();                                                    // lower-case name -> { name, last (age ms), session }
@@ -208,11 +225,13 @@ export function buildView(data, opts = {}) {
   const sourceLine = hidden ? tt('lounge.src.hidden', 'The lounge is switched off (setting lounge=off): nothing is fetched. Use ?lounge=text or ?lounge=names to show it.')
     : source === 'demo' ? tt('lounge.src.demo', 'Data: the built-in demo script (?lounge=demo), not your agents.')
       : status === 'nofile' ? tt('lounge.src.none', 'No data: this server has no /api/lounge endpoint.')
+        : down && stale ? tt('lounge.src.stale', 'GET /api/lounge is not answering (an error, a timeout or a reply that is not JSON). The posts shown are from its last good answer; asking again every 3 seconds.')
+          : down ? tt('lounge.src.failed', 'GET /api/lounge is not answering (an error, a timeout or a reply that is not JSON): asking again every 3 seconds.')
         : tt('lounge.src.live', 'Data: GET /api/lounge, the server’s read-only chat bridge (--chat-db), every 3 seconds while this view is on screen.');
   const channels = Object.entries(d.channels).sort((a, b) => b[1] - a[1] || (a[0] < b[0] ? -1 : 1)).slice(0, 6).map(([name, n]) => ({ name, n, colour: chipColour(name) }));
   const card = { title, rows: cardRows, posts: inHour, channels, source: sourceLine, sign, namesOnly: mode === 'names', people: people.map(p => p.name), hidden };
 
   // what is painted on the wall: when this string changes the canvas is painted again (the ages are in it as text, so they repaint once a minute and not once a second)
-  const key = JSON.stringify([mode, state, sign.text, sign.hint, wallRows.map(r => [r.seq, r.chip, r.who, r.lines, r.age])]);
-  return { mode, source, state, quiet, sign, wall: { rows: wallRows, showText: mode === 'text' }, people, activity, card, key, now };
+  const key = JSON.stringify([mode, state, stale, sign.text, sign.hint, wallRows.map(r => [r.seq, r.chip, r.who, r.lines, r.age])]);
+  return { mode, source, state, quiet, stale, sign, wall: { rows: wallRows, showText: mode === 'text' }, people, activity, card, key, now };
 }
