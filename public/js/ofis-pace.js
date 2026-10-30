@@ -7,7 +7,8 @@
 //   pacer.cost(ms)                  the CPU time of the frame that was just drawn: a scene that costs more than COST_SHARE of a display frame is drawn every 2nd, 3rd, ... frame
 //   pacer.shadow(now, casters)      true when the shadow map must be drawn again in this frame (time based: see SHADOW_MOVING_MS); shadowTaken(now) notes a refresh that something else asked for
 //   pacer.state                     { moving, fps, period, skip, costSkip, gapSkip, cost, deep }: the decision now, read-only (the QA and the page API read it)
-//   pacer.stats / pacer.summary()   counters since the start (raf, drawn, movingDrawn, shadows, wakes, steps, returns, reseeds) and the share of the last seconds that were moving
+//   pacer.stats / pacer.seconds(n) / pacer.summary(n)   counters since the start (raf, drawn, movingDrawn, late, shadows, wakes, steps, returns, reseeds), the last n finished seconds, and the share of them
+//                                   that were moving. A second has raf (animation frames that came), drawn, moving, shadows, late (gaps longer than GAP_LATE periods) and maxGap (ms)
 //
 // Rates. Moving (a walker, a door, the camera, a card that follows, a hover, a spring that is not at rest): every animation frame, whatever the display's rate (120 Hz: 120 frames a
 // second). Idle (nothing moves, nobody touches): IDLE_FPS. Idle for DEEP_AFTER_MS: DEEP_FPS. Focus is never asked: a visible window that has no focus is watched, not asleep.
@@ -64,10 +65,10 @@ export function createPacer({ softwareGL = false, idleFps = IDLE_FPS, deepFps = 
   const ring = new Uint8Array(GAP_WINDOW);
   let ringI = 0, ringN = 0, ringLate = 0, cleanMs = 0, gapSkip = 1, backoff = GAP_CLEAN_MS, lastReturn = -Infinity, lastChange = -Infinity;
   const changes = [];
-  const stats = { raf: 0, drawn: 0, movingRaf: 0, movingDrawn: 0, shadows: 0, shadowSync: 0, wakes: 0, steps: 0, returns: 0, reseeds: 0 };
+  const stats = { raf: 0, drawn: 0, movingRaf: 0, movingDrawn: 0, late: 0, shadows: 0, shadowSync: 0, wakes: 0, steps: 0, returns: 0, reseeds: 0 };
   // per second (what the page's cadence logger reads): the finished seconds and the one that is running
   const finished = [];
-  let cur = { s: -1, raf: 0, drawn: 0, moving: 0, shadows: 0 };
+  let cur = { s: -1, raf: 0, drawn: 0, moving: 0, shadows: 0, late: 0, maxGap: 0 };
 
   const ringClear = () => { ring.fill(0); ringI = ringN = ringLate = 0; };
   const guardReset = () => { ringClear(); cleanMs = 0; gapSkip = 1; backoff = GAP_CLEAN_MS; changes.length = 0; lastReturn = lastChange = -Infinity; };
@@ -133,7 +134,7 @@ export function createPacer({ softwareGL = false, idleFps = IDLE_FPS, deepFps = 
     const s = Math.floor(now / 1000);
     if (s === cur.s) return;
     if (cur.s >= 0) { finished.push(cur); if (finished.length > SECONDS_KEPT) finished.shift(); }
-    cur = { s, raf: 0, drawn: 0, moving: 0, shadows: 0 };
+    cur = { s, raf: 0, drawn: 0, moving: 0, shadows: 0, late: 0, maxGap: 0 };
   }
 
   return {
@@ -152,12 +153,14 @@ export function createPacer({ softwareGL = false, idleFps = IDLE_FPS, deepFps = 
     due(now) {
       lastNow = now;
       const moving = now < busyUntil;
+      bucket(now);
       if (lastRaf) {
         const gap = now - lastRaf;
+        if (gap > cur.maxGap) cur.maxGap = gap;
+        if (gap > GAP_LATE * period && gap < STALL_MS) { stats.late++; cur.late++; }
         if (!trackPeriod(gap) && !softwareGL) guard(now, gap, moving);
       }
       lastRaf = now;
-      bucket(now);
       stats.raf++; cur.raf++;
       if (moving) { stats.movingRaf++; cur.moving++; }
       let interval;
@@ -188,7 +191,8 @@ export function createPacer({ softwareGL = false, idleFps = IDLE_FPS, deepFps = 
       return { moving, fps, period: +period.toFixed(2), skip: k, costSkip, gapSkip, cost: +cost.toFixed(2), deep, softwareGL, maxFps };
     },
     get stats() { return { ...stats }; },
-    // the last `n` finished seconds: how many animation frames came, how many were drawn, how many came while the scene was moving, how many shadow maps; and the share that was moving
+    // the last `n` finished seconds: how many animation frames came, how many were drawn, how many came while the scene was moving, how many shadow maps, how many were late and the longest gap;
+    // and the share that was moving
     // (a source of motion that is stuck shows as a share near 1 with nobody moving)
     seconds(n = 60) { return finished.slice(-n).map(x => ({ ...x })); },
     summary(n = 60) {

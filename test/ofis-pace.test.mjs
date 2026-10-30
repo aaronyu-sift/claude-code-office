@@ -308,7 +308,9 @@ test('pace: the counters and the per-second record', () => {
   assert.equal(st.wakes, 2);
   const sec = pacer.seconds(5);
   assert.equal(sec.length, 5);
-  for (const r of sec) assert.ok(r.raf > 100 && r.raf < 130 && r.drawn <= r.raf, JSON.stringify(r));
+  for (const r of sec) assert.ok(r.raf > 100 && r.raf < 130 && r.drawn <= r.raf && r.maxGap > 7 && r.maxGap < 12 && r.late === 0, JSON.stringify(r));
+  const slow = run({ hz: 120, ms: 5000, late: 0.1, seed: 4 }).pacer.seconds(3);
+  assert.ok(slow.every(r => r.late >= 3 && r.maxGap > 15), `late frames are counted: ${JSON.stringify(slow)}`);
   const sum = pacer.summary(10);
   assert.ok(sum.movingShare > 0.2 && sum.movingShare < 0.3, `moving share ${sum.movingShare}`);
   const idle = run({ hz: 120, ms: 8000 });
