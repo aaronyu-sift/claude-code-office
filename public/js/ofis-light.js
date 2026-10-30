@@ -87,9 +87,11 @@ export function bezier(css) {
 const EASE_FN = { out: bezier(EASE.out), in: bezier(EASE.in) };
 export const SWITCH_MS = DUR.fast;
 
-// The lights of every room as a number 0..1 per slot (an office is the same room whoever sits in it, so the light belongs to the slot): off while nobody is there, on while a
-// chat is. When the switch is thrown the number eases over SWITCH_MS: coming on it arrives (ease-out), going off it leaves (ease-in): the "feedback" kind of docs/motion.md.
-// The first time a slot is seen it is at its state at once (a page that loads with chats in it does not flick the rooms on). The state stays across rebuilds of the building.
+// The lights of every room as a number 0..1 per slot (an office is the same room whoever sits in it, so the light belongs to the slot): off while nobody is inside it, on while somebody
+// is. Who is inside, and how long a light is held after the last person has left, is the rule of ofis-presence.js; this only eases the number it throws. When the switch is thrown the
+// number eases over SWITCH_MS: coming on it arrives (ease-out), going off it leaves (ease-in): the "feedback" kind of docs/motion.md. The first time a slot is seen it is at its state at
+// once, whatever that is, so a room never flicks on or off just because it was first read (a page that opens with chats in the data starts dark: nobody has come through a door yet).
+// The state stays across rebuilds of the building.
 export function createSwitches() {
   const m = new Map();
   return {

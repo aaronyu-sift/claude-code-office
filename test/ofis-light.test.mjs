@@ -146,7 +146,7 @@ test('bezier: the CSS curves as functions: they start at 0, end at 1, never go b
   assert.ok(Math.abs(bezier('cubic-bezier(0.5, 0.5, 0.5, 0.5)')(0.3) - 0.3) < 1e-5, 'a straight line is the identity');
 });
 
-test('switches: a room comes on over SWITCH_MS and arrives early, goes off and leaves late, and a page that loads with chats in it starts lit', () => {
+test('switches: a room comes on over SWITCH_MS and arrives early, goes off and leaves late, and the first time a slot is seen it is at its state at once', () => {
   const s = createSwitches();
   s.set(3, true, 0); s.set(4, false, 0);
   assert.equal(s.get(3), 1, 'first seen: at its state at once');
