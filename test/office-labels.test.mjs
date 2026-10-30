@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { labelParts, labelHtml, shortDesc, clipTxt, DESC_MAX, DOING_MAX, SAY_MAX } from '../public/js/office-labels.js';
+import { labelParts, labelHtml, shortDesc, clipTxt, unticked, DESC_MAX, DOING_MAX, SAY_MAX } from '../public/js/office-labels.js';
 import { fmtShort } from '../public/js/util.js';
 import { t } from '../public/js/i18n.js';
 
@@ -82,4 +82,16 @@ test('the parts name the state that the scene styles', () => {
   assert.equal(labelParts(main()).wait, null);
   assert.equal(labelParts(sub({ status: 'waiting' }), { main: false }).wait, null);
   assert.equal(labelParts(sub(), { main: false, overflow: 3 }).overflow, 0);
+});
+
+test('unticked: two markups that differ only in a running clock are the same label, anything else is not', () => {
+  const at = ms => html(main({ status: 'waiting', since: NOW - 5000 }), {}, { now: NOW + ms });      // the same chat, a later clock
+  assert.notEqual(at(0), at(1000), 'the seconds are in the markup');
+  assert.equal(unticked(at(0)), unticked(at(1000)));
+  assert.equal(unticked(at(0)), unticked(at(120_000)), 'also across a change of unit');
+  assert.notEqual(unticked(at(0)), unticked(html(main({ status: 'ask', since: NOW - 5000 }))), 'another state is another label');
+  assert.notEqual(unticked(at(0)), unticked(html(main({ status: 'waiting', since: NOW - 9000 }))), 'another since is another label');
+  assert.notEqual(unticked(html(main({ name: 'one' }))), unticked(html(main({ name: 'two' }))));
+  assert.equal(unticked('<b>no clock</b>'), '<b>no clock</b>');
+  assert.match(unticked(at(0)), /<span data-since="\d+" data-fmt="short"><\/span>/, 'the clock element stays, its text goes');
 });

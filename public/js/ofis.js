@@ -6,7 +6,7 @@ import { RoundedBoxGeometry } from 'three/addons/geometries/RoundedBoxGeometry.j
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { catColor, hash, esc, icon, fmtShort } from './util.js';
 import { t as msg } from './i18n.js';
-import { labelParts, labelHtml } from './office-labels.js';
+import { labelParts, labelHtml, unticked } from './office-labels.js';
 import { createEnv } from './ofis-env.js';
 import { createDecor } from './ofis-decor.js';
 import { styleAt, wallColour, floorColour } from './ofis-styles.js';
@@ -15,7 +15,7 @@ import { createAtmosphere } from './office-atmosphere.js';
 import { createOfficeSettings, officeQuery } from './office-settings.js';
 import { LOOP, wave } from './motion.js';
 import { createOfisUi } from './ofis-ui.js';
-import { layoutLabels } from './ofis-label-layout.js';
+import { createLabelLayout } from './ofis-label-layout.js';
 import * as AS from './ofis-assets.js';
 import * as PL from './ofis-polish.js';
 import { makePalette, PALETTES, chooseOutfit, poseBones, seatPose } from './ofis-rig.js';
@@ -501,26 +501,47 @@ export function createOfis(root, ctx, opts = {}) {
     labels.add(L);
     return L;
   }
+  // A label is rebuilt only when its markup changes without its clocks: the seconds of a chip (`data-since`) are kept by the page's ticker, and a rebuild would restart the animation of the chip
+  // and measure the label again every second (office-labels.js `unticked`). When only the seconds differ the label is measured again, its text may be a character wider.
   function setLabel(L, html, id, pri) {
-    if (L.html !== html) { L.el.innerHTML = html; L.html = html; L.dirty = true; }
+    if (L.html !== html) {
+      const key = unticked(html);
+      if (key !== L.key) { L.el.innerHTML = html; L.key = key; }
+      L.html = html; L.dirty = true;
+    }
     if (id !== undefined && L.el.dataset.id !== id) L.el.dataset.id = id;
     if (pri !== undefined && L.pri !== pri) { L.pri = pri; L.el.style.zIndex = String(pri); }
   }
   function dropLabel(L) { if (!L) return; L.el.remove(); labels.delete(L); }
-  function showLabel(L, on) {
+  // The inline `visibility` switches at once (the QA and the click handling read it); the fade is CSS only (app.css `.of-l`, `.on`, `.cut`): a rate-independent opacity transition, none under
+  // prefers-reduced-motion, and none for a label that goes under the card (`cut`).
+  function showLabel(L, on, cut = false) {
     if (L.shown === on) return;
     L.shown = on;
     L.el.style.visibility = on ? 'visible' : 'hidden';
+    L.el.classList.toggle('on', on);
+    L.el.classList.toggle('cut', !on && cut);
   }
 
   // The labels of the agents (`agent`) may leave their spot for a free one near their agent; every other label keeps its spot and is dropped when it touches a label of higher
-  // priority; nothing is drawn under the card or the shelf (ofis-label-layout.js).
+  // priority; nothing is drawn under the card or the shelf (ofis-label-layout.js createLabelLayout: it remembers, so a label stays where it is and glides when it must move).
+  // Walkers (docs/labels.md): the label of a walking main agent is carried under its figure and holds no place, and the label of a walking sub-agent is not drawn until it sits (animChar
+  // sets `tag.off`); the figure of a walker is no obstacle for the others' labels, so nothing that is seated moves for somebody who passes.
   const PV = new THREE.Vector3();
-  function placeLabels() {
-    const s = clamp(zoom / 38, 0.74, 1);
+  const labelLayout = createLabelLayout();
+  const LABEL_STEP = 0.04, LABEL_MIN = 0.76, ZOOM_SLACK = 0.06;
+  let labelScale = 1;                                       // the labels' scale in steps of LABEL_STEP, so their text is drawn again only when it really changes size (zoom / 38, clamped)
+  // a label's zoom limits have a band: shown from its limit, it stays until the zoom is ZOOM_SLACK beyond it
+  function inZoom(L) {
+    const on = !!L.zOn, lo = L.minZoom * (on ? 1 - ZOOM_SLACK : 1), hi = L.maxZoom ? L.maxZoom * (on ? 1 + ZOOM_SLACK : 1) : Infinity;
+    return L.zOn = zoom >= lo && zoom < hi;
+  }
+  function placeLabels(now = lastT) {
+    if (Math.abs(zoom / 38 - labelScale) >= LABEL_STEP * 0.75) labelScale = clamp(Math.round(zoom / 38 / LABEL_STEP) * LABEL_STEP, LABEL_MIN, 1);
+    const s = labelScale, dpr = window.devicePixelRatio || 1, snap = v => Math.round(v * dpr) / dpr;
     const fixed = [], tags = [], byId = new Map();
     for (const L of labels) {
-      if (!L.want || L.off || zoom < L.minZoom || (L.maxZoom && zoom >= L.maxZoom)) { showLabel(L, false); continue; }
+      if (!L.want || L.off || !inZoom(L)) { showLabel(L, false); continue; }
       // the label under a main agent says the project and the chip at every zoom (office-labels.js): the HTML sign for the far zoom would say it twice
       if (L.sign === undefined) L.sign = L.el.classList.contains('of-signl');
       if (L.sign) { const m = chars.get(L.el.dataset.id); if (m && m.tag.want && !m.tag.off) { showLabel(L, false); continue; } }
@@ -534,15 +555,19 @@ export function createOfis(root, ctx, opts = {}) {
       if (x > vw + 4 || x + w < -4 || y > vh + 4 || y + h < -4) { showLabel(L, false); continue; }
       L.k = k;
       byId.set(L.uid, L);
-      (L.agent ? tags : fixed).push({ id: L.uid, x, y, w, h, pri: L.pri, rank: L.rank, force: L.force, maxGap: L.force ? Infinity : SUB_LABEL_REACH });
+      const T = { id: L.uid, x, y, w, h, pri: L.pri, rank: L.rank, force: L.force, maxGap: L.force ? Infinity : SUB_LABEL_REACH };
+      if (L.agent) { const c = chars.get(L.charId); T.walking = !!c && c.mode === 'walk'; }
+      (L.agent ? tags : fixed).push(T);
     }
-    const figs = ui.figureRects(chars.keys());
+    const figs = ui.figureRects(chars.keys()), standing = [];
+    for (const [id, r] of figs) { const c = chars.get(id); if (!c || c.mode !== 'walk') standing.push(r); }
     for (const T of tags) { const L = byId.get(T.id); T.near = figs.get(L.charId); }
-    const shown = layoutLabels({ fixed, tags, blocked: ui.blocked(), figures: [...figs.values()], vw, vh });
+    const shown = labelLayout.step({ fixed, tags, blocked: ui.blocked(), figures: standing, vw, vh, reduced: !!atmosphere.state.reducedMotion }, now);
     for (const [id, L] of byId) {
       const p = shown.get(id);
-      if (!p) { showLabel(L, false); continue; }
-      L.el.style.transform = `translate(${p.x.toFixed(1)}px,${p.y.toFixed(1)}px) scale(${L.k.toFixed(3)})`;
+      if (!p || !p.shown) { showLabel(L, false, p && p.cut); continue; }
+      const tf = `translate(${snap(p.x)}px,${snap(p.y)}px) scale(${+L.k.toFixed(3)})`;
+      if (L.tf !== tf) { L.tf = tf; L.el.style.transform = tf; }
       showLabel(L, true);
     }
   }
@@ -2301,7 +2326,7 @@ export function createOfis(root, ctx, opts = {}) {
       let L = signs.get(room.id);
       if (!L) { L = mkLabel('of-signl', 90, 'mid', 0); L.maxZoom = SIGN_HTML_BELOW; signs.set(room.id, L); }
       if (room.signPos) L.pos.copy(room.signPos);
-      const chip = wait ? `<span class="of-chip w">${esc(msg(st === 'ask' ? 'of.chipAsk' : 'of.chipWait'))} · ${fmtShort(t - a.since)}</span>` : '';
+      const chip = wait ? `<span class="of-chip w">${esc(msg(st === 'ask' ? 'of.chipAsk' : 'of.chipWait'))} · <span data-since="${a.since}" data-fmt="short">${fmtShort(t - a.since)}</span></span>` : '';     // the seconds are kept by the page's ticker (setLabel)
       const sub = projectOn() ? boardProject(a) : '';          // the chat name in bold; the project folder only when the setting is on, small and at the right
       setLabel(L, `<div class="of-sign ${st}"><div class="r1"><span class="sw" style="background:${esc(a.color)}"></span><b>${esc(boardName(a) || msg('of.session'))}</b>${chip}</div>${sub ? `<div class="r2 of-sp">${esc(sub)}</div>` : ''}</div>`, room.id, wait ? 95 : 90);
     }
@@ -2422,7 +2447,7 @@ export function createOfis(root, ctx, opts = {}) {
 
     const sc = c.force ? c.force.scale : c.mode === 'walk' ? clamp((world.entryX + 0.15 - pos.x) / 0.9, 0.02, 1) : 1;
     c.root.scale.setScalar(sc);
-    if (c.tag) { c.tag.off = c.bal.off = sc < 0.7 || c.delay > 0; c.tag.pos.set(pos.x, 0, pos.z); }
+    if (c.tag) { c.bal.off = sc < 0.7 || c.delay > 0; c.tag.off = c.bal.off || (!c.main && c.mode === 'walk'); c.tag.pos.set(pos.x, 0, pos.z); }     // a walking sub-agent has no tag until it sits (docs/labels.md)
     if (c.pk) applyPack(c);
     if (c.bal) c.bal.pos.set(pos.x, c.pk ? c.pivotW + PK_TOP * PK_K + 0.25 : c.hip.position.y + 1.08, pos.z);
   }
@@ -2899,6 +2924,9 @@ export function createOfis(root, ctx, opts = {}) {
     replayEnter(id) { const c = chars.get(id), room = c && world.rooms.get(c.roomId); if (!c || c.main || !room || c.slot < 0) return false; enter(c, room); return true; },
     rec: { start() { REC.ev.length = 0; REC.lights.length = 0; REC.n = 0; REC.on = true; }, take() { return REC.ev.splice(0); }, takeLights() { return REC.lights.splice(0); }, stop() { REC.on = false; REC.ev.length = 0; REC.lights.length = 0; } },
     get pace() { return Object.fromEntries([...chars.values()].map(c => [c.id, c.pace])); },
+    // the labels (tools/qa/office3d-labels-qa.mjs): whether any label glides (the layout's `moving`: the frame loop keeps drawing while it does) and what the layout remembers of each
+    get labelsMoving() { return labelLayout.moving; },
+    labelState() { return [...labels].map(L => ({ id: L.el.dataset.id || '', cls: L.el.className, shown: L.shown, scale: L.k, ...(labelLayout.peek(L.uid) || {}) })); },
   };
 
   return {

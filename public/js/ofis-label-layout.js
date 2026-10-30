@@ -92,7 +92,7 @@ export const STABLE = Object.freeze({
   FB_GAP_MS: 150,          // least time between two searches of the fallback grid (the grid is the costly one)
   SHOW_MS: 90, HIDE_MS: 400, MIN_SHOWN_MS: 700, MIN_HIDDEN_MS: 500,
   REACH_SLACK: 24,         // px a sub-agent's label may be farther than maxGap once it is shown
-  MAX_SPEED: 380,          // px a second: the fastest a label glides relative to its agent (a free glide of one cell is slower, of three cells faster): 38 px in a 100 ms step at most
+  MAX_SPEED: 280,          // px a second: the fastest a label glides relative to its agent (a free glide of one cell peaks at about 330, of three cells at about 1000): 28 px in a 100 ms step at most
   RINGS: 4, FORGET_MS: 1500, DT_MAX: 100,
   SPRING: 'glide',
 });
