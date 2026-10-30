@@ -7,9 +7,18 @@ export const MODEL_DIR = 'models/';
 const F = MODEL_DIR + 'kenney-furniture/', N = MODEL_DIR + 'kenney-nature/', M = MODEL_DIR + 'kenney-mini/';
 
 // the pieces of furniture and nature the scene uses (Kenney Furniture Kit and Nature Kit, CC0), by the key the scene code asks for
+export const DECOR_FILES = [
+  'lampRoundFloor', 'lampRoundTable', 'lampSquareFloor', 'lampSquareTable', 'loungeSofa', 'loungeSofaLong', 'loungeChair', 'loungeChairRelax', 'loungeDesignSofa', 'stoolBar',
+  'benchCushion', 'tableCoffee', 'tableCoffeeGlass', 'tableRound', 'table', 'sideTable', 'sideTableDrawers', 'bookcaseOpenLow', 'coatRackStanding', 'kitchenCoffeeMachine',
+  'kitchenFridgeSmall', 'kitchenCabinet', 'televisionModern', 'speaker', 'laptop', 'pottedPlant', 'plantSmall2', 'plantSmall3', 'books', 'pillow', 'rugRound', 'rugRectangle',
+  'rugRounded', 'rugSquare',
+];
+export const DECOR_PLANTS = ['pottedPlant', 'plantSmall2', 'plantSmall3'];
 export const PROPS = {
   desk: F + 'desk.glb', chair: F + 'chairDesk.glb', screen: F + 'computerScreen.glb', keyboard: F + 'computerKeyboard.glb',
   mouse: F + 'computerMouse.glb', shelf: F + 'bookcaseClosedWide.glb', plant: F + 'plantSmall1.glb',
+  // the room styles (ofis-styles.js, ofis-decor.js): lamps, seats, tables, rugs, kitchen, a screen and more plants from the same Furniture Kit
+  ...Object.fromEntries(DECOR_FILES.map(k => [k, F + k + '.glb'])),
   treeA: N + 'tree_default.glb', treeA2: N + 'tree_oak.glb', treeB: N + 'tree_pineRoundA.glb', treeB2: N + 'tree_pineRoundB.glb',
   bushA: N + 'tree_fat.glb', bushA2: N + 'plant_bushDetailed.glb',
   rock1: N + 'stone_largeA.glb', rock2: N + 'stone_largeB.glb', rock3: N + 'stone_largeC.glb', rock4: N + 'stone_largeD.glb',
@@ -120,11 +129,18 @@ export const PALETTES = {
   potFloor: { byName: { wood: '#c8704a', plant: '#5fb25b' } },
   tree: { byName: { leafsGreen: '#5daa55', leafsDark: '#3f8c58', woodBark: '#8a5d3b', woodBarkDark: '#7a5236', grass: '#5aa653', _defaultMat: '#7a5236' } },
   rock: { byName: { stone: '#a7a29b', _defaultMat: '#a7a29b' } },
+  // the room styles' furniture: the default colours; every style gives the same names its own colours (ofis-styles.js paletteSpec)
+  decor: { byName: {
+    wood: '#c8935c', woodDark: '#9c6d42', metal: '#8b929f', metalLight: '#b9bfca', metalMedium: '#4a505d', metalDark: '#2a2f3a', carpet: '#505869', carpetDarker: '#3c4352',
+    carpetBlue: '#505869', carpetWhite: '#efe9dc', lamp: '#f5dfae', glass: '#bfe0ec', plant: '#5f9a5a', _defaultMat: '#9c6d42',
+  } },
+  pottedFloor: { byName: { wood: '#c8704a', woodDark: '#8a5a3a', plant: '#5fb25b' } },
 };
 // which palette goes with which model, so a test can check the material names
 export const PALETTE_OF = {
   desk: 'furniture', chair: 'furniture', screen: 'furniture', keyboard: 'furniture', mouse: 'furniture', shelf: 'furniture', plant: ['potDesk', 'potFloor'],
   treeA: 'tree', treeA2: 'tree', treeB: 'tree', treeB2: 'tree', bushA: 'tree', bushA2: 'tree', rock1: 'rock', rock2: 'rock', rock3: 'rock', rock4: 'rock',
+  ...Object.fromEntries(DECOR_FILES.map(k => [k, k === 'pottedPlant' ? 'pottedFloor' : k === 'plantSmall2' || k === 'plantSmall3' ? ['potDesk', 'potFloor'] : 'decor'])),
 };
 
 // The seasons of the 3D scene are palette swaps (the pixel scene bakes its seasons into the sprites; this scene recolours): the trees (the same material names as
