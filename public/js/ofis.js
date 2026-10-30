@@ -1560,9 +1560,10 @@ export function createOfis(root, ctx, opts = {}) {
    *     The card that opens beside a clicked agent (ofis-ui.js) is anchored to it and follows it through pan, zoom and walking.
    * api.seatOf(figure) → { x, z, aisleX, room } for a seated agent: its seat and the walking line in front of the desk
    *     (world coordinates), or null (not an agent, or walking in or out).
-   * api.layout() → { width, depth, entryX, halls: [{ z0, z1, lane }], rooms: [{ id, x0, x1, z0, z1, door, doorX, hall }] }:
-   *     the building interior is x ∈ [0, width], z ∈ [0, depth]. Halls run along x; lane is their walking line and each
-   *     hall is entered from outside at x = entryX. rooms lists the office rooms and the walled local areas; each one has
+   * api.layout() → { width, depth, entryX, halls: [{ z0, z1, lane, x0, x1 }], rooms: [{ id, x0, x1, z0, z1, door, doorX, hall }] }:
+   *     the building is an X of rows (ofis-layout.js): its interior lies in x ≤ width, z ≤ depth, and its rows are not all as long as the
+   *     building, so read each hall's own length (x0 to x1; x0 is 0 for the bar). Halls run along x; lane is their walking line and each
+   *     hall is entered from outside at x = entryX (a paved path joins the shorter ones to it). rooms lists the office rooms and the walled local areas; each one has
    *     its door at x = doorX on the hall side (z0 for door 'back', z1 for 'front'), opening onto halls[hall].
    * api.openDoorsNear(x, z): call it every frame while something walks through a door; the doors near that point open
    *     as they do for the agents.
