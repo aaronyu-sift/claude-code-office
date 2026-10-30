@@ -24,7 +24,6 @@ import {
   VACANT_CLS, minRoomsFrom, buildingPlan, classFor, nextClass, createSlots,
 } from './ofis-layout.js';
 import { boardName, boardProject, boardBadges, fitName } from './board-text.js';
-import { projectOn, onProjectChange } from './board-setting.js';
 
 // Models (ofis-assets.js has loaded them before this module runs): a piece that did not load is missing from PK and the procedural shape
 // below is drawn in its place. POLISH is the procedural polish: occlusion baked into the room batch, a noise floor, tone mapping, contact
@@ -1301,6 +1300,7 @@ export function createOfis(root, ctx, opts = {}) {
   // ---------------------------------------------------------- room sign: wall-mounted acrylic plaque
 
   let projectSub = null;
+  const projectOn = () => !!opts.settings && opts.settings.get('project') === 'on';       // the setting `project` (office-settings.js): the project folder on the boards, read live
   function makeSign(g, room, x, y, z, w, h) {
     const cv = document.createElement('canvas');
     cv.height = SIGN_PX;
@@ -1330,7 +1330,7 @@ export function createOfis(root, ctx, opts = {}) {
     g.add(lamp, halo);
     Object.assign(room, { signCv: cv, signTex: tex, signFace: face, signKey: '', lamp, halo, signPos: new THREE.Vector3(x, y, z + 0.1) });
     (root.__ofisSigns || (root.__ofisSigns = new Map())).set(room.id, cv);                       // verification only: tools/qa/office-board-qa.mjs reads the plaque's pixels
-    if (!projectSub) projectSub = onProjectChange(() => { for (const r of world.rooms.values()) r.signKey = ''; refreshLabels(); });       // the setting `project` shows or hides the project folder on every board
+    if (!projectSub) projectSub = (opts.settings && opts.settings.on('project', () => { for (const r of world.rooms.values()) r.signKey = ''; refreshLabels(); })) || (() => {});       // the setting `project` shows or hides the project folder on every board
   }
 
   function fitText(g, s, max) {

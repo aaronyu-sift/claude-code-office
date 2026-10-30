@@ -1,14 +1,31 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { KEY, DEFAULTS, clean, sanitize, fromQuery, merge, load, save, timeMinutes } from '../public/js/pixel/settings.js';
+import { KEY, KEYS, DEFAULTS, clean, sanitize, fromQuery, merge, load, save, keep, timeMinutes } from '../public/js/pixel/settings.js';
 
 const memory = (init = {}) => { const m = { ...init }; return { m, getItem: k => (k in m ? m[k] : null), setItem: (k, v) => { m[k] = String(v); } }; };
 
-test('settings: the defaults are automatic time and season, weather off, northern hemisphere, ten chats on the shelf, no project folder on the boards', () => {
-  assert.deepEqual({ ...DEFAULTS }, { time: 'auto', season: 'auto', weather: 'off', hemisphere: 'north', shelf: 10, project: 'off' });
+test('settings: the defaults are automatic time and season, weather off, northern hemisphere, ten chats on the shelf, no project folder on the boards, the 3D scene', () => {
+  assert.deepEqual({ ...DEFAULTS }, { time: 'auto', season: 'auto', weather: 'off', hemisphere: 'north', shelf: 10, project: 'off', scene: '3d' });
+  assert.deepEqual(KEYS, ['time', 'season', 'weather', 'hemisphere', 'shelf', 'project', 'scene']);
   const { values, from } = merge({}, {});
   assert.deepEqual(values, { ...DEFAULTS });
-  assert.deepEqual(Object.values(from), ['default', 'default', 'default', 'default', 'default', 'default']);
+  assert.deepEqual(Object.values(from), ['default', 'default', 'default', 'default', 'default', 'default', 'default']);
+});
+test('settings: the scene is 3d or pixel, from the store or the address; the address wins and is not stored; anything else is ignored', () => {
+  assert.equal(clean('scene', '3d'), '3d'); assert.equal(clean('scene', 'pixel'), 'pixel'); assert.equal(clean('scene', ' Pixel '), 'pixel'); assert.equal(clean('scene', '3D'), '3d');
+  for (const bad of ['', ' ', '2d', 'three', 'auto', 'on', null, undefined, 3, true, ['pixel'], {}]) assert.equal(clean('scene', bad), null, String(bad));
+  assert.deepEqual(fromQuery('?scene=pixel'), { scene: 'pixel' }); assert.deepEqual(fromQuery('?scene=3d&season=winter'), { scene: '3d', season: 'winter' }); assert.deepEqual(fromQuery('?scene=flat'), {});
+  assert.equal(merge({}, {}).values.scene, '3d');
+  assert.equal(merge({ scene: 'pixel' }, {}).values.scene, 'pixel'); assert.equal(merge({ scene: 'pixel' }, {}).from.scene, 'stored');
+  assert.equal(merge({ scene: 'pixel' }, fromQuery('?scene=3d')).values.scene, '3d', 'the address beats the store'); assert.equal(merge({ scene: 'pixel' }, fromQuery('?scene=3d')).from.scene, 'url');
+  assert.equal(merge({ scene: 'flat' }, {}).values.scene, '3d', 'a broken stored value is ignored');
+  const s = memory();
+  merge(load(s), fromQuery('?scene=pixel'));
+  assert.deepEqual(load(s), {}, 'loading with ?scene= stores nothing');
+  save(s, { scene: 'pixel' });
+  assert.deepEqual(JSON.parse(s.m[KEY]), { scene: 'pixel' });
+  save(s, { scene: 'flat' });
+  assert.deepEqual(load(s), { scene: 'pixel' }, 'an invalid change is dropped');
 });
 test('settings: values are validated per key', () => {
   assert.equal(clean('time', 'auto'), 'auto'); assert.equal(clean('time', '22:05'), '22:05'); assert.equal(clean('time', '2205'), '22:05'); assert.equal(clean('time', '25:00'), null); assert.equal(clean('time', 'noon'), null);
@@ -29,8 +46,8 @@ test('settings: URL overrides beat stored settings, stored beat the defaults, an
   const url = fromQuery('?season=spring&time=06:30&bogus=1&weather=hail&shelf=5');
   assert.deepEqual(url, { season: 'spring', time: '06:30', shelf: 5 });
   const { values, from } = merge(stored, url);
-  assert.deepEqual(values, { time: '06:30', season: 'spring', weather: 'rain', hemisphere: 'south', shelf: 5, project: 'off' });
-  assert.deepEqual(from, { time: 'url', season: 'url', weather: 'stored', hemisphere: 'stored', shelf: 'url', project: 'default' });
+  assert.deepEqual(values, { time: '06:30', season: 'spring', weather: 'rain', hemisphere: 'south', shelf: 5, project: 'off', scene: '3d' });
+  assert.deepEqual(from, { time: 'url', season: 'url', weather: 'stored', hemisphere: 'stored', shelf: 'url', project: 'default', scene: 'default' });
   assert.equal(merge(stored, fromQuery('?shelf=2')).values.shelf, 20, 'a shelf size out of range in the address is ignored');
   assert.equal(merge({ shelf: 'many' }, {}).values.shelf, 10, 'and so is a broken stored one');
   assert.deepEqual(merge(stored, {}).values.season, 'winter');
@@ -68,6 +85,18 @@ test('settings: saving merges into what is stored, a URL override is not stored 
   assert.deepEqual(load(null), {});
   assert.doesNotThrow(() => save(null, { season: 'autumn' }));
   assert.doesNotThrow(() => save({ getItem: () => null, setItem: () => { throw new Error('quota'); } }, { season: 'autumn' }));
+});
+test('settings: keep stores a change and says whether it stuck (the Settings tab must not call a lost change saved)', () => {
+  const ok = memory();
+  assert.equal(keep(ok, { season: 'winter' }), true);
+  assert.deepEqual(JSON.parse(ok.m[KEY]), { season: 'winter' });
+  assert.equal(keep(ok, { shelf: 20, project: 'on' }), true);
+  assert.deepEqual(JSON.parse(ok.m[KEY]), { season: 'winter', shelf: 20, project: 'on' });
+  assert.equal(keep(null, { season: 'winter' }), false, 'no storage at all');
+  assert.equal(keep({ getItem: () => null, setItem: () => { throw new Error('quota'); } }, { season: 'winter' }), false, 'the browser refuses the write');
+  assert.equal(keep({ getItem: () => { throw new Error('denied'); }, setItem: () => {} }, { season: 'winter' }), false, 'a write that cannot be read back');
+  assert.equal(keep({ getItem: () => null, setItem: () => {} }, { season: 'winter' }), false, 'a write that is silently dropped');
+  assert.equal(keep(memory(), { season: 'bogus' }), true, 'nothing valid to store: nothing was lost');
 });
 test('settings: a time setting is minutes after midnight, or null for the real clock', () => {
   assert.equal(timeMinutes('auto'), null); assert.equal(timeMinutes('07:30'), 450); assert.equal(timeMinutes('00:00'), 0); assert.equal(timeMinutes('23:55'), 1435);

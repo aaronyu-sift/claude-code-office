@@ -1,5 +1,5 @@
-// Settings of the pixel Office view (what the popover in the header edits): time of day, season, weather and hemisphere. They are kept in
-// localStorage as one JSON object; a URL parameter (?time=HH:MM, ?season=, ?weather=, ?hemisphere=, ?shelf=, ?project=) overrides what is stored and is not
+// Settings of the Office view (what the popover in the header and the Settings tab edit): time of day, season, weather, hemisphere and more. They are kept in
+// localStorage as one JSON object; a URL parameter (?time=HH:MM, ?season=, ?weather=, ?hemisphere=, ?shelf=, ?project=, ?scene=) overrides what is stored and is not
 // stored itself. Pure functions over an injectable storage, so the rules can be tested without a browser.
 //   time:       'auto' (the browser's local clock) or 'HH:MM' (fixed)
 //   season:     'auto' (from the date and the hemisphere) or spring | summer | autumn | winter
@@ -7,6 +7,8 @@
 //   hemisphere: north (default) | south
 //   shelf:      how many asleep and closed chats the shelf shows at first, a whole number from 3 to 200 (default 10; the visitor can ask for more)
 //   project:    'off' (default) | 'on': whether a room's board also shows the project folder, small in its bottom-right corner (the chat name is the big text)
+//   scene:      '3d' (default) | 'pixel': which Office scene the page opens. It is read once, when the page loads (the two scenes are separate engines), so a change is
+//               kept for the next load; ?scene= wins over it and is not stored
 // The camera view (isometric or front) has its own, older key and is handled by the view itself.
 import { parseClock, fmtClock } from './time.js';
 import { parseSeason, parseHemisphere } from './season.js';
@@ -14,7 +16,7 @@ import { parseWeather } from './weather.js';
 import { DEFAULT_CAP, MIN_CAP, MAX_CAP } from './shelf.js';
 
 export const KEY = 'ajan-ofisi.settings';
-export const DEFAULTS = Object.freeze({ time: 'auto', season: 'auto', weather: 'off', hemisphere: 'north', shelf: DEFAULT_CAP, project: 'off' });
+export const DEFAULTS = Object.freeze({ time: 'auto', season: 'auto', weather: 'off', hemisphere: 'north', shelf: DEFAULT_CAP, project: 'off', scene: '3d' });
 export const KEYS = Object.keys(DEFAULTS);
 
 // a valid value for a key, or null
@@ -25,6 +27,7 @@ const CLEAN = {
   hemisphere: v => parseHemisphere(v),
   shelf: v => { const n = typeof v === 'number' ? v : typeof v === 'string' && /^\s*\d+\s*$/.test(v) ? +v : NaN; return Number.isInteger(n) && n >= MIN_CAP && n <= MAX_CAP ? n : null; },
   project: v => { const t = typeof v === 'string' ? v.trim().toLowerCase() : ''; return t === 'on' || t === 'off' ? t : null; },
+  scene: v => { const t = typeof v === 'string' ? v.trim().toLowerCase() : ''; return t === '3d' || t === 'pixel' ? t : null; },
 };
 export const clean = (key, value) => (CLEAN[key] ? CLEAN[key](value) : null);
 
@@ -56,6 +59,14 @@ export function save(storage, patch) {
   const next = { ...load(storage), ...sanitize(patch) };
   try { storage.setItem(KEY, JSON.stringify(next)); } catch { /* storage disabled */ }
   return next;
+}
+// store a change and say whether it stuck: false when there is no storage, when the browser refuses the write, or when the value cannot be read back (the browser is not keeping
+// settings, so the choice holds for this visit only and the page must not call it saved)
+export function keep(storage, patch) {
+  const want = sanitize(patch);
+  if (!storage) return false;
+  save(storage, want);
+  return Object.keys(want).every(k => load(storage)[k] === want[k]);
 }
 // minutes after midnight for a time setting, or null for 'auto'
 export const timeMinutes = value => (value === 'auto' ? null : parseClock(value));

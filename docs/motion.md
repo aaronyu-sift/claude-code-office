@@ -17,6 +17,7 @@ QA check `21-motion` measures the real animations in Chrome (`3d-motion` in `too
 | Feedback | hover, press, focus: colour, background, border | short ease-out, never moves anything | 150 ms |
 | Data change | a bar that fills | ease, longer | 450 ms |
 | Mounted sign | the board on a room's back wall (pixel scene) | eased fade of opacity, nothing moves (in with ease-out, out with ease-in); none under reduced motion, where the page's rule removes every CSS transition | fade 200 ms |
+| Page | the Settings view when its tab is chosen | eased fade of opacity on arrival, nothing moves (no travel, no scale: a page is not a card that comes from somewhere); 150 ms under reduced motion, as for every kind; no leave animation, the page it replaces is hidden at once like every view | fade 200 ms |
 | Camera and view | pan, zoom, fit, a change of frame | direct while the visitor drags, a spring when the view changes by itself, carrying velocity | follow 0.6 s bounce 0 (858 ms) |
 | Built thing | a new room, desk or prop | spring that rises from the ground and bounces once, neighbours 40 ms apart | build 0.5 s bounce 0.3 (804 ms), scale 0.6 to 1 |
 | Walker | an agent walking between desks | constant speed along the path with a short speed-up and slow-down at the ends, walk cycle paced by the speed | no feet sliding |
@@ -85,6 +86,7 @@ millisecond value is the time the spring needs to settle to within 0.3 percent.
 ## Where the current animations sit
 
 - Surface, small control, feedback, data change: done (cards, menus, tooltip, switch knob, hover transitions).
+- Page: done for the Settings view (`public/js/settings-tab.js`: a Web Animations fade of `.st` with `DUR.fast` and `EASE.out`, `DUR.hover` under reduced motion). The sample board of the project setting there is a mounted sign: its project line only fades (200 ms) and keeps its place.
 - The 3D scene (`?scene=3d`) has the card, the details card and the shelf card through the same helpers (`enter`, `leave`, `setShown`, the same tokens), so they move as above; its camera is still direct (see the next item).
 - Indicator: done. The working dot uses the slow tempo and the thinking dots and the waiting balloon the quick one (CSS); in the pixel scene the light beam is slow and the waiting
   figure's bob is quick; in the 3D scene the beam is slow and the lamp's blink is quick.

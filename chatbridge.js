@@ -108,7 +108,10 @@ function createChatBridge(dbPath, { log = console.error } = {}) {
     }
   }
 
-  return { step };
+  // what /api/config tells the Settings tab: 'unsupported' (this Node has no node:sqlite), 'on' (the database is open), else 'off' (the file cannot be read, the log says why)
+  const status = () => (!DatabaseSync ? 'unsupported' : open() ? 'on' : 'off');
+
+  return { step, status };
 }
 
 module.exports = { createChatBridge };

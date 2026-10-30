@@ -831,3 +831,71 @@ main { flex: 1; min-height: 0; position: relative; }
 /* Scene settings and the atmosphere of the 3D scene (office-settings.js, ofis-weather.js; docs/motion.md, kinds cycle and ambient scenery) */
 .set-row[hidden] { display: none; }                                   /* a row the scene does not support (settings-panel.js): `.set-row` is flex, which would beat the hidden attribute */
 .of-stage .of-wx { position: absolute; inset: 0; pointer-events: none; }  /* the weather canvas over the 3D canvas: it takes no pointer event, the scene below does */
+
+/* the Settings tab (settings-tab.js): glass cards like the details card and the bar, one column ------------------------------------------------------------------ */
+.set-row .toggle { flex: none; }                                       /* the project switch in the popover */
+.st { max-width: 760px; margin: 0 auto; padding: 14px 20px 56px; display: grid; gap: 16px; }
+.st-head { padding: 6px 0 0; }
+.st-title { margin: 0; font: 600 22px/1.25 var(--font-d); letter-spacing: -.2px; }
+.st-intro { margin: 6px 0 0; max-width: 58ch; color: var(--muted); font-size: 13px; }
+.st-none { margin: 0; padding: 12px 16px; border-radius: 12px; background: var(--warn-soft); color: #f3d89a; }
+.st-none[hidden] { display: none; }
+.st-card {
+  --panel: rgba(12, 16, 36, .96); --panel-2: rgba(143, 176, 255, .08); --panel-3: rgba(143, 176, 255, .15); --line-2: rgba(150, 165, 255, .22);
+  padding: 4px 20px 6px; background: rgba(9, 12, 28, .8); backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px);
+  border: 1px solid rgba(196, 208, 255, .32); border-radius: 18px; box-shadow: 0 18px 50px -18px rgba(0, 0, 0, .65);
+}
+.st-card:not(:has(.st-row:not([hidden]))) { display: none; }          /* a card whose rows are all hidden (no message board to report) is not shown */
+.st-gh { margin: 0; padding: 14px 0 2px; font: 600 11.5px/1.3 var(--font); letter-spacing: .6px; text-transform: uppercase; color: var(--muted); }
+.st-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 10px 24px; padding: 14px 0; border-top: 1px solid var(--line); }
+.st-gh + .st-row { border-top: 0; }
+.st-row[hidden] { display: none; }
+.st-text { display: grid; justify-items: start; gap: 3px; min-width: 0; }
+.st-l { font: 500 14px/1.35 var(--font); color: var(--text); }
+.st-help { font-size: 12.5px; line-height: 1.45; color: var(--muted); max-width: 52ch; }
+.st-top { display: flex; flex-wrap: wrap; align-items: center; gap: 3px 10px; }
+.st-src { padding: 1px 9px; border-radius: 999px; background: rgba(143, 176, 255, .08); color: var(--muted); font-size: 11.5px; line-height: 1.6; white-space: nowrap; max-width: 100%; overflow: hidden; text-overflow: ellipsis; }
+.st-src[data-from="stored"] { color: var(--text-2); }
+.st-src[data-from="url"] { background: rgba(144, 133, 233, .2); color: #d9d4ff; }
+.st-src[data-from="visit"] { background: var(--warn-soft); color: #f3d89a; }
+.st-ctl { justify-self: end; min-width: 0; display: flex; align-items: center; }
+.st-card .seg { background: rgba(143, 176, 255, .08); }
+.st-card .seg button[aria-pressed="true"] { background: var(--panel-3); color: var(--text); }
+.st-card .seg button { min-height: 28px; }
+.st select { min-height: 32px; min-width: 150px; max-width: 240px; background: var(--panel-3); color: var(--text); border: 1px solid var(--line-2); border-radius: 9px; padding: 5px 10px; font: inherit; font-size: 13px; }
+.st-time, .st-pending, .st-note, .st-sample { grid-column: 1 / -1; }
+.st-time { display: flex; align-items: center; gap: 12px; }
+.st-time[hidden], .st-pending[hidden], .st-note[hidden] { display: none; }
+.st-time input[type="range"] { flex: 1; min-width: 0; accent-color: var(--accent); }
+.st-time output { min-width: 48px; text-align: right; font: 13px var(--mono); color: var(--text); }
+.st-pending { margin: 0; display: flex; flex-wrap: wrap; align-items: center; gap: 8px 14px; padding: 8px 12px; border-radius: 12px; background: rgba(144, 133, 233, .14); color: var(--text-2); font-size: 12.5px; }
+.st-pending .ghost-btn { margin-top: 0; background: rgba(143, 176, 255, .15); color: var(--text); }
+.st-pending [hidden] { display: none; }
+.st-note { margin: 0; color: var(--muted); font-size: 12px; }
+/* the sample of a board: what the project setting changes (the same plate as the room boards, in small); the project line only fades, nothing moves (docs/motion.md, mounted sign) */
+.st-sample {
+  position: relative; justify-self: start; width: min(100%, 300px); min-height: 3.7em; display: flex; flex-direction: column; gap: .35em; padding: .55em .8em .5em 1.4em; border-radius: 6px; color: #fff; font: 700 14px/1.25 var(--font-d);
+  background: linear-gradient(180deg, rgba(144, 133, 233, .36), rgba(144, 133, 233, .2)), #090c13;
+  box-shadow: inset .42em 0 0 var(--accent), inset 0 0 0 1px rgba(255, 255, 255, .16), 0 .25em .6em -.1em rgba(0, 0, 0, .65);
+}
+.st-sample-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.st-sample-proj { align-self: flex-end; font: 500 10px/1.25 var(--font); color: rgba(236, 240, 247, .78); opacity: 0; transition: opacity var(--m-fast) var(--ease-in); }
+.st-sample[data-on="true"] .st-sample-proj { opacity: 1; transition: opacity var(--m-fast) var(--ease-out); }
+.st-state { display: inline-flex; align-items: center; gap: 9px; font-size: 13px; color: var(--text-2); }
+.st-state .dot { background: var(--faint); }
+.st-state[data-state="on"] .dot { background: var(--ok); box-shadow: 0 0 0 3px rgba(34, 197, 94, .12); }
+.st-state[data-state="unsupported"] .dot { background: var(--warn); box-shadow: 0 0 0 3px rgba(250, 178, 25, .12); }
+@media (max-width: 640px) {
+  .st { padding: 10px 12px 48px; gap: 12px; }
+  .st-card { padding: 2px 14px 4px; }
+  .st-row { grid-template-columns: minmax(0, 1fr); gap: 10px; }
+  .st-ctl { justify-self: stretch; }
+  .st select { width: 100%; max-width: none; }
+}
+/* the header's tabs never push the bar wider than the window: tighter on a phone, and they scroll as a last resort (a focus ring inside the strip is not clipped) */
+.top nav.seg { min-width: 0; max-width: 100%; overflow-x: auto; scrollbar-width: none; }
+.top nav.seg::-webkit-scrollbar { display: none; }
+.top nav.seg button:focus-visible { outline-offset: -2px; }
+@media (max-width: 520px) { .top nav.seg { flex: 1 1 100%; } .top nav.seg button { padding: 6px 7px; font-size: 12px; } }
+/* a small phone (320 to 370 px): the five tabs of the longest language are wider than the bar, so the bar's side padding and the tabs' own padding give way and all five stay in view */
+@media (max-width: 370px) { .top { padding-left: 8px; padding-right: 8px; } .top nav.seg { gap: 1px; } .top nav.seg button { padding: 6px 4px; font-size: 11.5px; } }

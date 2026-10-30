@@ -1,7 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { boardName, boardProject, boardBadges, clipText, wrapLines, fitName } from '../public/js/board-text.js';
-import { KEY } from '../public/js/pixel/settings.js';
 
 // a font where every character is `size` wide, so widths are easy to reason about
 const mono = size => s => [...s].length * size;
@@ -71,55 +70,4 @@ test('board text: fitName takes the biggest size that fits on one line, then two
     const r = fitName(t, mono, box);
     assert.ok(r.lines.length >= 1 && r.lines.length <= 2 && r.fs >= box.twoMin && r.fs <= box.big, t);
   }
-});
-
-// board-setting.js reads window.localStorage and window.location when it loads, so each test loads its own copy against a pretend window
-let copies = 0;
-async function loadSetting({ stored, search = '' } = {}) {
-  const mem = new Map(stored ? [[KEY, JSON.stringify(stored)]] : []);
-  const listeners = [];
-  globalThis.window = {
-    localStorage: { getItem: k => (mem.has(k) ? mem.get(k) : null), setItem: (k, v) => mem.set(k, String(v)) },
-    location: { search },
-    addEventListener: (type, fn) => listeners.push([type, fn]),
-  };
-  const mod = await import(`../public/js/board-setting.js?copy=${++copies}`);
-  return { mod, mem, fire: e => listeners.filter(([t]) => t === 'storage').forEach(([, fn]) => fn(e)) };
-}
-
-test('board setting: off unless stored or asked for in the address; the address wins and is not stored', async () => {
-  try {
-    assert.equal((await loadSetting()).mod.projectOn(), false);
-    assert.equal((await loadSetting({ stored: { project: 'on' } })).mod.projectOn(), true);
-    assert.equal((await loadSetting({ stored: { project: 'on' }, search: '?project=off' })).mod.projectOn(), false);
-    const url = await loadSetting({ search: '?project=on&season=winter' });
-    assert.equal(url.mod.projectOn(), true);
-    assert.equal(url.mem.size, 0, 'an address override is not stored');
-    assert.equal((await loadSetting({ stored: { project: 'bogus' } })).mod.projectOn(), false);
-    assert.equal((await loadSetting({ search: '?project=maybe' })).mod.projectOn(), false);
-  } finally { delete globalThis.window; }
-});
-
-test('board setting: a change is stored, tells the listeners once, and a change in another tab is picked up', async () => {
-  try {
-    const { mod, mem, fire } = await loadSetting();
-    const seen = [];
-    const stop = mod.onProjectChange(v => seen.push(v));
-    assert.equal(mod.projectOn(), false);
-    mod.setProject('on');
-    mod.setProject(true);
-    assert.equal(mod.projectOn(), true);
-    assert.deepEqual(JSON.parse(mem.get(KEY)), { project: 'on' });
-    assert.deepEqual(seen, [true], 'one notice for one change');
-    fire({ key: 'something-else' });
-    mem.set(KEY, JSON.stringify({ project: 'off' }));
-    fire({ key: KEY });
-    assert.equal(mod.projectOn(), false);
-    assert.deepEqual(seen, [true, false]);
-    stop();
-    mod.setProject('on');
-    assert.deepEqual(seen, [true, false], 'no notice after unsubscribing');
-    mod.setProject('nonsense');
-    assert.equal(mod.projectOn(), false, 'anything but on is off');
-  } finally { delete globalThis.window; }
 });

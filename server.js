@@ -33,6 +33,8 @@ let INLINE_COLORS = {};
 let CSWAP_URL = null;
 let DEVRELOAD = null;   // --dev: tells an open page that its files changed (dev-reload.js)
 let CHAT = null;   // optional read-only bridge from the agentchat database
+// chat.state of /api/config, shown read-only in the Settings tab: 'off' (no bridge, or its database cannot be read), 'on' (reading it) or 'unsupported' (no node:sqlite in this Node)
+const chatState = () => (CHAT ? (typeof CHAT.status === 'function' ? CHAT.status() : 'on') : 'off');
 let PROGRESS_FILE = null;   // the task tracker's snapshot of each chat's progress (progress-file.js, docs/progress.md)
 let COST_OPTS = {};   // pricesFile, discount, extraLogs for the cost worker
 let RECENT_OPTS = { days: 14, max: 50, budgetMs: 150 };   // recently closed sessions (recent.js); days 0 turns them off
@@ -799,7 +801,7 @@ function handler(req, res, next) {
     return;
   }
   if (DEVRELOAD && DEVRELOAD.handle(url.pathname, res)) return;
-  if (url.pathname === '/api/config') return json(res, { version: VERSION, demo: DEMO, site: SITE, cswap: !!CSWAP_URL && !DEMO });
+  if (url.pathname === '/api/config') return json(res, { version: VERSION, demo: DEMO, site: SITE, cswap: !!CSWAP_URL && !DEMO, chat: { state: chatState() } });
   if (url.pathname === '/api/state') return json(res, snapshot());
   if (url.pathname === '/api/closed') return json(res, { closed: closedList, days: RECENT_OPTS.days, max: RECENT_OPTS.max, scan: recent ? recent.stats : null });
   if (url.pathname === '/api/cost') {

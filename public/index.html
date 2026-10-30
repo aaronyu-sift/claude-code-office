@@ -17,10 +17,11 @@
     <span data-i18n="app.name">Claude Code Office</span>
   </div>
   <nav class="seg" role="tablist" aria-label="View" data-i18n-aria="nav.label">
-    <button role="tab" data-view="pano" title="Dashboard (1)" data-i18n="tab.pano" data-i18n-title="tab.pano.tip">Dashboard</button>
-    <button role="tab" data-view="ofis" title="Office (2)" data-i18n="tab.ofis" data-i18n-title="tab.ofis.tip">Office</button>
-    <button role="tab" data-view="akis" title="Timeline (3)" data-i18n="tab.akis" data-i18n-title="tab.akis.tip">Timeline</button>
-    <button role="tab" data-view="maliyet" title="Cost (4)" data-i18n="tab.maliyet" data-i18n-title="tab.maliyet.tip">Cost</button>
+    <button role="tab" id="tab-pano" aria-controls="view-pano" data-view="pano" title="Dashboard (1)" data-i18n="tab.pano" data-i18n-title="tab.pano.tip">Dashboard</button>
+    <button role="tab" id="tab-ofis" aria-controls="view-ofis" data-view="ofis" title="Office (2)" data-i18n="tab.ofis" data-i18n-title="tab.ofis.tip">Office</button>
+    <button role="tab" id="tab-akis" aria-controls="view-akis" data-view="akis" title="Timeline (3)" data-i18n="tab.akis" data-i18n-title="tab.akis.tip">Timeline</button>
+    <button role="tab" id="tab-maliyet" aria-controls="view-maliyet" data-view="maliyet" title="Cost (4)" data-i18n="tab.maliyet" data-i18n-title="tab.maliyet.tip">Cost</button>
+    <button role="tab" id="tab-settings" aria-controls="view-settings" data-view="settings" title="Settings (5)" data-i18n="tab.settings" data-i18n-title="tab.settings.tip">Settings</button>
   </nav>
   <div class="seg small proj-seg" id="proj-seg" role="group" aria-label="Camera view" data-i18n-aria="proj.label" hidden>
     <button type="button" data-proj="iso" aria-pressed="true" title="Isometric view" data-i18n="proj.iso" data-i18n-title="proj.iso.tip">Isometric</button>
@@ -41,7 +42,7 @@
           <button type="button" data-v="auto" aria-pressed="true" data-i18n="set.timeAuto">Auto</button>
           <button type="button" data-v="fixed" aria-pressed="false" data-i18n="set.timeFixed">Fixed</button>
         </div></div>
-      <div class="set-row set-time"><input type="range" id="set-time" min="0" max="1435" step="5" value="720" aria-label="Time of day" data-i18n-aria="set.time"><output id="set-time-out" for="set-time">12:00</output></div>
+      <div class="set-row set-time"><input type="range" id="set-time" min="0" max="1435" step="5" value="720" aria-valuetext="12:00" aria-label="Time of day" data-i18n-aria="set.time"><output id="set-time-out" for="set-time">12:00</output></div>
       <div class="set-row" data-row="season"><label class="set-l" for="set-season" data-i18n="set.season">Season</label>
         <select id="set-season"><option value="auto" data-i18n="set.seasonAuto">Auto (by date)</option><option value="spring" data-i18n="season.spring">Spring</option><option value="summer" data-i18n="season.summer">Summer</option><option value="autumn" data-i18n="season.autumn">Autumn</option><option value="winter" data-i18n="season.winter">Winter</option></select></div>
       <div class="set-row" data-row="hemisphere"><label class="set-l" for="set-hemisphere" data-i18n="set.hemisphere">Hemisphere</label>
@@ -50,6 +51,8 @@
         <select id="set-weather"><option value="off" data-i18n="weather.off">Off</option><option value="auto" data-i18n="weather.auto">Auto (by date)</option><option value="clear" data-i18n="weather.clear">Clear</option><option value="cloudy" data-i18n="weather.cloudy">Cloudy</option><option value="rain" data-i18n="weather.rain">Rain</option><option value="snow" data-i18n="weather.snow">Snow</option><option value="fog" data-i18n="weather.fog">Fog</option></select></div>
       <div class="set-row" data-row="shelf"><label class="set-l" for="set-shelf" data-i18n="set.shelf">Chats on the shelf</label>
         <select id="set-shelf"><option value="5">5</option><option value="10" selected>10</option><option value="20">20</option><option value="50">50</option></select></div>
+      <div class="set-row" data-row="project"><label class="set-l" for="set-project" data-i18n="set.project">Project folder on boards</label>
+        <label class="toggle"><input type="checkbox" role="switch" id="set-project"><span></span></label></div>
       <p class="set-note" id="set-note" hidden></p>
     </div>
   </div>
@@ -63,9 +66,9 @@
 <div id="attention" class="attention" hidden></div>
 
 <main>
-  <section id="view-pano" class="view" hidden></section>
-  <section id="view-ofis" class="view view-ofis" hidden></section>
-  <section id="view-akis" class="view view-akis" hidden>
+  <section id="view-pano" class="view" role="tabpanel" aria-labelledby="tab-pano" hidden></section>
+  <section id="view-ofis" class="view view-ofis" role="tabpanel" aria-labelledby="tab-ofis" hidden></section>
+  <section id="view-akis" class="view view-akis" role="tabpanel" aria-labelledby="tab-akis" hidden>
     <div class="akis-bar">
       <div class="seg small" id="akis-range">
         <button data-r="15" data-i18n="akis.r15">15m</button><button data-r="60" data-i18n="akis.r60">1h</button><button data-r="180" data-i18n="akis.r180">3h</button><button data-r="360" data-i18n="akis.r360">6h</button>
@@ -77,7 +80,8 @@
     <div class="akis-axis"><canvas id="akis-axis"></canvas></div>
     <div class="akis-scroll" id="akis-scroll"><canvas id="akis"></canvas></div>
   </section>
-  <section id="view-maliyet" class="view view-maliyet" hidden></section>
+  <section id="view-maliyet" class="view view-maliyet" role="tabpanel" aria-labelledby="tab-maliyet" hidden></section>
+  <section id="view-settings" class="view view-settings" role="tabpanel" aria-labelledby="tab-settings" hidden></section>
 </main>
 
 <aside id="drawer" class="drawer" aria-hidden="true"></aside>
