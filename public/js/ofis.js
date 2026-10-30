@@ -654,7 +654,9 @@ export function createOfis(root, ctx, opts = {}) {
     });
     world.plan = { bays: P.bays, size: P.size };
     world.lounge = P.lounge;
-    if (P.lounge) { buildPlaza(B, P.lounge, { bed: false }); lounge.build({ g, B, c: P.lounge, rng: rng(7) }); } else lounge.clear();      // the pavilion takes the place of the round bed
+    // the pavilion takes the place of the round bed. What it puts into the batch is measured here, around the call, not by the lounge itself (`o.loungeBatchTris`: the QA holds it to its budget)
+    world.loungeBatchTris = 0;
+    if (P.lounge) { buildPlaza(B, P.lounge, { bed: false }); const b0 = B.i.length / 3; lounge.build({ g, B, c: P.lounge, rng: rng(7) }); world.loungeBatchTris = B.i.length / 3 - b0; } else lounge.clear();
     buildHalls(B, g, items, areas);
     addVacantSigns(g);
     decor.finish(g);
@@ -768,6 +770,10 @@ export function createOfis(root, ctx, opts = {}) {
     get life() { return decor.stats(); },
     get lounge() { return lounge.snapshot(); },                   // the lounge: mode, state, the wall's posts and picture, the people, the poll, the card, what it cost (ofis-lounge.js)
     loungeVisible(on, part) { lounge.setVisible(on, part); },
+    get frameNo() { return frameNo; },                                   // the scene's frames drawn so far (software GL draws 8 a second, not one per animation frame)
+    get loungeBatchTris() { return world.loungeBatchTris || 0; },       // the triangles the lounge's build put into the building's batch, counted around the call (not the lounge's own count)
+    get loungeAnim() { return lounge.paintState(); },                   // cheap: is a post fading in on the wall (the QA samples it every frame; `lounge` reads the canvas back)
+    loungeFeed(payload) { lounge.feed(payload); },                      // verification only: answer the lounge's poll by hand
     lifeVisible(on, part) { decor.setVisible(on, part); },
     styles() { return Object.fromEntries([...world.rooms.keys()].map(id => [id, styleAt(styleOf.get(id) ?? hash(id)).id])); },
     view(x, y, z, zm) { autoFit = false; camA = PV.set(x, y, z).dot(R); camB = PV.dot(U); lim = { a0: -1e9, a1: 1e9, b0: -1e9, b1: 1e9 }; zoom = clamp(zm, 1, 400); applyCam(); return [camA, camB, zoom]; },
@@ -2075,7 +2081,8 @@ export function createOfis(root, ctx, opts = {}) {
 
   function removeChar(c) {
     scene.remove(c.root);
-    c.root.traverse(o => { if (o.userData.own && o.geometry) o.geometry.dispose(); });
+    // a skinned figure has a bone texture of its own (made on its first draw): without skeleton.dispose() every person who leaves keeps about 1.6 textures on the GPU for good
+    c.root.traverse(o => { if (o.userData.own && o.geometry) o.geometry.dispose(); if (o.isSkinnedMesh && o.skeleton) o.skeleton.dispose(); });
     dropLabel(c.tag);
     dropLabel(c.bal);
     const room = world.rooms.get(c.roomId);
