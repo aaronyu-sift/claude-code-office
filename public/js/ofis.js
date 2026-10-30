@@ -9,7 +9,8 @@ import { t as msg } from './i18n.js';
 import { labelParts, labelHtml } from './office-labels.js';
 import { createEnv } from './ofis-env.js';
 import { createDecor } from './ofis-decor.js';
-import { STYLE_IDS, assignStyles, neighbourMap, planRoom, styleAt, wallColour, floorColour } from './ofis-styles.js';
+import { styleAt, wallColour, floorColour } from './ofis-styles.js';
+import { looksAll, lookOf, planRoom } from './ofis-arrange.js';
 import { createAtmosphere } from './office-atmosphere.js';
 import { createOfficeSettings, officeQuery } from './office-settings.js';
 import { LOOP, wave } from './motion.js';
@@ -17,10 +18,10 @@ import { createOfisUi } from './ofis-ui.js';
 import { layoutLabels } from './ofis-label-layout.js';
 import * as AS from './ofis-assets.js';
 import * as PL from './ofis-polish.js';
-import { makePalette, PALETTES, chooseOutfit, poseBones } from './ofis-rig.js';
+import { makePalette, PALETTES, chooseOutfit, poseBones, seatPose } from './ofis-rig.js';
 import { isShelved } from './pixel/shelf.js';
 import {
-  WALL_T, ROOM_D, CHEF_W, COL_W, FRONT_M, GAP, HALL_D, HALL_GAP, PLINTH_M, COLS, CAP, roomW,
+  WALL_T, ROOM_D, FRONT_M, GAP, HALL_D, HALL_GAP, PLINTH_M, CAP, roomW,
   VACANT_CLS, minRoomsFrom, buildingPlan, classFor, nextClass, createSlots,
 } from './ofis-layout.js';
 import { boardName, boardProject, boardBadges, fitName } from './board-text.js';
@@ -42,8 +43,6 @@ const SUB_LABEL_REACH = 70;               // px a sub-agent's label may be from 
 const SIGN_PX = 288;                      // sign texture height in pixels (for crisp text)
 const SIGN_FONT = '"Segoe UI Variable Text", "Segoe UI", system-ui, sans-serif';
 const SIGN_FONT_D = '"Segoe UI Variable Display", "Segoe UI", system-ui, sans-serif';
-const ROWS_Z = [1.6, 3.4, 5.2];
-const LANE_Z = 0.55;
 const DOOR_W = 0.9, DOOR_H = 1.72;
 const WALK = 2.2;                         // units / s
 const FRAME_MS = 1000 / 30;
@@ -63,14 +62,12 @@ const THEMES = [
   { wall: '#cf7b5c', floor: '#5b8fb8' }, // terracotta + blue
   { wall: '#a9c98f', floor: '#8f9fb0' }, // sage + gray
 ];
-const VACANT_THEME = { wall: '#cdd1d8', floor: '#9aa5b3' };    // an office nobody uses: quiet grey
-const VACANT_DESKS = 3;                                        // bare desks in a vacant office (the chief's two come on top)
 const SKINS = ['#f3cfb0', '#e7b590', '#cf9670', '#b07650', '#86573a', '#f7dcc6'];
 const HAIRS = ['#2b211c', '#4c3528', '#7d5130', '#c08f4f', '#1c1d24', '#8a8f9c', '#a8432f', '#e0c890'];
 const PANTS = ['#35405a', '#3e5a86', '#4a4f5c', '#5c4a3e', '#2f3440'];
 const BOOKS = ['#d6604d', '#e8a33d', '#4f86c6', '#5aa469', '#8e6bbf', '#e07a9a', '#3f4a5a', '#e9d8b4'];
 const POSTERS = ['#f2c14e', '#5b9bd5', '#e8735a', '#6cc3a0', '#9d7fd8', '#f29fb5'];
-const WOOD = '#c8935c', WOOD_D = '#9c6d42', METAL = '#4a505d', BEZEL = '#2a2f3a', CHAIR = '#3d4350', CHAIR_S = '#505869';
+const WOOD = '#c8935c', WOOD_D = '#9c6d42', METAL = '#4a505d', BEZEL = '#2a2f3a';
 const SCR_OFF = '#141820', SCR_IDLE = '#5b6d8e', SCR_DONE = '#3f7a5e';
 
 const FIT_ICON = '<svg class="ic" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M2.5 6V2.5H6M10 2.5h3.5V6M13.5 10v3.5H10M6 13.5H2.5V10"/></svg>';
@@ -449,8 +446,6 @@ export function createOfis(root, ctx, opts = {}) {
   const labels = new Set();
   let labelSeq = 0;
   const signs = new Map();       // session id → sign label
-  const themeOf = new Map();     // project → theme index; open projects get distinct colors when possible
-  const styleOf = new Map();     // chat id → room style index (ofis-styles.js): the style a room has, kept while the page is open
   let extras = null;             // optional local decoration module { mod, w }
   const extraLabels = [];
   const extraFrame = [];
@@ -483,25 +478,8 @@ export function createOfis(root, ctx, opts = {}) {
     openAgent: id => ui.openAgent(id), closeAgentCard: () => ui.card.close(),
   });
 
-  function assignThemes(list, cells) {
-    const live = [];
-    for (const it of list) {
-      const a = store.agents.get(it.id);
-      const p = (a && a.project) || it.id;
-      if (!live.includes(p)) live.push(p);
-    }
-    const used = new Set(live.filter(p => themeOf.has(p)).map(p => themeOf.get(p)));
-    for (const p of live) {
-      if (themeOf.has(p)) continue;
-      let t = hash(p) % THEMES.length;
-      for (let i = 0; i < THEMES.length && used.has(t); i++) t = (t + 1) % THEMES.length;
-      themeOf.set(p, t);
-      used.add(t);
-    }
-    // the same for the room style, but per chat, not per project: chats started from the same folder (all of them, for someone who works from home) must not
-    // all get the same style. The chat's own pick (a hash of its id), a free one when it is taken, and never the style of the office next to it (ofis-styles.js assignStyles)
-    for (const [k, i] of assignStyles(list.map(it => it.id), styleOf, neighbourMap(list.map(it => ({ project: it.id, slot: it.slot })), cells))) styleOf.set(k, i);
-  }
+  // The look of an office is a property of its slot (ofis-arrange.js looksAll): its style, its colour theme and its furniture are the same whether a chat sits in it or not, and
+  // whoever sits in it. No state: the plan of the building decides.
 
   // ---------------------------------------------------------- label layer
 
@@ -619,7 +597,7 @@ export function createOfis(root, ctx, opts = {}) {
       const a = ar && P.areas.find(x => x.key === key);
       if (a) areas.push({ ...ar, x: a.x, z: a.z, door: a.door, hall: a.hall });
     }
-    assignThemes(list, P.cells);
+    world.looks = looksAll(P.cells);
     const B = new Batch();
     const T = WALL_T;
 
@@ -643,7 +621,7 @@ export function createOfis(root, ctx, opts = {}) {
 
     items.forEach(it => {
       const n0 = B.i.length / 3, f0 = floorJobs.length;
-      const room = it.vacant ? buildVacant(B, g, it) : buildRoom(B, g, it);
+      const room = buildRoom(B, g, it);
       room.tris = B.i.length / 3 - n0;                        // verification only: the triangles of the office (its floor is added below)
       for (let k = f0; k < floorJobs.length; k++) floorJobs[k].room = room;
       if (it.vacant) { world.vacant.push(room); return; }
@@ -658,25 +636,25 @@ export function createOfis(root, ctx, opts = {}) {
     if (P.lounge) { buildPlaza(B, P.lounge, { bed: false }); const b0 = B.i.length / 3; lounge.build({ g, B, c: P.lounge, rng: rng(7) }); world.loungeBatchTris = B.i.length / 3 - b0; } else lounge.clear();
     buildHalls(B, g, items, areas);
     addVacantSigns(g);
+    lightsFor(items, instantNext);
     decor.finish(g);
 
     if (POLISH) {
       const occ = PL.makeOcc(B.p, B.i);
       PL.bakeBatchAO(B, occ);
-      const quiet = [];                                       // the vacant floors (a coarser grid) share one mesh
+      const byPattern = new Map();                            // the floors of one pattern (every office, vacant or not, has the same grid) share one mesh: one draw call a pattern
       for (const j of floorJobs) {
-        const fg = PL.floorMesh(j.X, j.Z, j.W, j.D, j.hex, occ, 0.012, j.quiet ? 0.6 : 0.3);
+        const fg = PL.floorMesh(j.X, j.Z, j.W, j.D, j.hex, occ, 0.012, 0.3);
         if (j.room) j.room.tris += fg.index.count / 3;
-        if (j.quiet) { quiet.push(fg); continue; }
-        const fm = new THREE.Mesh(fg, (j.pattern && decor.floorMaterial(j.pattern)) || MAT.stat);
-        fm.receiveShadow = true; fm.userData.own = true;
-        g.add(fm);
+        const k = j.pattern || '';
+        if (!byPattern.has(k)) byPattern.set(k, []);
+        byPattern.get(k).push(fg);
       }
-      if (quiet.length) {
-        const fm = new THREE.Mesh(mergeGeometries(quiet), MAT.stat);
+      for (const [k, list] of byPattern) {
+        const fm = new THREE.Mesh(list.length > 1 ? mergeGeometries(list) : list[0], (k && decor.floorMaterial(k)) || MAT.stat);
         fm.receiveShadow = true; fm.userData.own = true;
         g.add(fm);
-        quiet.forEach(q => q.dispose());
+        if (list.length > 1) list.forEach(q => q.dispose());
       }
     }
     const stat = new THREE.Mesh(B.build(), MAT.stat);
@@ -727,6 +705,12 @@ export function createOfis(root, ctx, opts = {}) {
     rebuildMs = performance.now() - t0;
   }
 
+  // The lights of the offices: on in the office of a chat, off in a vacant one (feedback kind of docs/motion.md: the switch is a short ease, decor.setLit; the first time a slot is seen it is
+  // at its state at once). The ONE place that decides it, so that when a chat's light should come on at the door crossing (the walkers' entrance) this is the function to call from there.
+  function lightsFor(items, instant) {
+    for (const it of items) decor.setLit(it.slot, !it.vacant, instant);
+  }
+
   // Union of the building and the local lots: camera framing, pan limits and the shadow camera follow it.
   function applyBounds() {
     const b = { ...(world.baseBounds || { x0: -1, x1: 1, z0: -1, z1: 1 }) };
@@ -774,7 +758,29 @@ export function createOfis(root, ctx, opts = {}) {
     get loungeAnim() { return lounge.paintState(); },                   // cheap: is a post fading in on the wall (the QA samples it every frame; `lounge` reads the canvas back)
     loungeFeed(payload) { lounge.feed(payload); },                      // verification only: answer the lounge's poll by hand
     lifeVisible(on, part) { decor.setVisible(on, part); },
-    styles() { return Object.fromEntries([...world.rooms.keys()].map(id => [id, styleAt(styleOf.get(id) ?? hash(id)).id])); },
+    styles() { return Object.fromEntries([...world.rooms.values()].map(r => [r.id, styleAt(r.look.style).id])); },
+    // the look of every office (the slot's own: ofis-arrange.js looksAll) and what the room drew; vacant ones included, in slot order (tools/qa/office3d-cowork-qa.mjs)
+    looks() {
+      return [...world.rooms.values(), ...(world.vacant || [])].sort((a, b) => a.slot - b.slot).map(r => {
+        const l = lookOf(r.look), d = decor.collected && decor.collected.rooms.get(r.id);
+        return { slot: r.slot, id: r.id, vacant: r.vacant, style: l.style, theme: r.look.theme, work: l.work, soft: l.soft, sig: d && d.sig, tris: d && d.tris, items: d && d.items, models: d && d.models, lit: decor.litOf(r.slot) };
+      });
+    },
+    lit(slot) { return decor.litOf(slot); },                                  // the light of a slot's room now, 0..1 (it eases when a chat takes the slot or leaves)
+    // the arrangement of one office: the seats (kind, place, facing, stand point), the walks the people take to them (what pathFor gives) and the furniture they must keep clear of
+    arrange(id) {
+      const r = world.rooms.get(id) || (world.vacant || []).find(v => v.id === id);
+      if (!r) return null;
+      const pt = v => [+(v.x - r.X).toFixed(3), +(v.z - r.Z).toFixed(3)];
+      const seat = (key, s) => ({ key, kind: s.kind, facing: s.facing, hip: s.hip, pos: pt(s.pos), stand: pt(s.stand), walk: pathFor(r, key).map(pt) });
+      return {
+        slot: r.slot, vacant: r.vacant, W: r.W, D: r.D, door: r.door, work: r.plan.look.work, soft: r.plan.look.soft,
+        seats: [seat('chef', r.chefSeat), ...r.seats.map((s, i) => seat(i, s))],
+        obstacles: r.plan.obstacles.map(o => ({ id: o.id, poly: o.poly, seat: !!o.piece.seatOf })),
+      };
+    },
+    // the chars of a room and the seat each one is at (the QA looks that a figure sits where the arrangement says)
+    sitting() { return [...chars.values()].map(c => ({ id: c.id, main: c.main, mode: c.mode, slot: c.slot, room: c.roomId, x: c.root.position.x, z: c.root.position.z, heading: c.heading, sit: c.sit, hipY: c.pk ? c.pivotW : c.hip.position.y, seat: c.seat ? { kind: c.seat.kind, x: c.seat.pos.x, z: c.seat.pos.z, facing: c.seat.facing, hip: c.seat.hip } : null })); },
     view(x, y, z, zm) { autoFit = false; camA = PV.set(x, y, z).dot(R); camB = PV.dot(U); lim = { a0: -1e9, a1: 1e9, b0: -1e9, b1: 1e9 }; zoom = clamp(zm, 1, 400); applyCam(); return [camA, camB, zoom]; },
     room(id) { const r = world.rooms.get(id) || (world.vacant || []).find(v => v.id === id); return r ? { X: r.X, Z: r.Z, W: r.W, D: r.D } : null; },
     // every office of the building, vacant ones included, in slot order: the stable layout's state (tools/qa/office3d-qa.mjs)
@@ -870,49 +876,6 @@ export function createOfis(root, ctx, opts = {}) {
     return { pivot, cap, dx, signX0: 0.3, signX1: door === 'back' ? dl - 0.3 : W - 0.75 };
   }
 
-  // A vacant office: the walls, floor, door and sign are the office's own (same places, so nothing moves when a chat takes the slot), the
-  // contents are a few bare pieces of the one batch (desks without monitors or chairs, a plant, a sofa) and nothing is a mesh of its own:
-  // no door leaf, no sign mesh (addVacantSigns), no pick boxes of desks, overlay, beam or rings (nobody sleeps or waits here). A chat in the
-  // slot gets buildRoom's full office. Only its two outer walls block the pointer.
-  function buildVacant(B, g, it) {
-    const X = it.X, Z = it.Z, W = it.W, D = ROOM_D, T = WALL_T, H = WALL_H;
-    const th = VACANT_THEME;
-    const b = (x, y, z, w, hh, d, col, ry) => B.box(X + x, y, Z + z, w, hh, d, col, ry);
-    const shell = buildShell(B, g, X, Z, W, D, th, it.door, true);
-    decor.furnishVacant({ B, X, Z, W, door: it.door });
-    const room = { id: it.id, cls: it.cls, cap: CAP[it.cls], X, Z, W, D, door: it.door, hall: it.hall, slot: it.slot, vacant: true };
-    const desk = (x, z, dep, len) => {                      // a top and its two end panels
-      b(x, 0.6, z, dep, 0.05, len, WOOD);
-      b(x - 0.02, 0.29, z - len / 2 + 0.05, dep - 0.1, 0.58, 0.04, WOOD_D);
-      b(x - 0.02, 0.29, z + len / 2 - 0.05, dep - 0.1, 0.58, 0.04, WOOD_D);
-    };
-    const cz = D / 2;
-    desk(0.95, cz - 0.58, 0.9, 1.17);
-    desk(0.95, cz + 0.58, 0.9, 1.17);
-    for (let k = 0; k < VACANT_DESKS; k++) desk(CHEF_W + 0.55, ROWS_Z[k], 0.66, 1.24);
-    if (!B.model('plant', X + 0.42, 0, Z + 0.42, { h: 1.0, pal: PAL.potFloor, pk: 'floor', ry: 0 })) {
-      B.put(GEO.pot, X + 0.42, 0.19, Z + 0.42, 0.36, 0.38, 0.36, '#c8704a');
-      B.put(GEO.ico, X + 0.42, 0.98, Z + 0.42, 0.66, 0.58, 0.66, '#4c9a4f');
-    }
-    const lx0 = CHEF_W + COLS[it.cls] * COL_W + 0.3, lx1 = W - 0.3, lw = lx1 - lx0;     // the lounge corner of buildRoom: one sofa on its rug
-    if (lw >= 1.5) {
-      const lz = 3.9, sofa = shade(th.wall, -0.28), sx = lx0 + 0.42;
-      b((lx0 + lx1) / 2, 0.018, lz, Math.min(lw - 0.1, 3.4), 0.012, 2.6, '#efe6d2');
-      b(sx, 0.26, lz, 0.72, 0.26, 1.8, sofa);
-      b(sx - 0.28, 0.56, lz, 0.18, 0.52, 1.8, sofa);
-    }
-    // the sign: its frame and body are batch boxes, its face is an instance of the shared plate (addVacantSigns)
-    const sg0 = shell.signX0, sg1 = shell.signX1;
-    const sw = Math.min(sg1 - sg0, 5.4);
-    const scx = sg0 + Math.min(sw / 2 + 0.2, (sg1 - sg0) / 2);
-    b(scx, SIGN_Y, 0.012, sw + 0.1, SIGN_H + 0.1, 0.024, shell.cap);
-    b(scx, SIGN_Y, 0.055, sw, SIGN_H, 0.06, '#1b1f28');
-    world.vacantSigns.push({ x: X + scx, y: SIGN_Y, z: Z + 0.0865, w: sw });
-    hitBox(g, X - T / 2, H / 2, Z + (D - T) / 2, T, H, D + T).userData.pick = { t: 'block' };
-    hitBox(g, X + (W - T) / 2, H / 2, Z - T / 2, W + T, H, T).userData.pick = { t: 'block' };
-    return room;
-  }
-
   // The faces of the vacant signs: one blank grey plate (no text: nobody uses the office) painted once per build, drawn as one instanced mesh (one draw call) per sign width.
   function addVacantSigns(g) {
     const byW = new Map();
@@ -942,159 +905,57 @@ export function createOfis(root, ctx, opts = {}) {
     }
   }
 
+  // An office, occupied or vacant. The walls, floor, furniture and look are a property of the slot (ofis-arrange.js looksAll and planRoom), so a vacant office is the very room a chat
+  // gets, with the lights off (decor.setLit through lightsFor) and nobody in it. What only an occupied office has: the sign with the chat's name, the door leaf, the dark overlay of a
+  // sleeping chat, the beam and the rings of a chat that waits, and the boxes the pointer hits. A vacant office has a blank sign (addVacantSigns), a shut door of boxes (buildShell quiet)
+  // and only its two outer walls block the pointer. Every office has the seats of the largest class (12 besides the chat's own): the class only says how many are in use.
   function buildRoom(B, g, it) {
+    const vac = !!it.vacant;
     const X = it.X, Z = it.Z, W = it.W, D = ROOM_D, T = WALL_T, H = WALL_H;
-    const a = store.agents.get(it.id);
-    const key = (a && a.project) || it.id;
-    const base = THEMES[themeOf.get(key) ?? (hash(key) % THEMES.length)];
-    const style = styleAt(styleOf.get(it.id) ?? hash(it.id));
-    const th = { wall: wallColour(base, style), floor: floorColour(base, style), pattern: style.floor.pattern, wain: style.wain };      // the project's colours, tinted by the room's style
-    const r = rng(hash(it.id));
+    const a = vac ? null : store.agents.get(it.id);
+    const look = world.looks.get(it.slot);
+    const base = THEMES[look.theme % THEMES.length], style = styleAt(look.style);
+    const th = { wall: wallColour(base, style), floor: floorColour(base, style), pattern: style.floor.pattern, wain: style.wain };      // the slot's colours, tinted by the room's style
+    const r = rng(hash('room:' + it.slot));
     const b = (x, y, z, w, hh, d, col, ry) => B.box(X + x, y, Z + z, w, hh, d, col, ry);
-    const rb = (x, y, z, w, hh, d, rr, col, ry) => B.rbox(X + x, y, Z + z, w, hh, d, rr, col, ry);
-    const pt = (geo, x, y, z, sx, sy, sz, col, ry, rx, rz) => B.put(geo, X + x, y, Z + z, sx, sy, sz, col, ry, rx, rz);
 
-    const shell = buildShell(B, g, X, Z, W, D, th, it.door);
-    const cap = shell.cap;
+    const shell = buildShell(B, g, X, Z, W, D, th, it.door, vac);
+    const plan = planRoom(lookOf(look), { door: it.door });
+    const V = (x, z) => new THREE.Vector3(X + x, 0, Z + z);
+    // a seat of the plan in the building's coordinates: pos (the hip on the floor), facing (a heading), kind ('desk' | 'lounge' | 'stool'), hip (its height), stand (where a person stops
+    // before sitting down) and approach (the points from just inside the door to `stand`: clear of all furniture, ofis-arrange.js)
+    const seatOf = s => ({ id: s.id, pos: V(s.x, s.z), facing: s.facing, kind: s.kind, hip: s.hip, stand: V(s.stand[0], s.stand[1]), approach: s.approach.map(p => V(p[0], p[1])) });
     const room = {
-      id: it.id, cls: it.cls, cap: CAP[it.cls], X, Z, W, D, door: it.door, hall: it.hall, slot: it.slot, vacant: false,
-      chefSeat: new THREE.Vector3(X + 1.95, 0, Z + D / 2),
+      id: it.id, cls: it.cls, cap: CAP[it.cls], X, Z, W, D, door: it.door, hall: it.hall, slot: it.slot, vacant: vac, look, plan,
+      seats: plan.seats.map(seatOf),
       doorX: X + shell.dx, doorPt: new THREE.Vector3(X + shell.dx, 0, it.door === 'back' ? Z : Z + D),
       doorPivot: shell.pivot,
       slotChar: new Array(CAP[it.cls]).fill(null),
       doorOpen: 0, overflow: 0,
     };
+    // the chat's own seat keeps its old name: a Vector3 at the floor under the hip (the beam, the rings and the walkers use it as a point), with the seat's other fields on it
+    const cs = seatOf(plan.chef);
+    room.chefSeat = Object.assign(cs.pos, { id: 'chef', pos: cs.pos, facing: cs.facing, kind: cs.kind, hip: cs.hip, stand: cs.stand, approach: cs.approach });
 
-    // ---- chief's corner
-    const cz = D / 2;
-    // the polished procedural pieces: the same furniture with more shape (edge bands, drawers, a star base with casters, a stand and chin)
-    const deskProc = (x, z, len = 1.24, dep = 0.66) => {
-      rb(x, 0.6, z, dep, 0.05, len, 0.022, WOOD);
-      rb(x, 0.572, z, dep - 0.03, 0.014, len - 0.03, 0.006, shade(WOOD, -0.3));
-      b(x - 0.02, 0.29, z - len / 2 + 0.05, dep - 0.1, 0.58, 0.04, WOOD_D);
-      b(x - 0.03, 0.29, z + len / 2 - 0.23, dep - 0.12, 0.54, 0.38, WOOD_D);
-      for (let i = 0; i < 3; i++) {
-        b(x + dep / 2 - 0.06, 0.12 + i * 0.17, z + len / 2 - 0.23, 0.012, 0.15, 0.34, shade(WOOD_D, 0.14));
-        b(x + dep / 2 - 0.05, 0.12 + i * 0.17, z + len / 2 - 0.23, 0.016, 0.02, 0.1, '#e8d9b8');
-      }
-      b(x - dep / 2 + 0.07, 0.37, z, 0.025, 0.4, len - 0.3, shade(WOOD_D, -0.08));
-    };
-    const chairProc = (sx, z) => {
-      pt(GEO.cyl, sx, 0.085, z, 0.08, 0.05, 0.08, METAL);
-      for (let k = 0; k < 5; k++) {
-        const a = k * Math.PI * 2 / 5 + 0.3, ca = Math.cos(a), sa = Math.sin(a);
-        pt(GEO.unit, sx + ca * 0.15, 0.075, z + sa * 0.15, 0.3, 0.03, 0.045, METAL, -a);
-        pt(GEO.cyl, sx + ca * 0.28, 0.035, z + sa * 0.28, 0.055, 0.05, 0.055, '#23262e');
-      }
-      pt(GEO.cyl, sx, 0.26, z, 0.05, 0.34, 0.05, METAL);
-      rb(sx, 0.465, z, 0.5, 0.09, 0.5, 0.05, CHAIR_S);
-      rb(sx - 0.01, 0.505, z, 0.43, 0.035, 0.43, 0.02, shade(CHAIR_S, 0.14));
-      b(sx + 0.22, 0.58, z, 0.06, 0.14, 0.07, METAL);
-      rb(sx + 0.26, 0.83, z, 0.08, 0.52, 0.46, 0.04, CHAIR, 0);
-      rb(sx + 0.235, 0.83, z, 0.04, 0.4, 0.38, 0.02, shade(CHAIR, 0.14));
-      for (const sg of [-1, 1]) { b(sx + 0.1, 0.58, z + sg * 0.27, 0.035, 0.14, 0.035, METAL); rb(sx + 0.04, 0.665, z + sg * 0.27, 0.3, 0.035, 0.06, 0.015, CHAIR); }
-    };
-    // pack desks (chief: two side by side, staff: one each); `top` is where things stand, whichever desk was built
-    let packDesk = false;
-    for (const sg of [-1, 1]) packDesk = !!B.model('desk', X + 0.95, 0, Z + cz + sg * 0.6, { ry: Math.PI / 2, s: 1.7 });
-    if (!packDesk && POLISH) { deskProc(0.95, cz - 0.58, 1.17, 0.9); deskProc(0.95, cz + 0.58, 1.17, 0.9); }
-    else if (!packDesk) {
-      rb(0.95, 0.615, cz, 0.9, 0.05, 2.3, 0.02, shade(WOOD, -0.12));
-      b(0.95, 0.3, cz - 1.08, 0.8, 0.6, 0.06, WOOD_D);
-      b(0.95, 0.3, cz + 1.08, 0.8, 0.6, 0.06, WOOD_D);
-      b(0.6, 0.34, cz, 0.04, 0.5, 2.1, WOOD_D);
-    }
-    const top = { chef: packDesk ? 0.653 : POLISH ? 0.625 : 0.64, slot: packDesk ? 0.634 : POLISH ? 0.625 : 0.6225 };
-    const monitor = (x, z, ry, w, kind, slot) => {
-      const nx = Math.cos(ry), nz = -Math.sin(ry);
-      const sc = w / 0.379;                                   // the pack's screen is 0.379 wide
-      if (B.model('screen', X + x, top[kind], Z + z, { ry: ry + Math.PI / 2, s: sc })) {
-        world.screens.push({ x: X + x + nx * (0.016 * sc + 0.004), y: top[kind] + 0.1715 * sc, z: Z + z + nz * (0.016 * sc + 0.004), ry, rx: -0.1, w: 0.355 * sc, h: 0.21 * sc, room: it.id, kind, slot });
-        return;
-      }
-      if (POLISH) {
-        pt(GEO.cyl, x, 0.652, z, 0.2, 0.018, 0.2, METAL);
-        rb(x - nx * 0.02, 0.76, z - nz * 0.02, 0.035, 0.2, 0.07, 0.015, METAL, ry);
-        rb(x, 0.98, z, 0.05, 0.38, w, 0.02, BEZEL, ry);
-        b(x, 0.8, z, 0.052, 0.025, w - 0.02, '#1d2129', ry);
-        world.screens.push({ x: X + x + nx * 0.027, y: 0.995, z: Z + z + nz * 0.027, ry, w: w - 0.07, h: 0.3, room: it.id, kind, slot });
-        return;
-      }
-      b(x, 0.648, z, 0.2, 0.02, 0.24, METAL, ry);
-      b(x - nx * 0.02, 0.76, z - nz * 0.02, 0.04, 0.22, 0.05, METAL, ry);
-      b(x, 0.97, z, 0.05, 0.38, w, BEZEL, ry);
-      world.screens.push({ x: X + x + nx * 0.027, y: 0.975, z: Z + z + nz * 0.027, ry, w: w - 0.06, h: 0.32, room: it.id, kind, slot });
-    };
-    monitor(0.74, cz - 0.4, -0.22, 0.66, 'chef', 0);
-    monitor(0.74, cz + 0.4, 0.22, 0.66, 'chef', 1);
-    if (B.model('keyboard', X + 1.18, top.chef, Z + cz, { ry: Math.PI / 2, s: 1.6 })) B.model('mouse', X + 1.2, top.chef, Z + cz + 0.42, { ry: Math.PI / 2, s: 1.5 });
-    else if (POLISH) {
-      rb(1.2, top.chef + 0.012, cz, 0.18, 0.024, 0.52, 0.009, '#e8ebf0');
-      for (let i = -2; i <= 2; i++) b(1.2 + i * 0.03, top.chef + 0.026, cz, 0.014, 0.005, 0.46, '#c4c9d3');
-      rb(1.24, top.chef + 0.013, cz + 0.42, 0.065, 0.026, 0.05, 0.013, '#e8ebf0');
-    } else {
-      b(1.2, 0.652, cz, 0.2, 0.025, 0.56, '#e8ebf0');
-      b(1.22, 0.652, cz + 0.46, 0.11, 0.022, 0.07, '#e8ebf0');
-    }
-    pt(GEO.cyl, 1.15, top.chef + 0.065, cz - 0.86, 0.1, 0.13, 0.1, POSTERS[(r() * POSTERS.length) | 0]);
-    const rot = r() * 6;
-    if (!B.model('plant', X + 0.78, top.chef, Z + cz + 0.95, { h: 0.3, pal: PAL.potDesk, pk: 'desk', ry: rot })) {
-      pt(GEO.pot, 0.78, top.chef + 0.05, cz + 0.95, 0.14, 0.12, 0.14, '#e9e4da');
-      pt(GEO.ico, 0.78, top.chef + 0.16, cz + 0.95, 0.2, 0.18, 0.2, '#5aa85a', rot / 2);
-    }
-
-    // back-right wall: room sign (project name + session title), with posters and a clock in the space left over
+    // back-right wall: room sign (project name + session title) with the clock and posters of the style in the space left over; a vacant office has the blank plate
     const sg0 = shell.signX0, sg1 = shell.signX1;
     const sw = Math.min(sg1 - sg0, 5.4), sh = SIGN_H;
     const scx = sg0 + Math.min(sw / 2 + 0.2, (sg1 - sg0) / 2);
-    makeSign(g, room, X + scx, SIGN_Y, Z, sw, sh);
-    b(scx, SIGN_Y, 0.012, sw + 0.1, sh + 0.1, 0.024, cap);
-    // everything else that is not a desk, the sign or the door is the room's style: ofis-styles.js plans it, ofis-decor.js draws it (windows, lamps, furniture, extras)
-    const plan = planRoom(style.id, { cls: it.cls, door: it.door, W, D, top: top.chef });
-    decor.furnish({ B, kit: KIT, X, Z, W, D, plan, style, theme: th, color: a && a.color, rng: r, top: top.chef, roomId: it.id });
+    if (vac) {
+      b(scx, SIGN_Y, 0.012, sw + 0.1, sh + 0.1, 0.024, shell.cap);
+      b(scx, SIGN_Y, 0.055, sw, sh, 0.06, '#1b1f28');
+      world.vacantSigns.push({ x: X + scx, y: SIGN_Y, z: Z + 0.0865, w: sw });
+    } else {
+      makeSign(g, room, X + scx, SIGN_Y, Z, sw, sh);
+      b(scx, SIGN_Y, 0.012, sw + 0.1, sh + 0.1, 0.024, shell.cap);
+    }
+    // everything in the room that is not the shell or the sign: ofis-arrange.js plans it, ofis-decor.js draws it (tables, seats, laptops and monitors, windows, lamps, plants, shelves)
+    decor.furnish({ B, kit: KIT, X, Z, W, D, plan, style, theme: th, color: a && a.color, rng: r, roomId: it.id, slot: it.slot, screens: d => world.screens.push({ ...d, room: it.id }) });
 
-    // subagent desks
-    const cols = COLS[it.cls];
-    for (let c = 0; c < cols; c++) {
-      for (let rr = 0; rr < 3; rr++) {
-        const slot = c * 3 + rr;
-        const ax = CHEF_W + c * COL_W, z = ROWS_Z[rr];
-        if (!B.model('desk', X + ax + 0.55, 0, Z + z, { ry: Math.PI / 2, s: 1.65 })) {
-          if (POLISH) deskProc(ax + 0.55, z);
-          else {
-            rb(ax + 0.55, 0.6, z, 0.64, 0.045, 1.24, 0.018, WOOD);
-            b(ax + 0.55, 0.29, z - 0.57, 0.56, 0.58, 0.04, WOOD_D);
-            b(ax + 0.55, 0.29, z + 0.57, 0.56, 0.58, 0.04, WOOD_D);
-            b(ax + 0.28, 0.34, z, 0.03, 0.46, 1.1, WOOD_D);
-          }
-        }
-        monitor(ax + 0.42, z, 0, 0.58, 'slot', slot);
-        if (B.model('keyboard', X + ax + 0.74, top.slot, Z + z - 0.02, { ry: Math.PI / 2, s: 1.4 })) B.model('mouse', X + ax + 0.76, top.slot, Z + z + 0.34, { ry: Math.PI / 2, s: 1.4 });
-        else if (POLISH) {
-          rb(ax + 0.76, top.slot + 0.012, z, 0.17, 0.022, 0.46, 0.008, '#e8ebf0');
-          for (let i = -2; i <= 2; i++) b(ax + 0.76 + i * 0.027, top.slot + 0.024, z, 0.012, 0.004, 0.41, '#c4c9d3');
-          rb(ax + 0.78, top.slot + 0.014, z + 0.36, 0.06, 0.024, 0.045, 0.012, '#e8ebf0');
-        } else b(ax + 0.76, 0.635, z, 0.18, 0.022, 0.46, '#e8ebf0');
-        const item = r(), rot2 = r() * 6;
-        if (item < 0.3) pt(GEO.cyl, ax + 0.55, top.slot + 0.06, z + 0.46, 0.09, 0.12, 0.09, POSTERS[(r() * POSTERS.length) | 0]);
-        else if (item < 0.5) {
-          if (!B.model('plant', X + ax + 0.45, top.slot, Z + z - 0.46, { h: 0.26, pal: PAL.potDesk, pk: 'desk', ry: rot2 })) {
-            pt(GEO.pot, ax + 0.45, top.slot + 0.045, z - 0.46, 0.12, 0.1, 0.12, '#e9e4da'); pt(GEO.ico, ax + 0.45, top.slot + 0.145, z - 0.46, 0.17, 0.15, 0.17, '#5aa85a', rot2 / 2);
-          }
-        } else if (item < 0.7) b(ax + 0.62, top.slot + 0.005, z + 0.42, 0.22, 0.04, 0.3, '#f5f3ee', r() - 0.5);
-        // chair (backrest toward +x)
-        const sx = ax + 1.2;
-        if (!B.model('chair', X + sx + 0.03, 0, Z + z, { ry: -Math.PI / 2, s: 1.76 })) {
-          if (POLISH) chairProc(sx, z);
-          else {
-            pt(GEO.cyl, sx, 0.03, z, 0.52, 0.05, 0.52, METAL);
-            pt(GEO.cyl, sx, 0.25, z, 0.06, 0.4, 0.06, METAL);
-            rb(sx, 0.46, z, 0.5, 0.09, 0.5, 0.035, CHAIR_S);
-            rb(sx + 0.25, 0.78, z, 0.09, 0.58, 0.48, 0.04, CHAIR);
-          }
-        }
-        hitBox(g, X + ax + 0.75, 0.5, Z + z, 1.2, 1.0, 1.3).userData.pick = { t: 'slot', room: it.id, slot };
-      }
+    if (vac) {
+      hitBox(g, X - T / 2, H / 2, Z + (D - T) / 2, T, H, D + T).userData.pick = { t: 'block' };
+      hitBox(g, X + (W - T) / 2, H / 2, Z - T / 2, W + T, H, T).userData.pick = { t: 'block' };
+      return room;
     }
 
     // dark overlay (sleeping room), yellow light beam and rings (your turn)
@@ -1122,11 +983,16 @@ export function createOfis(root, ctx, opts = {}) {
       return m;
     });
 
-    // pick boxes
+    // pick boxes: the floor (the room), the chat's seat, every seat in use (its agent, if one sits there), and the two outer walls
     const fh = hitBox(g, X + W / 2, 0.03, Z + D / 2, W, 0.06, D);
     fh.userData.pick = { t: 'room', id: it.id };
-    const ch = hitBox(g, X + 1.2, 0.5, Z + cz, 1.6, 1.0, 2.4);
-    ch.userData.pick = { t: 'agent', id: it.id };
+    const around = s => [s.pos.x + Math.sin(s.facing) * 0.3, s.pos.z + Math.cos(s.facing) * 0.3];
+    const [cx, cz] = around(room.chefSeat);
+    hitBox(g, cx, 0.5, cz, 1.3, 1.0, 1.3).userData.pick = { t: 'agent', id: it.id };
+    room.seats.slice(0, CAP[it.cls]).forEach((s, i) => {
+      const [sx, sz] = around(s);
+      hitBox(g, sx, 0.5, sz, 1.0, 1.0, 1.0).userData.pick = { t: 'slot', room: it.id, slot: i };
+    });
     const w1 = hitBox(g, X - T / 2, H / 2, Z + (D - T) / 2, T, H, D + T);
     w1.userData.pick = { t: 'block' };
     const w2 = hitBox(g, X + (W - T) / 2, H / 2, Z - T / 2, W + T, H, T);
@@ -1496,7 +1362,8 @@ export function createOfis(root, ctx, opts = {}) {
    * api.agentScreen(id) → { cx, cy, w, h } | null: where the agent with that id is on the screen, in CSS px from the top left of
    *     the office view (the box api.pickFigure tests, projected; cx, cy is its centre), or null when it is not in the scene.
    *     The card that opens beside a clicked agent (ofis-ui.js) is anchored to it and follows it through pan, zoom and walking.
-   * api.seatOf(figure) → { x, z, aisleX, room } for a seated agent: its seat and the walking line in front of the desk
+   * api.seatOf(figure) → { x, z, aisleX, stand, facing, kind, room } for a seated agent: its seat, where it stood before it sat down (aisleX is that point's x), the heading it faces and the
+   * kind of seat ('desk' | 'lounge' | 'stool'): the room's arrangement decides all of it (ofis-arrange.js)
    *     (world coordinates), or null (not an agent, or walking in or out).
    * api.layout() → { width, depth, entryX, halls: [{ z0, z1, lane, x0, x1 }], rooms: [{ id, x0, x1, z0, z1, door, doorX, hall }] }:
    *     the building is an X of rows (ofis-layout.js): its interior lies in x ≤ width, z ≤ depth, and its rows are not all as long as the
@@ -1542,7 +1409,7 @@ export function createOfis(root, ctx, opts = {}) {
       THREE, scene, group: root3, unit: 1, wallH: WALL_H, gap: GAP, roomD: ROOM_D,
       fonts: { text: SIGN_FONT, display: SIGN_FONT_D }, shade, rounded,
       palette: {
-        skins: SKINS, hairs: HAIRS, pants: PANTS, wood: WOOD, woodDark: WOOD_D, metal: METAL, chair: CHAIR, chairSeat: CHAIR_S,
+        skins: SKINS, hairs: HAIRS, pants: PANTS, wood: WOOD, woodDark: WOOD_D, metal: METAL,
         bezel: BEZEL, books: BOOKS, posters: POSTERS, walls: THEMES.map(t => t.wall), floors: THEMES.map(t => t.floor), yellow: YELLOW,
       },
       mat: hex => mat(hex),
@@ -1696,10 +1563,9 @@ export function createOfis(root, ctx, opts = {}) {
           if (!fig || c.root !== fig.root) continue;
           const room = world.rooms.get(c.roomId);
           if (!room || c.mode !== 'seated' || c.after === 'gone') return null;
-          if (c.main) return { x: room.chefSeat.x, z: room.chefSeat.z, aisleX: room.chefSeat.x + 0.7, room: room.id };
-          if (c.slot < 0) return null;
-          const s = slotGeom(room, c.slot);
-          return { x: s.seat.x, z: s.seat.z, aisleX: s.aisle, room: room.id };
+          const s = c.main ? room.chefSeat : c.slot >= 0 ? room.seats[c.slot] : null;
+          if (!s) return null;
+          return { x: s.pos.x, z: s.pos.z, aisleX: s.stand.x, stand: { x: s.stand.x, z: s.stand.z }, facing: s.facing, kind: s.kind, room: room.id };
         }
         return null;
       },
@@ -2013,11 +1879,13 @@ export function createOfis(root, ctx, opts = {}) {
     const p = poseBones(j);
     B.armL.rotation.set(...p.armL); B.armR.rotation.set(...p.armR); B.torso.rotation.set(...p.torso); B.head.rotation.set(...p.head);
     B.legL.rotation.set(...p.legL); B.legR.rotation.set(...p.legR);
-    // hip pivot in world units: feet on the floor when standing, seat height when seated, plus the walking bob of the old hip
-    const bob = c.hip.position.y - lerp(0.42, 0.5, c.sit);
-    c.pivotW = lerp(PK_PIV * PK_K, PK_SEAT, c.sit) + bob;
+    // hip pivot in world units: feet on the floor when standing, the height of the seat's cushion when seated (a stool is higher than a sofa), plus the walking bob of the old hip
+    const bob = c.hip.position.y - lerp(0.42, seatHip(c) + 0.03, c.sit);
+    c.pivotW = lerp(PK_PIV * PK_K, seatHip(c), c.sit) + bob;
     B.root.position.y = c.pivotW / PK_K - PK_PIV;
   }
+  // where the hip sits on the person's seat (ofis-arrange.js: the top of the cushion plus a little), the old fixed height before it has one
+  const seatHip = c => (c.seat && c.seat.hip) || PK_SEAT;
 
   // plain: a person of the lounge (ofis-lounge.js): no name tag and no balloon of its own, and it is not an agent of the store
   function makeChar(id, main, shirt, plain = false) {
@@ -2034,23 +1902,7 @@ export function createOfis(root, ctx, opts = {}) {
       const headset = new THREE.Mesh(hs.build(), MAT.stat);
       headset.userData.own = true;
       (f.headHost || head).add(headset);
-      // the chief's chair turns with the character
-      const chair = new THREE.Group(); root.add(chair);
-      const chairBake = PK.chair && AS.bake(PK.chair, PAL.furniture, '');
-      if (chairBake) {
-        const cm = new THREE.Mesh(chairBake.geo, MAT.stat);
-        cm.scale.setScalar(1.76); cm.position.set(0, 0, -0.03); cm.castShadow = true;
-        chair.add(cm);
-      } else {
-        const cm = (geo, col, x, y, z) => { const m = M(geo, col, true); m.position.set(x, y, z); chair.add(m); return m; };
-        cm(GEO.base, METAL, 0, 0.03, 0);
-        cm(GEO.post, METAL, 0, 0.24, 0);
-        cm(GEO.seat, '#343a46', 0, 0.45, 0);
-        cm(GEO.back, '#262a33', 0, 0.86, -0.27);
-        cm(GEO.arm2, '#262a33', 0.29, 0.64, 0.02);
-        cm(GEO.arm2, '#262a33', -0.29, 0.64, 0.02);
-        mergeMeshes(chair);
-      }
+      // no chair of its own any more: the chief sits on the seat of the room (a lounge chair, a sofa, a stool: ofis-arrange.js), which stays where it is when the chief gets up
     }
     if (POLISH) {
       // soft contact shadow under the person and the chair
@@ -2090,39 +1942,36 @@ export function createOfis(root, ctx, opts = {}) {
     chars.delete(c.id);
   }
 
+  // the seat of a person: the chat's own (room.chefSeat) or the sub-agent's slot (room.seats[slot]); both come from the room's arrangement (ofis-arrange.js)
+  const seatFor = (room, slot) => (slot === 'chef' ? room.chefSeat : room.seats[slot]);
   function seatChef(c, room) {
+    c.seat = room.chefSeat;
     c.root.position.copy(room.chefSeat);
     c.mode = 'seated'; c.path = null; c.sit = 1;
   }
-  function slotGeom(room, slot) {
-    const col = Math.floor(slot / 3), row = slot % 3;
-    const ax = room.X + CHEF_W + col * COL_W, z = room.Z + ROWS_Z[row];
-    return { seat: new THREE.Vector3(ax + 1.15, 0, z), aisle: ax + 1.9, z };
-  }
   function seatSub(c, room) {
-    const s = slotGeom(room, c.slot);
-    c.root.position.copy(s.seat);
+    const s = c.seat = seatFor(room, c.slot);
+    c.root.position.copy(s.pos);
     c.mode = 'seated'; c.path = null; c.after = null; c.sit = 1;
-    c.heading = c.th = -Math.PI / 2;
+    c.heading = c.th = s.facing;
   }
-  // A newcomer comes in at the building entrance (right end of the hall), walks along the hall to its room's door and sits at its desk.
+  // The walk of a newcomer, from the building entrance (right end of the hall) along the hall lane to the room's door, through the door and across the room to the stand point of its
+  // seat, then onto the seat. slot is a sub-agent's slot or 'chef' (the chat's own seat). The points inside the room are the seat's `approach` (ofis-arrange.js), which keeps clear of
+  // every table, chair and prop of this very arrangement, so the walk crosses no furniture. The first point is the door's outer point.
   function pathFor(room, slot) {
-    const s = slotGeom(room, slot);
+    const s = seatFor(room, slot);
     const V = (x, z) => new THREE.Vector3(x, 0, z);
     const hall = world.halls[room.hall];
     const lane = hall ? hall.lane : room.Z - 0.9;
     const p = [V(world.entryX, lane), V(room.doorX, lane)];
-    if (room.door === 'front') {
-      const fz = room.Z + ROOM_D;
-      p.push(V(room.doorX, fz + 0.45), V(room.doorX, fz - 0.5), V(s.aisle, fz - 0.5));
-    } else {
-      p.push(V(room.doorX, room.Z - 0.75), V(room.doorX, room.Z + LANE_Z), V(s.aisle, room.Z + LANE_Z));
-    }
-    p.push(V(s.aisle, s.z), s.seat.clone());
+    p.push(V(room.doorX, room.door === 'front' ? room.Z + ROOM_D + 0.45 : room.Z - 0.75));
+    for (const q of s.approach) p.push(q.clone());
+    p.push(s.pos.clone());
     return p;
   }
   function enter(c, room) {
     const p = pathFor(room, c.slot);
+    c.seat = seatFor(room, c.slot);
     c.root.position.copy(p[0]);
     c.path = p; c.pi = 1; c.mode = 'walk'; c.after = 'sit'; c.sit = 0;
     c.heading = -Math.PI / 2;
@@ -2174,7 +2023,7 @@ export function createOfis(root, ctx, opts = {}) {
         chef.roomId = room.id;
         chars.set(room.id, chef);
         seatChef(chef, room);
-        chef.heading = chef.th = (m.status === 'waiting' || m.status === 'ask') ? Math.PI / 4 : -Math.PI / 2;
+        chef.heading = chef.th = (m.status === 'waiting' || m.status === 'ask') ? Math.PI / 4 : room.chefSeat.facing;
       }
       seen.add(room.id);
       let overflow = 0;
@@ -2299,7 +2148,7 @@ export function createOfis(root, ctx, opts = {}) {
         if (c.pi >= c.path.length) {
           c.path = null;
           if (c.after === 'gone') { removeChar(c); return; }
-          c.mode = 'seated'; c.after = null; c.th = -Math.PI / 2;
+          c.mode = 'seated'; c.after = null; c.th = c.seat ? c.seat.facing : -Math.PI / 2;
         }
       } else {
         pos.x += dx / d * stp; pos.z += dz / d * stp;
@@ -2315,7 +2164,8 @@ export function createOfis(root, ctx, opts = {}) {
     else if (st === 'working') pose = cat === 'think' ? 'think' : 'type';
     else if (c.main && (st === 'waiting' || st === 'ask')) pose = 'wave';
     else if (st === 'dormant') pose = 'sleep';
-    if (c.mode === 'seated') c.th = pose === 'wave' ? Math.PI / 4 : -Math.PI / 2;
+    const seat = c.seat, sp = seatPose(seat && seat.kind);
+    if (c.mode === 'seated') c.th = pose === 'wave' ? Math.PI / 4 : seat ? seat.facing : -Math.PI / 2;      // facing the table of its seat; the chat waving turns to the room
     if (c.force) { pose = c.force.pose; c.th = c.force.th; }       // a person of the lounge chats or listens, and faces where its seat faces
 
     c.heading = angTo(c.heading, c.th, Math.min(1, dt * (c.mode === 'walk' ? 12 : 5)));
@@ -2340,6 +2190,7 @@ export function createOfis(root, ctx, opts = {}) {
     } else {
       tgt.up = -0.06; tgt.hx = -0.04 + Math.sin(T * 1.2 + ph) * 0.03; tgt.lx = tgt.rx = -0.45;
     }
+    if (c.mode === 'seated' && pose !== 'wave') tgt.up += sp.lean * c.sit;                 // a person at a desk leans to the screen, on a sofa back into it, on a stool over the table
     const k = Math.min(1, dt * 10);
     c.armL.rotation.x = lerp(c.armL.rotation.x, tgt.lx, k);
     c.armL.rotation.z = lerp(c.armL.rotation.z, tgt.lz, k);
@@ -2349,9 +2200,9 @@ export function createOfis(root, ctx, opts = {}) {
     c.head.rotation.x = lerp(c.head.rotation.x, tgt.hx, k);
     c.head.rotation.z = lerp(c.head.rotation.z, tgt.hz, k);
     const legSwing = pose === 'walk' ? sw * 0.6 : 0;
-    c.legL.rotation.x = -1.5 * c.sit + legSwing * (1 - c.sit);
-    c.legR.rotation.x = -1.5 * c.sit - legSwing * (1 - c.sit);
-    c.hip.position.y = lerp(0.42, 0.5, c.sit) + (pose === 'walk' ? Math.abs(Math.cos(c.walkPh)) * 0.03 : 0);
+    c.legL.rotation.x = sp.legs * c.sit + legSwing * (1 - c.sit);
+    c.legR.rotation.x = sp.legs * c.sit - legSwing * (1 - c.sit);
+    c.hip.position.y = lerp(0.42, seatHip(c) + 0.03, c.sit) + (pose === 'walk' ? Math.abs(Math.cos(c.walkPh)) * 0.03 : 0);
 
     const sc = c.force ? c.force.scale : c.mode === 'walk' ? clamp((world.entryX + 0.15 - pos.x) / 0.9, 0.02, 1) : 1;
     c.root.scale.setScalar(sc);

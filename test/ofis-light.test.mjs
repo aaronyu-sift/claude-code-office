@@ -1,8 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { flicker, noise, levels, paneColour, createFollower, AMP, CANDLE_STEPS, DAY_SKY, NIGHT_GLOW } from '../public/js/ofis-light.js';
+import { flicker, noise, levels, paneColour, createFollower, bezier, createSwitches, SWITCH_MS, AMP, CANDLE_STEPS, DAY_SKY, NIGHT_GLOW } from '../public/js/ofis-light.js';
 import { atmosphereAt, lightTarget, lightVector } from '../public/js/office-atmosphere.js';
-import { CYCLE } from '../public/js/motion.js';
+import { CYCLE, EASE } from '../public/js/motion.js';
 
 const KINDS = ['lamp', 'candle', 'bulb', 'sconce', 'screen', 'led'];
 const day = new Date(2026, 5, 15, 13, 0), night = new Date(2026, 5, 15, 22, 30);
@@ -120,4 +120,52 @@ test('follower: the light moves toward the atmosphere at the scene\'s constant r
   assert.equal(f.reduced, false);
   state = atmosphereAt({ settings, date: night, reducedMotion: true }); version++;
   assert.equal(f.reduced, true);
+});
+
+// ---------------------------------------------------------------- a room's lights: the switch and the window
+
+test('pane: the same by day whether the room is lit or not; at night a lit window glows warm and an unlit one is the dark night sky', () => {
+  const dv = vec(day), nv = vec(night);
+  assert.deepEqual(paneColour(dv, DAY_SKY, 1), paneColour(dv, DAY_SKY, 0), 'daylight comes from outside');
+  const lit = paneColour(nv, DAY_SKY, 1), dark = paneColour(nv, DAY_SKY, 0), half = paneColour(nv, DAY_SKY, 0.5);
+  assert.ok(lit[0] > 0.8 && lit[0] > lit[2] + 0.3, 'a lit window is warm');
+  assert.ok(dark[0] < 0.15 && dark[2] < 0.25 && dark[2] > dark[0], 'an unlit window is a dark blue');
+  assert.ok(half[0] > dark[0] && half[0] < lit[0], 'in between while the switch moves');
+  assert.deepEqual(paneColour(nv, DAY_SKY), lit, 'lit is the default');
+});
+
+test('bezier: the CSS curves as functions: they start at 0, end at 1, never go back, and out arrives early while in leaves late', () => {
+  const out = bezier(EASE.out), inn = bezier(EASE.in);
+  for (const f of [out, inn]) {
+    assert.equal(f(0), 0); assert.equal(f(1), 1);
+    let last = 0;
+    for (let i = 1; i <= 100; i++) { const v = f(i / 100); assert.ok(v >= last - 1e-9, 'monotonic'); last = v; }
+  }
+  assert.ok(out(0.2) > 0.5, `decelerate: ${out(0.2)}`);
+  assert.ok(inn(0.5) < 0.5, `accelerate: ${inn(0.5)}`);
+  assert.ok(Math.abs(bezier('cubic-bezier(0.5, 0.5, 0.5, 0.5)')(0.3) - 0.3) < 1e-5, 'a straight line is the identity');
+});
+
+test('switches: a room comes on over SWITCH_MS and arrives early, goes off and leaves late, and a page that loads with chats in it starts lit', () => {
+  const s = createSwitches();
+  s.set(3, true, 0); s.set(4, false, 0);
+  assert.equal(s.get(3), 1, 'first seen: at its state at once');
+  assert.equal(s.get(4), 0);
+  assert.equal(s.get(9), 0, 'an unknown slot is dark');
+  s.set(4, true, 1000);
+  assert.equal(s.get(4), 0, 'nothing moves until time does');
+  assert.ok(s.step(1000 + SWITCH_MS / 4)); const early = s.get(4);
+  assert.ok(early > 0.4 && early < 1, `ease-out is well on its way a quarter in: ${early}`);
+  s.step(1000 + SWITCH_MS * 2);
+  assert.equal(s.get(4), 1); assert.ok(!s.step(1000 + SWITCH_MS * 3), 'nothing changes once it is there');
+  s.set(4, false, 5000);
+  s.step(5000 + SWITCH_MS / 4);
+  assert.ok(s.get(4) > 0.8, `ease-out going off: ${s.get(4)} is still bright a quarter in`);
+  s.step(5000 + SWITCH_MS);
+  assert.equal(s.get(4), 0);
+  s.set(7, true, 6000); s.set(7, false, 6050); s.step(6060);
+  assert.ok(s.get(7) >= 0 && s.get(7) <= 1);
+  s.set(5, false, 7000); s.set(5, true, 7000, true);
+  assert.equal(s.get(5), 1, 'instant: reduced motion');
+  assert.ok(s.key().includes('3:1.000'));
 });

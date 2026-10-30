@@ -5,7 +5,7 @@ import { fileURLToPath } from 'node:url';
 import { join, dirname } from 'node:path';
 import {
   PROPS, OUTFITS, MANIFEST, BONES, ATLAS, PALETTES, PALETTE_OF, SLEEVE, parseLook, manifestFor, judge, createWarner, warnText, chooseOutfit,
-  isPerson, rawSRGB, hexToLinear, rgbToHsl, hslToRgb, makePalette, poseBones,
+  isPerson, rawSRGB, hexToLinear, rgbToHsl, hslToRgb, makePalette, poseBones, SEAT_POSE, seatPose,
 } from '../public/js/ofis-rig.js';
 import { readGlb, readAccessor } from '../tools/models/strip-glb.mjs';
 
@@ -148,6 +148,16 @@ test('palettes: no material of a pack model keeps the pack colour by accident (a
     const names = [].concat(PALETTE_OF[key]).flatMap(p => Object.keys(PALETTES[p].byName));
     for (const m of (glb(PROPS[key]).json.materials || []).map(m => m.name)) assert.ok(names.includes(m), `model ${key} has material "${m}" that its palette does not colour`);
   }
+});
+
+test('rig: every kind of seat has a pose: a desk leans a little to the screen, a lounge seat leans back, a stool has the legs hanging, and an unknown kind is a desk', () => {
+  assert.deepEqual(Object.keys(SEAT_POSE).sort(), ['desk', 'lounge', 'stool']);
+  assert.ok(seatPose('desk').lean > 0 && seatPose('desk').lean < 0.1);
+  assert.ok(seatPose('lounge').lean < -0.1, 'a lounge seat leans back');
+  assert.ok(seatPose('stool').legs > seatPose('desk').legs + 0.3, 'on a stool the thighs point down more than on a chair');
+  for (const k of Object.keys(SEAT_POSE)) assert.ok(seatPose(k).legs <= -0.8 && seatPose(k).legs >= -1.6, `${k}: the thigh angle is that of a seated person`);
+  assert.equal(seatPose('nonsense'), SEAT_POSE.desk);
+  assert.equal(seatPose(undefined), SEAT_POSE.desk);
 });
 
 test('rig: the old joint angles drive the pack bones (arms hang from the T pose, legs and spine follow)', () => {
