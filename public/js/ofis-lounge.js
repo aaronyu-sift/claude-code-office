@@ -3,15 +3,16 @@
 // the signs say), lounge-paint.js (the picture on the wall), lounge-source.js (the poll) and lounge-card.js (the card); this file puts them into the scene of ofis.js.
 //
 //   const lounge = createLounge(host)
-//   lounge.build({ g, c, rng })      in every rebuild of the building, where the old round bed of the plaza was: the pavilion (its own batch, so the cost can be measured), the
-//                                    wall, the strip of light and the pick boxes; the lights of its lamps and candles go through ofis-decor.js
+//   lounge.build({ g, B, c, rng })   in every rebuild of the building, where the old round bed of the plaza was: the pavilion goes into the building's one batch `B` (no draw call of its
+//                                    own, and the occlusion baked into the batch reaches it), the wall's face and the strip of light are two meshes, then the pick boxes; the lights of
+//                                    its lamps and candles go through ofis-decor.js. The face of the wall is drawn only while the board has something to say (see `boardShown`)
 //   lounge.step(dt, T)               every frame: the poll's conditions, the view, the wall's picture, the pulse, the people
 //   lounge.touch()                   the Office's chats changed: the people are tied to them again
 //   lounge.show() / hide()           the Office view is shown or hidden (the poll runs only while it is shown, the tab is visible and the lounge is on the screen)
 //   lounge.click(pick) / hover(pick) / openCard(from) / closeCard() / tipHtml(key) / people() / snapshot() / setVisible(on)
 //
-// host: { scene, camera, root, area, store, settings, decor, KIT, size() -> [w, h], project(x, y, z) -> [px, py] in the scene's box, bounds() -> the card's bounds, newBatch(),
-//         bake(batch), stat (the material of a batch), hitBox(g, x, y, z, w, h, d), mkLabel, setLabel, dropLabel, person: { make(id, shirt), anim(c, dt, T), remove(c) },
+// host: { scene, camera, root, area, store, settings, decor, KIT, size() -> [w, h], project(x, y, z) -> [px, py] in the scene's box, bounds() -> the card's bounds,
+//         hitBox(g, x, y, z, w, h, d), mkLabel, setLabel, dropLabel, person: { make(id, shirt), anim(c, dt, T), remove(c) },
 //         sessionInfo(id), openAgent(id), closeAgentCard(), search, tex (shared textures) }
 import * as THREE from 'three';
 import { t as msg } from './i18n.js';
@@ -55,7 +56,7 @@ export function createLounge(host) {
   }
 
   // ---- where it stands
-  let cell = null, plan = null, group = null, pavilion = null, boardMesh = null, strip = null, built = { tris: 0, lights: 0, builds: 0 };
+  let cell = null, plan = null, group = null, boardMesh = null, strip = null, built = { tris: 0, lights: 0, builds: 0 };
   const boardBox = () => {
     if (!cell) return null;
     const b = plan.board;
@@ -213,39 +214,37 @@ export function createLounge(host) {
     }
   }
 
+  // the face of the wall is drawn only while the board has something to show: posts, a quiet board, or an unsupported one. A board that is off (no endpoint, no --chat-db, the setting off, or
+  // nothing has answered yet) keeps its dark frame, which is in the batch, and says so in the sign over it and in the card: a lounge with nothing to say adds no draw call to the building
+  const boardShown = () => !!view && (view.state === 'ok' || view.state === 'unsupported');
+
   // ---- the build
   let visibleParts = true, parts = [];                                                  // parts: everything the lounge added to the building group (not the invisible boxes that are clicked)
-  function build({ g, c, rng }) {
-    const first = g.children.length;
+  function build({ g, B, c, rng }) {
+    const first = g.children.length, t0 = B.i.length / 3;
     cell = c; plan = loungePlan(c.W, c.D);
-    const LB = host.newBatch(), { deck, board: b } = plan, X = c.X, Z = c.Z;
+    const { deck, board: b } = plan, X = c.X, Z = c.Z;
     // the deck: planks of three tones on a dark base, with a low lip all round
     const dw = deck.u1 - deck.u0, dd = deck.v1 - deck.v0, dcx = X + (deck.u0 + deck.u1) / 2, dcz = Z + (deck.v0 + deck.v1) / 2;
-    LB.box(dcx, 0.00675, dcz, dw, 0.0135, dd, '#7a5535');
+    B.box(dcx, 0.00675, dcz, dw, 0.0135, dd, '#7a5535');
     const n = Math.max(2, Math.round(dd / 0.32)), pw = dd / n;
-    for (let k = 0; k < n; k++) LB.box(dcx, deck.h / 2, Z + deck.v0 + pw * (k + 0.5), dw, deck.h, pw - 0.014, PLANKS[(k * 7 + (k >> 1)) % PLANKS.length]);
+    for (let k = 0; k < n; k++) B.box(dcx, deck.h / 2, Z + deck.v0 + pw * (k + 0.5), dw, deck.h, pw - 0.014, PLANKS[(k * 7 + (k >> 1)) % PLANKS.length]);
     for (const s of [0, 1]) {
-      LB.box(dcx, 0.02, Z + (s ? deck.v1 : deck.v0), dw + 0.1, 0.04, 0.06, '#6d4c33');
-      LB.box(X + (s ? deck.u1 : deck.u0), 0.02, dcz, 0.06, 0.04, dd + 0.1, '#6d4c33');
+      B.box(dcx, 0.02, Z + (s ? deck.v1 : deck.v0), dw + 0.1, 0.04, 0.06, '#6d4c33');
+      B.box(X + (s ? deck.u1 : deck.u0), 0.02, dcz, 0.06, 0.04, dd + 0.1, '#6d4c33');
     }
     // the wall: a dark frame, two posts with a beam and caps, feet
     const bx = X + b.cu, bz = Z + b.cv, top = b.y0 + b.h;
-    LB.box(bx, b.y0 + b.h / 2, bz, b.w + 0.16, b.h + 0.16, b.t, '#262b38');
+    B.box(bx, b.y0 + b.h / 2, bz, b.w + 0.16, b.h + 0.16, b.t, '#262b38');
     for (const s of [-1, 1]) {
       const px = bx + s * (b.w / 2 + 0.22);
-      LB.box(px, (top + 0.3) / 2, bz, 0.16, top + 0.3, 0.22, '#6d4c33');
-      LB.box(px, top + 0.32, bz, 0.26, 0.05, 0.3, '#4f3724');
-      LB.box(px, 0.04, bz, 0.42, 0.05, 0.52, '#4a505d');
+      B.box(px, (top + 0.3) / 2, bz, 0.16, top + 0.3, 0.22, '#6d4c33');
+      B.box(px, top + 0.32, bz, 0.26, 0.05, 0.3, '#4f3724');
+      B.box(px, 0.04, bz, 0.42, 0.05, 0.52, '#4a505d');
     }
-    LB.box(bx, top + 0.2, bz, b.w + 0.7, 0.07, 0.14, '#6d4c33');
-    const t0 = LB.i.length / 3;
-    decor.furnish({ B: LB, kit: host.KIT, X, Z, W: c.W, D: c.D, plan: { items: plan.items, lights: plan.lights, windows: [] }, style: LOUNGE_STYLE, theme: { wall: '#cdd1d8', floor: '#9aa5b3' }, color: null, rng, top: 0.75, roomId: 'lounge' });
-    host.bake(LB);
-    const tris = LB.i.length / 3;
-    pavilion = new THREE.Mesh(LB.build(), host.stat);
-    pavilion.castShadow = pavilion.receiveShadow = true;
-    pavilion.userData.own = true;
-    g.add(pavilion);
+    B.box(bx, top + 0.2, bz, b.w + 0.7, 0.07, 0.14, '#6d4c33');
+    decor.furnish({ B, kit: host.KIT, X, Z, W: c.W, D: c.D, plan: { items: plan.items, lights: plan.lights, windows: [] }, style: LOUNGE_STYLE, theme: { wall: '#cdd1d8', floor: '#9aa5b3' }, color: null, rng, top: 0.75, roomId: 'lounge' });
+    const tris = B.i.length / 3 - t0;                                                     // what the pavilion put into the building's batch
     // the face of the wall, and the strip of light under it
     boardMesh = new THREE.Mesh(new THREE.PlaneGeometry(b.w, b.h), boardMat);
     boardMesh.position.set(bx, b.y0 + b.h / 2, bz + b.t / 2 + 0.004);
@@ -259,9 +258,9 @@ export function createLounge(host) {
     host.hitBox(g, bx, b.y0 + b.h / 2, bz + 0.1, b.w + 0.5, b.h + 0.3, 0.7).userData.pick = { t: 'lounge' };
     host.hitBox(g, dcx, 0.03, dcz, dw, 0.06, dd).userData.pick = { t: 'lounge' };
     parts = g.children.slice(first).filter(m => !m.userData.pick);
-    for (const m of parts) if (m !== strip) m.visible = visibleParts;
+    for (const m of parts) if (m !== strip && m !== boardMesh) m.visible = visibleParts;
     group = g;
-    built = { tris: tris + 4 + plan.lights.reduce((s, l) => s + 80 + 2 + (l.pool > 0 ? 2 : 0), 0), staticTris: tris, furnishTris: tris - t0, lights: plan.lights.length, builds: built.builds + 1 };
+    built = { tris: tris + 4 + plan.lights.reduce((s, l) => s + 80 + 2 + (l.pool > 0 ? 2 : 0), 0), staticTris: tris, lights: plan.lights.length, builds: built.builds + 1 };
     painted.key = ''; painted.anim = null; sign = sign && sign.el.isConnected ? sign : null; signHtml = '';
     dirty = true;
     return { tris: built.tris };
@@ -276,6 +275,7 @@ export function createLounge(host) {
     if (on !== lastOn) { lastOn = on; poller.kick(); }
     updateWall(T);
     stepPulse(T);
+    if (boardMesh) boardMesh.visible = visibleParts && boardShown();
     stepPeople(dt, T);
     card.place();
   }
@@ -312,7 +312,7 @@ export function createLounge(host) {
   // verification only: hide the lounge to measure it (everything, or only the people, or only the pavilion with its wall and strip)
   function setVisible(on, part) {
     const v = !!on;
-    if (part !== 'people') { visibleParts = v; for (const m of parts) m.visible = v && (m !== strip || pulse > 0.003); }
+    if (part !== 'people') { visibleParts = v; for (const m of parts) m.visible = v && (m === strip ? pulse > 0.003 : m === boardMesh ? boardShown() : true); }
     if (part !== 'building') for (const P of folk.values()) P.c.root.visible = v;
   }
 
@@ -331,7 +331,7 @@ export function createLounge(host) {
       paint: { count: painted.count, texts: painted.texts, scale: painted.scale, rows: painted.rows.length, animating: !!painted.anim, key: painted.key },
       ink: inkCount(), canvas: { w: CANVAS.w, h: CANVAS.h },
       poll: { requests: poller.stats.requests, starts: [...poller.stats.starts], lastStatus: poller.stats.lastStatus, armed: poller.armed, inflight: poller.inflight, canPoll: canPoll(), pollMs: POLL_MS, why: { visible, hidden: typeof document !== 'undefined' && document.hidden, mode: mode(), onScreen: cell ? onScreen() : false } },
-      activity: view ? view.activity : null, pulse: +pulse.toFixed(4), stripVisible: !!(strip && strip.visible), reduced: reducedNow(),
+      boardVisible: !!(boardMesh && boardMesh.visible), activity: view ? view.activity : null, pulse: +pulse.toFixed(4), stripVisible: !!(strip && strip.visible), reduced: reducedNow(),
       card: card.read(), signLabel: sign ? { shown: sign.shown, want: sign.want, text: sign.el.textContent, tabIndex: sign.el.tabIndex, role: sign.el.getAttribute('role'), label: sign.el.getAttribute('aria-label') } : null,
       built, cell: cell ? { X: cell.X, Z: cell.Z, W: cell.W, D: cell.D } : null, onScreen: cell ? onScreen() : false, visibleParts,
       lights: plan ? plan.lights.length : 0, seats: plan ? plan.seats.length : 0, viewKey: view ? view.key : null, limits: LIMITS,

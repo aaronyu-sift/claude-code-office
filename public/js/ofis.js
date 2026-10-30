@@ -474,10 +474,9 @@ export function createOfis(root, ctx, opts = {}) {
   // The lounge (ofis-lounge.js): the pavilion on the plaza of the hub, its message wall and the agents that talk. What it needs from this scene comes in here.
   lounge = createLounge({
     scene, camera, root, area, store, decor, KIT, settings: opts.settings || createOfficeSettings({ overrides: officeQuery(typeof location === 'undefined' ? '' : location.search) }),
-    size: () => [vw, vh], anisotropy: aniso, stat: MAT.stat,
+    size: () => [vw, vh], anisotropy: aniso,
     project: (x, y, z) => { PV.set(x, y, z).project(camera); return [(PV.x + 1) / 2 * vw, (1 - PV.y) / 2 * vh]; },
     bounds: () => { const b = root.getBoundingClientRect(), a = area.getBoundingClientRect(), c = ui.covered(); return { x0: a.left - b.left, y0: a.top - b.top + c.top, x1: a.left - b.left + a.width - c.right, y1: a.top - b.top + a.height }; },
-    newBatch: () => new Batch(), bake: B => { if (POLISH) PL.bakeBatchAO(B, PL.makeOcc(B.p, B.i)); },
     hitBox: (g, x, y, z, w, h, d) => hitBox(g, x, y, z, w, h, d),
     mkLabel: (...a) => mkLabel(...a), setLabel: (...a) => setLabel(...a), dropLabel: L => dropLabel(L),
     person: { make: (id, shirt) => makeChar(id, false, shirt, true), anim: (c, dt, T) => animChar(c, dt, T), remove: c => removeChar(c) },
@@ -655,7 +654,7 @@ export function createOfis(root, ctx, opts = {}) {
     });
     world.plan = { bays: P.bays, size: P.size };
     world.lounge = P.lounge;
-    if (P.lounge) { buildPlaza(B, P.lounge, { bed: false }); lounge.build({ g, c: P.lounge, rng: rng(7) }); } else lounge.clear();      // the pavilion takes the place of the round bed
+    if (P.lounge) { buildPlaza(B, P.lounge, { bed: false }); lounge.build({ g, B, c: P.lounge, rng: rng(7) }); } else lounge.clear();      // the pavilion takes the place of the round bed
     buildHalls(B, g, items, areas);
     addVacantSigns(g);
     decor.finish(g);

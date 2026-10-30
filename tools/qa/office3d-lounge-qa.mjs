@@ -77,14 +77,15 @@ function pulseSpread(samples) {
   return Math.max(0, ...[...by.values()].map(r => r[1] - r[0]));
 }
 
-// ---- the draw calls and triangles of the lounge: the scene drawn with all of it, without the people, and without anything of it
+// ---- the draw calls and triangles of the lounge: the scene drawn with all of it, without the people, and without anything of it that is a mesh of its own (the wall's face, the strip of
+// light, anything else the lounge adds to the building). The furniture is in the building's batch, so its triangles are the ones the lounge counted as it put them there.
 async function cost(page) {
   const draw = async (on, part) => { await page.evaluate(o3(`o.loungeVisible(${on}, ${part ? JSON.stringify(part) : 'undefined'})`)); await sleep(150); return page.evaluate(o3('o.draw()')); };
   const all = await draw(true), noPeople = await draw(false, 'people'), none = await draw(false);
   await draw(true);
   const s = await snap(page), lights = s.built.tris - s.built.staticTris - 4;           // the lamps and candles are in ofis-decor's shared meshes: counted from their shape
   return {
-    pavilion: { calls: noPeople.calls - none.calls, tris: noPeople.tris - none.tris + lights }, people: { calls: all.calls - noPeople.calls, tris: all.tris - noPeople.tris, n: s.people.length },
+    pavilion: { calls: noPeople.calls - none.calls, tris: noPeople.tris - none.tris + s.built.staticTris + lights }, people: { calls: all.calls - noPeople.calls, tris: all.tris - noPeople.tris, n: s.people.length },
     all, none, lightTris: lights,
   };
 }
@@ -301,9 +302,12 @@ async function sceneLive({ root, shots }) {
     const s = await until(page, x => x.status === 'nofile' && x.state === 'off', 15000);
     if (!s) { bad(`the board did not turn off on a 404 (${JSON.stringify((await snap(page)).state)})`); return out; }
     await sleep(9000);
-    const t = await snap(page), drawn = await painted(page);
-    if (!drawn.includes('Agent message board is off')) bad(`the wall does not say the board is off: ${JSON.stringify(drawn)}`);
-    if (!drawn.some(d => /--chat-db/.test(d))) bad('the wall has no hint (--chat-db)');
+    const t = await snap(page);
+    if (t.boardVisible) bad('the wall draws its face although the board is off (a lounge with nothing to say adds no draw call)');
+    const k = await cost(page);
+    out.cost = k;
+    if (k.pavilion.calls !== 0) bad(`a board that is off adds ${k.pavilion.calls} draw calls to the building (none: the pavilion is in the building's batch and the face of the wall is not drawn)`);
+    if (k.pavilion.tris > BUDGET.tris || k.pavilion.tris < 500) bad(`the pavilion is ${k.pavilion.tris} triangles (500 to ${BUDGET.tris})`);
     if (!t.signLabel || !/Agent message board is off/.test(t.signLabel.text)) bad(`the sign does not say the board is off (${t.signLabel && t.signLabel.text})`);
     if (t.people.length) bad(`${t.people.length} people in a lounge whose board is off`);
     if (t.wall.length) bad('posts on a board that is off');
@@ -323,7 +327,7 @@ async function sceneLive({ root, shots }) {
     if (!cd) bad('a click on the wall of a board that is off opens no card');
     else if (!/\/api\/lounge/.test(cd.card.source) || !/(--chat-db|off)/i.test(cd.card.note.join(' '))) bad(`the card does not say why the board is off: "${cd.card.source}" / ${cd.card.note.join(' | ')}`);
     if (shots) { await page.mouse.move(2, 2); await sleep(500); await page.screenshot(join(shots, 'lounge-off-card.png')); }
-    out.notes.push('1 request, its 404 answer and console line expected');
+    out.notes.push('1 request, its 404 answer and console line expected, the face of the wall not drawn');
     return out;
   } finally { await S.done(); }
 }
@@ -503,6 +507,8 @@ const MUTATIONS = [
   { name: 'a request leaves the machine', file: L, from: '  const { scene, store, decor, settings } = host;\n', to: "  const { scene, store, decor, settings } = host;\n  try { new Image().src = 'https://cdn.example.com/lounge.png'; } catch { /* no image */ }\n", scenes: ['live'] },
   { name: 'Escape does not close the card', file: C, from: "if (e.key !== 'Escape' || !open) return;", to: "if (e.key !== 'Escape1' || !open) return;", scenes: ['demo'] },
   { name: 'the sign cannot be reached with the Tab key', file: L, from: 'sign.el.tabIndex = 0;', to: 'sign.el.tabIndex = -1;', scenes: ['demo'] },
+  { name: 'the pavilion is 8,400 triangles heavier', file: L, from: '    const tris = B.i.length / 3 - t0;', to: "    for (let i = 0; i < 700; i++) B.box(X + 1 + (i % 20) * 0.1, 0.5, Z + 1 + (i >> 5) * 0.1, 0.05, 0.05, 0.05, '#ff00ff');\n    const tris = B.i.length / 3 - t0;", scenes: ['live'] },
+  { name: 'the face of the wall is drawn although the board is off', file: L, from: "const boardShown = () => !!view && (view.state === 'ok' || view.state === 'unsupported');", to: 'const boardShown = () => !!view;', scenes: ['live'] },
   { name: 'the wall is painted again every frame', file: L, from: 'if (view.key !== painted.key) {', to: 'if (true) {', scenes: ['stub'] },
   { name: 'an unsupported board says it is off', file: M, from: "sign.tone = 'warn'; sign.text = tt('lounge.unsupported', 'Message board format not recognised');", to: "sign.tone = 'warn'; sign.text = tt('lounge.off', 'x');", scenes: ['stub'] },
 ];
