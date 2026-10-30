@@ -894,4 +894,4 @@ main { flex: 1; min-height: 0; position: relative; }
 .top nav.seg { min-width: 0; max-width: 100%; overflow-x: auto; scrollbar-width: none; }
 .top nav.seg::-webkit-scrollbar { display: none; }
 .top nav.seg button:focus-visible { outline-offset: -2px; }
-@media (max-width: 520px) { .top nav.seg button { padding: 6px 8px; font-size: 12.5px; } }
+@media (max-width: 520px) { .top nav.seg { flex: 1 1 100%; } .top nav.seg button { padding: 6px 7px; font-size: 12px; } }

@@ -40,7 +40,7 @@ export function createSettingsPanel({ wrap, hub }) {
   function open() { refresh(); pop.hidden = false; btn.setAttribute('aria-expanded', 'true'); }
   function close() { pop.hidden = true; btn.setAttribute('aria-expanded', 'false'); }
 
-  hub.on(() => { if (isOpen()) refresh(); });                          // a change made in the Settings tab shows here at once
+  hub.on(refresh);                                                     // a change made in the Settings tab shows here at once, open or not
   btn.addEventListener('click', () => (isOpen() ? close() : open()));
   document.addEventListener('pointerdown', e => { if (isOpen() && !wrap.contains(e.target)) close(); });
   document.addEventListener('keydown', e => { if (e.key === 'Escape' && isOpen()) { close(); btn.focus(); } });

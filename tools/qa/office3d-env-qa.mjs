@@ -102,8 +102,8 @@ async function runSettings(ctx) {
 
     const C = {
       shown: s0.scene === '3d' && s0.wrapShown && !s0.headerCamera && opened && s1.open,
-      rows: same(s1.rows, ['time', 'season', 'hemisphere', 'weather', 'shelf']) && !s1.rows.includes('camera'),
-      slider: fixedBtn && same(s1b.rows, ['time', 'time-slider', 'season', 'hemisphere', 'weather', 'shelf']) && s1b.timeMode === 'fixed',
+      rows: same(s1.rows, ['time', 'season', 'hemisphere', 'weather', 'shelf', 'project']) && !s1.rows.includes('camera'),
+      slider: fixedBtn && same(s1b.rows, ['time', 'time-slider', 'season', 'hemisphere', 'weather', 'shelf', 'project']) && s1b.timeMode === 'fixed',
       applied: s2.season === 'winter' && s2.weather === 'rain' && s2.hemi === 'south' && s2.shelf === '20' && s2.sliderOut === '22:00' && same(stored(s2.stored), E) && s2.url === '?scene=3d',
       reload: s3.wrapShown && same(stored(s3.stored), E) && s3o.season === 'winter' && s3o.weather === 'rain' && s3o.hemi === 'south' && s3o.shelf === '20' && s3o.timeMode === 'fixed' && s3o.sliderOut === '22:00' && same(s3o.rows, s1b.rows),
       pixel: pixel && Object.keys(E).every(k => pixel.settings[k] === E[k] && pixel.from[k] === 'stored'),                       // the keys this check set; the pixel scene has more (`project`)

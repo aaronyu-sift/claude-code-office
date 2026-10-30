@@ -54,6 +54,7 @@
     "qa:progress": "node tools/qa/office-progress-qa.mjs",
     "qa:chrome-leak": "node tools/qa/cdp-leak-check.mjs",
     "qa:board": "node tools/qa/office-board-qa.mjs",
+    "qa:settings-tab": "node tools/qa/office-settings-tab-qa.mjs",
     "sprites": "node tools/sprites/build-atlas.mjs --proj iso",
     "sprites:check": "node tools/sprites/build-atlas.mjs --proj iso --check",
     "sprites:table": "node tools/sprites/content-table.mjs"
