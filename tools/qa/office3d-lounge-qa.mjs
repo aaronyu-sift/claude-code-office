@@ -412,7 +412,7 @@ const CHURN = (from, to) => o3(`(async () => {
   }
   return o.info.tex;
 })()`);
-const CHURN_N = 100, CHURN_WARM = 12, CHURN_SLACK = 12;           // a leak is about 1.6 textures a person: 160 over the run, against 12 of slack
+const CHURN_N = 100, CHURN_WARM = 12, CHURN_SLACK = 12;           // a leak is 1.6 to 2 textures a person: 160 to 200 over the run, against 12 of slack
 async function sceneChurn({ root }) {
   const out = { tag: 'churn', problems: [], notes: [] };
   const bad = m => out.problems.push('churn: ' + m);

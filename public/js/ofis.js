@@ -2081,7 +2081,7 @@ export function createOfis(root, ctx, opts = {}) {
 
   function removeChar(c) {
     scene.remove(c.root);
-    // a skinned figure has a bone texture of its own (made on its first draw): without skeleton.dispose() every person who leaves keeps about 1.6 textures on the GPU for good
+    // a skinned figure has a bone texture of its own (made on its first draw): without skeleton.dispose() every person who leaves keeps one to two textures on the GPU for good
     c.root.traverse(o => { if (o.userData.own && o.geometry) o.geometry.dispose(); if (o.isSkinnedMesh && o.skeleton) o.skeleton.dispose(); });
     dropLabel(c.tag);
     dropLabel(c.bal);
