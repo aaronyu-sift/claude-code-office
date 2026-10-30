@@ -152,10 +152,10 @@ export function createDecor({ atmosphere, aniso = 4 } = {}) {
       };
       // a pack model, or a box of its size when the file is not there
       const model = it => {
-        const s = it.s ?? SCALE, { pal, pk } = palFor(it), y = it.k === 'rug' ? 0.022 : it.y || 0;
+        const s = it.s ?? SCALE, { pal, pk } = palFor(it), y = it.k === 'rug' ? (it.y ?? 0.022) : it.y || 0;       // a rug is 10 mm over its floor unless the plan says where (the lounge's, on its deck)
         if (B.model(it.m, X + it.x, y, Z + it.z, { ry: it.ry || 0, s, pal, pk })) return;
         const [w, d] = footprint(it), h = MODEL_SIZE[it.m][1] * s;
-        if (it.k === 'rug') b(it.x, 0.018, it.z, w, 0.012, d, st.pack.fabric);
+        if (it.k === 'rug') b(it.x, y - 0.004, it.z, w, 0.012, d, st.pack.fabric);
         else if (it.k === 'lamp') { b(it.x, y + h / 2, it.z, 0.04, h, 0.04, st.pack.metal); b(it.x, y + h * 0.86, it.z, w * 1.7, h * 0.28, d * 1.7, st.pack.shade); }
         else {
           const col = /sofa|chair|bench|stool|pillow/i.test(it.m) ? st.pack.fabric : /plant/i.test(it.m) ? '#5f9a5a' : st.pack.wood;
@@ -201,7 +201,7 @@ export function createDecor({ atmosphere, aniso = 4 } = {}) {
             if (it.kind === 'laptop') {
               const s = it.s;
               model({ k: 'm', m: 'laptop', x: it.x, z: it.z, y: it.y, ry, s, role: 'fabric' });
-              if (screens) screens({ x: X + it.x - 0.075 * s * fx + nx * 0.006, y: it.y + 0.0875 * s, z: Z + it.z - 0.075 * s * fz + nz * 0.006, ry: rq, rx: -0.42, w: 0.2 * s, h: 0.115 * s, kind, slot: idx });
+              if (screens) screens({ x: X + it.x - 0.075 * s * fx + nx * 0.012, y: it.y + 0.0875 * s, z: Z + it.z - 0.075 * s * fz + nz * 0.012, ry: rq, rx: -0.42, w: 0.2 * s, h: 0.115 * s, kind, slot: idx });
             } else {
               const sc = it.w / 0.379, top = it.y;
               if (B.model('screen', X + it.x, top, Z + it.z, { ry, s: sc })) {
@@ -271,16 +271,16 @@ export function createDecor({ atmosphere, aniso = 4 } = {}) {
             wbox(wall, c, yc, 0.03, w, 0.76, 0.04, '#c9ced7');
             wbox(wall, c, yc, 0.055, w - 0.1, 0.68, 0.02, '#fbfbfd');
             wbox(wall, c, yc - 0.37, 0.08, w - 0.4, 0.03, 0.06, '#b7bcc7');
-            wbox(wall, c, yc + 0.3, 0.068, w - 0.14, 0.08, 0.012, color || '#5b9bd5');             // the project's colour along the top
+            wbox(wall, c, yc + 0.3, 0.071, w - 0.14, 0.08, 0.012, color || '#5b9bd5');             // the project's colour along the top (the decals are 11 to 12 mm over the board's face, 0.065: the depth rule, public/js/ofis.js)
             const ink = ['#3b6fd1', '#d8484a', '#2f9e6a'];
             for (let i = 0; i < 3; i++) {
               const len = 0.3 + r() * (w - 0.8) * 0.8;
-              wbox(wall, c - w / 2 + 0.2 + len / 2, yc + 0.12 - i * 0.12, 0.068, len, 0.024, 0.01, ink[i % 3]);
+              wbox(wall, c - w / 2 + 0.2 + len / 2, yc + 0.12 - i * 0.12, 0.071, len, 0.024, 0.01, ink[i % 3]);
             }
-            if (it.menu) for (let i = 0; i < 3; i++) wbox(wall, c + w / 2 - 0.3, yc + 0.12 - i * 0.12, 0.068, 0.2, 0.024, 0.01, '#e8a33d');
+            if (it.menu) for (let i = 0; i < 3; i++) wbox(wall, c + w / 2 - 0.3, yc + 0.12 - i * 0.12, 0.071, 0.2, 0.024, 0.01, '#e8a33d');
             else {
               const notes = ['#ffd766', '#ff9fb2', '#8fd3ff', '#b5ec8e'];
-              for (let i = 0; i < 3; i++) wbox(wall, c + w / 2 - 0.2 - (i & 1) * 0.2, yc - 0.03 - (i >> 1) * 0.2, 0.068, 0.14, 0.14, 0.01, notes[(i + (r() * 4 | 0)) % 4]);
+              for (let i = 0; i < 3; i++) wbox(wall, c + w / 2 - 0.2 - (i & 1) * 0.2, yc - 0.03 - (i >> 1) * 0.2, 0.071, 0.14, 0.14, 0.01, notes[(i + (r() * 4 | 0)) % 4]);
             }
             break;
           }
@@ -288,8 +288,8 @@ export function createDecor({ atmosphere, aniso = 4 } = {}) {
             for (let i = 0; i < it.n; i++) {
               const a = it.c + (i - (it.n - 1) / 2) * 0.5, bg = POSTERS[(r() * POSTERS.length) | 0], fg = POSTERS[(r() * POSTERS.length) | 0], hh = 0.5 + (i % 2) * 0.12;
               wbox(it.wall, a, 1.58, 0.03, 0.42, hh, 0.04, '#2d313b');
-              wbox(it.wall, a, 1.58, 0.052, 0.35, hh - 0.07, 0.01, bg);
-              wbox(it.wall, a, 1.52, 0.06, 0.2, 0.1, 0.008, shade(fg, 0.2));
+              wbox(it.wall, a, 1.58, 0.056, 0.35, hh - 0.07, 0.012, bg);
+              wbox(it.wall, a, 1.52, 0.07, 0.2, 0.1, 0.008, shade(fg, 0.2));
             }
             break;
           }

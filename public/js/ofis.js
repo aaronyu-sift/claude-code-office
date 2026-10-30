@@ -146,6 +146,10 @@ function rounded(w, h, d, r) {
 }
 
 // ------------------------------------------------------------ batch that merges the static scene into one mesh
+// THE DEPTH RULE (docs/floors.md; tools/qa/office3d-coplanar-qa.mjs holds the builders to it): two visible layers are at least 10 mm apart, or they share no plane. A slab and a
+// decal 2 mm above it, a box whose top is the height of the floor, a trim whose end is the end of its wall: the depth buffer cannot say which is in front, the winner changes
+// with every sub-pixel step of the camera, and the ground, a floor or a wall blinks while the user zooms or pans. Raise or lower one piece by 12 mm, or let it overhang 10 mm; never
+// polygonOffset (a material of its own is a draw call of its own: the budgets of 3d-budget and 3d-vacant count them).
 
 const _m = new THREE.Matrix4(), _nm = new THREE.Matrix3(), _q = new THREE.Quaternion(), _e = new THREE.Euler();
 const _p = new THREE.Vector3(), _s = new THREE.Vector3(), _v = new THREE.Vector3(), _s2 = new THREE.Vector3();
@@ -623,8 +627,8 @@ export function createOfis(root, ctx, opts = {}) {
       slab.receiveShadow = true;
       slab.userData.own = true;
       g.add(slab);
-      B.box(cx, -0.23, cz, w, 0.46, d, '#4a5163');
-      B.box(cx, -0.012, cz, w + 0.06, 0.02, d + 0.06, '#b9b1a1');
+      B.box(cx, -0.254, cz, w, 0.46, d, '#4a5163');                  // top at -0.024: 24 mm under the slab, 12 mm under the paths that start inside it at WALK_Y = -0.012 (it was exactly the slab's height: a depth tie that blinked while zooming)
+      B.box(cx, -0.046, cz, w + 0.06, 0.02, d + 0.06, '#b9b1a1');    // top at -0.036: 12 mm under the plinth's top (it was 2 mm under the slab)
     }
 
     // an office whose chat has just left is vacant now, but its person may still be walking out of it: its door is a real one (it opens for the person) until the next rebuild
@@ -766,6 +770,7 @@ export function createOfis(root, ctx, opts = {}) {
     get builds() { return builds; },
     get models() { return { loaded: Object.keys(PK), failed: [...AS.packs.failed.keys()] }; },
     get look() { return { assets: AS.look.assets, polish: POLISH }; },
+    get scene() { return scene; },                                      // the scene graph, for tools/qa/office3d-coplanar-qa.mjs to read the built meshes (nothing in the app calls it)
     figures() { return [...chars.values()].map(c => ({ id: c.id, main: c.main, pack: !!c.pk, shirt: c.shirt, tinted: c.tinted, mode: c.mode, after: c.after, vis: c.root.visible, x: c.root.position.x, z: c.root.position.z })); },
     seatOf(id) { const c = chars.get(id); return c ? seatOfChar(c) : null; },              // the seat the room has for it (not the end of the figure's route): where a seated figure must be; the seat's own x, z, stand, facing, kind
     routeOf(id) { const c = chars.get(id); return c && c.route ? c.route.map(p => [+p.x.toFixed(3), +p.z.toFixed(3)]) : null; },      // the route the figure came in by, entrance first and seat last (the way out is this reversed)
@@ -863,7 +868,7 @@ export function createOfis(root, ctx, opts = {}) {
       floor.userData.own = true;
       g.add(floor);
     }
-    b(W / 2, 0.004, D / 2, W + 0.04, 0.008, D + 0.04, shade(th.floor, -0.3));
+    // (no dark base box under the floor any more: its top was 4 mm under the floor mesh, a depth tie that showed as dark speckles in the pattern, and its 2 cm ring lay inside the walls)
 
     // back-left wall (x = 0 plane)
     b(-T / 2, H / 2, (D - T) / 2, T, H, D + T, wall);
@@ -917,7 +922,7 @@ export function createOfis(root, ctx, opts = {}) {
     if (door === 'front') {
       low(-T, dl);
       low(dr, W);
-      for (const px of [dl - 0.05, dr + 0.05]) b(px, 0.3, D + T / 2, 0.1, 0.6, T + 0.08, trim);
+      for (const s of [-1, 1]) b(s < 0 ? dl - 0.035 : dr + 0.035, 0.3, D + T / 2, 0.13, 0.6, T + 0.08, trim);      // the trim reaches 30 mm past the end of the low wall (it ended where the wall ends: one plane)
       b(dx, 0.016, D - 0.25, DOOR_W - 0.1, 0.012, 0.5, shade(th.floor, -0.35));
     } else low(-T, W);
 
@@ -994,7 +999,7 @@ export function createOfis(root, ctx, opts = {}) {
     if (vac) {
       b(scx, SIGN_Y, 0.012, sw + 0.1, sh + 0.1, 0.024, shell.cap);
       b(scx, SIGN_Y, 0.055, sw, sh, 0.06, '#1b1f28');
-      world.vacantSigns.push({ x: X + scx, y: SIGN_Y, z: Z + 0.0865, w: sw });
+      world.vacantSigns.push({ x: X + scx, y: SIGN_Y, z: Z + 0.097, w: sw });                // the blank face is 12 mm in front of its plate (the plate's front is at 0.085)
     } else {
       makeSign(g, room, X + scx, SIGN_Y, Z, sw, sh);
       b(scx, SIGN_Y, 0.012, sw + 0.1, sh + 0.1, 0.024, shell.cap);
@@ -1058,7 +1063,7 @@ export function createOfis(root, ctx, opts = {}) {
   function buildPlaza(B, c, o = {}) {
     const { X, Z, W, D } = c, cx = X + W / 2, cz = Z + D / 2;
     B.box(cx, 0.006, cz, W, 0.012, D, '#d6d0c2');
-    B.box(cx, 0.03, Z + D - 0.12, W, 0.06, 0.24, '#b9b1a1');
+    B.box(cx, 0.03, Z + D - 0.105, W + 0.03, 0.06, 0.27, '#b9b1a1');                        // the curb overhangs the plaza by 15 mm on its three open sides: no face of it is in a face of the plaza's box
     for (let k = 0; k < 4; k++) {
       const x = X + W * (0.13 + k * 0.248), z = Z + D - 0.75;
       B.put(GEO.pot, x, 0.24, z, 0.4, 0.48, 0.4, '#d9d2c4');
@@ -1094,15 +1099,15 @@ export function createOfis(root, ctx, opts = {}) {
       // runner rug (runs left from the entrance)
       const rx0 = hx0 + 0.5, rx1 = Wb + 0.3;
       B.box((rx0 + rx1) / 2, 0.016, h.lane, rx1 - rx0, 0.012, 1.08, '#c9a24e');
-      B.box((rx0 + rx1) / 2, 0.02, h.lane, rx1 - rx0 - 0.08, 0.012, 0.94, '#4f7f93');
+      B.box((rx0 + rx1) / 2, 0.028, h.lane, rx1 - rx0 - 0.08, 0.012, 0.94, '#4f7f93');         // each layer 12 mm over the one below: floor 0.01, rug 0.022, its inlay 0.034, the mat 0.046
       // left end wall
       const ez0 = z0 - HALL_GAP, ez1 = z1 + T;
       B.box(hx0 - T / 2, H / 2, (ez0 + ez1) / 2, T, H, ez1 - ez0, endWall);
-      B.box(hx0 - T / 2, H + 0.025, (ez0 + ez1) / 2, T + 0.03, 0.05, ez1 - ez0 + 0.03, endCap);
+      B.box(hx0 - T / 2, H + 0.015, (ez0 + ez1) / 2, T + 0.03, 0.05, ez1 - ez0 + 0.03, endCap);       // 10 mm lower than the caps of the offices it meets: their tops were one plane
       B.box(hx0 + 0.012, 0.43, (z0 + z1) / 2, 0.024, 0.86, hd, endWain);
       B.box(hx0 + 0.022, 0.875, (z0 + z1) / 2, 0.044, 0.045, hd, '#f3ead9');
       // entrance (right end): doormat and two planters
-      B.box(Wb + 0.3, 0.02, h.lane, 0.55, 0.02, 1.3, '#3b3f48');
+      B.box(Wb + 0.3, 0.028, h.lane, 0.55, 0.036, 1.3, '#3b3f48');
       for (const dz of [-1.05, 1.05]) {
         const pz = h.lane + dz;
         if (pz < z0 + 0.3 || pz > z1 - 0.3) continue;
@@ -1149,7 +1154,7 @@ export function createOfis(root, ctx, opts = {}) {
           B.box(cx, 0.55, bz + 0.315, 2.2, 0.14, 0.012, '#35596b');
           B.rbox(cx, 1.025, bz, 2.54, 0.05, 0.74, 0.02, '#8a5a3a');
           B.box(cx - 0.55, 1.23, bz - 0.12, 0.5, 0.32, 0.04, BEZEL);
-          B.box(cx - 0.55, 1.23, bz - 0.098, 0.44, 0.26, 0.006, '#7fb0e6');
+          B.box(cx - 0.55, 1.23, bz - 0.092, 0.44, 0.26, 0.012, '#7fb0e6');         // the screen stands 14 mm proud of the bezel
           B.put(GEO.cyl, cx + 0.55, 1.07, bz + 0.12, 0.12, 0.05, 0.12, '#d9b25a');
           B.put(GEO.pot, cx + 0.95, 1.12, bz - 0.1, 0.18, 0.14, 0.18, '#e9e4da');
           B.put(GEO.ico, cx + 0.95, 1.26, bz - 0.1, 0.26, 0.24, 0.26, '#5aa85a', 1);
@@ -1187,7 +1192,7 @@ export function createOfis(root, ctx, opts = {}) {
         const m = new THREE.MeshBasicMaterial({ map: tex });
         const scr = new THREE.Mesh(new THREE.PlaneGeometry(sw, sh), m);
         scr.rotation.y = Math.PI / 2;
-        scr.position.set(hx0 + 0.064, sy, scz);
+        scr.position.set(hx0 + 0.072, sy, scz);                                     // 12 mm in front of the board's frame (its front is at hx0 + 0.06)
         scr.userData.own = true;
         scr.userData.dispose = () => { m.dispose(); tex.dispose(); };
         g.add(scr);
