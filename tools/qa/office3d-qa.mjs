@@ -578,7 +578,7 @@ async function runWalk(ctx) {
       const wander = t.filter(f => f.x > doorX + 0.9 && Math.abs(f.z - hall.lane) > 0.7);
       if (wander.length) problems.push(`${tag}: ${wander.length} readings before the door are off the lane (first at z ${wander[0].z.toFixed(1)}, lane ${hall.lane.toFixed(1)})`);
       if (!seat || seat.x < r.X || seat.x > r.X + r.W || seat.z < r.Z || seat.z > r.Z + r.D) problems.push(`${tag}: its seat ${seat ? `(${seat.x.toFixed(1)}, ${seat.z.toFixed(1)})` : 'is unknown'} is not inside its room`);
-      else if (last.mode !== 'seated' || Math.hypot(last.x - seat.x, last.z - seat.z) > 0.1) problems.push(`${tag}: it ends ${last.mode} at (${last.x.toFixed(1)}, ${last.z.toFixed(1)}), its desk is (${seat.x.toFixed(1)}, ${seat.z.toFixed(1)})`);
+      else if (last.mode !== 'seated' || Math.hypot(last.x - seat.x, last.z - seat.z) > 0.1) problems.push(`${tag}: it ends ${last.mode} at (${last.x.toFixed(1)}, ${last.z.toFixed(1)}), its seat is (${seat.x.toFixed(1)}, ${seat.z.toFixed(1)})`);
       const stub = info.office.stubs.find(x => x.hall === w.hall);
       notes.push(`${tag}: ${t.length} frames from x ${first.x.toFixed(1)} to the door ${doorX.toFixed(1)}${stub ? `, ${(stub.x1 - stub.x0).toFixed(1)} m of it on the paved path` : ''}`);
     }
