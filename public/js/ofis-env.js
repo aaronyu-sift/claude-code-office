@@ -7,6 +7,9 @@
 //
 // The time of day, the season and the weather come from the atmosphere (office-atmosphere.js: the local clock, or the time chosen in the popover; the month moves
 // sunrise and sunset, the hemisphere turns the months round). Preview another time with ?time=21:30 (or ?hour=21) in the page address; ?env=0 leaves the surroundings out.
+//
+// THE DEPTH RULE (docs/floors.md; tools/qa/office3d-coplanar-qa.mjs holds this file to it too): two visible layers are at least 10 mm apart, or they share no plane. Paint, joints,
+// curbs and the strips of a path stand 12 mm over what they lie on, and an end that meets another face overhangs it by 10 mm or more; never polygonOffset (a material of its own is a draw call).
 import * as THREE from 'three';
 import { RoundedBoxGeometry } from 'three/addons/geometries/RoundedBoxGeometry.js';
 import * as AS from './ofis-assets.js';
@@ -756,17 +759,17 @@ function buildStreet(c) {
   if (from < z1) walks.push([from, z1]);
   for (const [a, b2] of walks) {
     S.slab(X.walk0, X.road0, a, b2, WALK_Y, SUB, PAL.walk);
-    S.slab(X.road0 - 0.18, X.road0, a, b2, WALK_Y + 0.005, WALK_Y - 0.02, PAL.curb);
+    S.slab(X.road0 - 0.18, X.road0 + 0.01, a, b2, WALK_Y + 0.015, WALK_Y - 0.02, PAL.curb);       // the curb overhangs the end of its sidewalk by 10 mm and stands 15 mm over it (its end was in the sidewalk's end face, its top 5 mm over the sidewalk)
   }
   S.slab(X.road0, X.road1, z0, z1, ROAD_Y, SUB, PAL.asphalt);
   S.slab(X.road1, X.walk1, z0, z1, WALK_Y, SUB, PAL.walk);
-  S.slab(X.road1, X.road1 + 0.18, z0, z1, WALK_Y + 0.005, WALK_Y - 0.02, PAL.curb);
+  S.slab(X.road1 - 0.01, X.road1 + 0.18, z0, z1, WALK_Y + 0.015, WALK_Y - 0.02, PAL.curb);
   for (let z = Math.ceil(I.z0 / 1.6) * 1.6; z < I.z1; z += 1.6) {
-    if (!L.inCut(z, 0.05)) S.slab(X.walk0, X.road0 - 0.18, z - 0.02, z + 0.02, WALK_Y + 0.003, WALK_Y - 0.01, PAL.joint);
-    S.slab(X.road1 + 0.18, X.walk1, z - 0.02, z + 0.02, WALK_Y + 0.003, WALK_Y - 0.01, PAL.joint);
+    if (!L.inCut(z, 0.05)) S.slab(X.walk0, X.road0 - 0.18, z - 0.02, z + 0.02, WALK_Y + 0.012, WALK_Y - 0.01, PAL.joint);
+    S.slab(X.road1 + 0.18, X.walk1, z - 0.02, z + 0.02, WALK_Y + 0.012, WALK_Y - 0.01, PAL.joint);
   }
   // markings
-  const paint = (x0, x1, za, zc, color = PAL.paint) => S.slab(x0, x1, za, zc, ROAD_Y + 0.004, ROAD_Y - 0.004, color);
+  const paint = (x0, x1, za, zc, color = PAL.paint) => S.slab(x0, x1, za, zc, ROAD_Y + 0.012, ROAD_Y - 0.004, color);          // the paint is 12 mm over the asphalt (4 mm was a depth tie)
   for (let z = Math.ceil(I.z0 / 3) * 3; z < I.z1 - 1.4; z += 3) if (Math.abs(z + 0.7 - zz) > 2.3) paint(X.mid - 0.07, X.mid + 0.07, z, z + 1.4);
   const spans = [[I.z0, zz - 1.5], [zz + 1.5, I.z1]];
   for (const [a, b2] of spans) if (b2 - a > 0.3) paint(X.park - 0.05, X.park + 0.05, a, b2);
@@ -860,15 +863,15 @@ function buildRoads(c) {
       if (r.w >= 4.4) {
         const lo = Math.min(s0, s1) + 0.6, hi = Math.max(s0, s1) - 0.6;
         for (let t = lo; t + 1.0 < hi; t += 2.4) {
-          if (horiz) S.slab(t, t + 1.0, az - 0.06, az + 0.06, top + 0.004, top - 0.004, PAL.paint);
-          else S.slab(ax - 0.06, ax + 0.06, t, t + 1.0, top + 0.004, top - 0.004, PAL.paint);
+          if (horiz) S.slab(t, t + 1.0, az - 0.06, az + 0.06, top + 0.012, top - 0.004, PAL.paint);
+          else S.slab(ax - 0.06, ax + 0.06, t, t + 1.0, top + 0.012, top - 0.004, PAL.paint);
         }
       }
     }
     // stop line and a zebra crossing on the cut sidewalk (the last leg runs along +x into the street)
     const zc = pts[n - 1][1];
-    S.slab(X.walk0 - 0.55, X.walk0 - 0.35, zc - 0.02, zc + hw - 0.15, top + 0.004, top - 0.004, PAL.paint);   // eastbound half (right-hand traffic)
-    for (let z = zc - hw + 0.3; z + 0.4 <= zc + hw - 0.2; z += 0.85) S.slab(X.walk0 + 0.15, X.road0 - 0.15, z, z + 0.45, top + 0.004, top - 0.004, '#f6f5ef');
+    S.slab(X.walk0 - 0.55, X.walk0 - 0.35, zc - 0.02, zc + hw - 0.15, top + 0.012, top - 0.004, PAL.paint);   // eastbound half (right-hand traffic)
+    for (let z = zc - hw + 0.3; z + 0.4 <= zc + hw - 0.2; z += 0.85) S.slab(X.walk0 + 0.15, X.road0 - 0.15, z, z + 0.45, top + 0.012, top - 0.004, '#f6f5ef');
   }
 }
 
@@ -901,15 +904,15 @@ function house(c, h) {
   // flower box under the front windows
   for (const s of [-1, 1]) {
     const fx = cx + s * w * 0.24, fz = z0 + d + 0.16;
-    S.box(fx, y0 + 0.86, fz, 0.7, 0.16, 0.2, PAL.woodDark);
+    S.box(fx, y0 + 0.866, fz, 0.7, 0.172, 0.2, PAL.woodDark);                       // 12 mm over the sill of the window above it
     for (let i = 0; i < 4; i++) S.put(G.gem, fx - 0.24 + i * 0.16, y0 + 1.0, fz, 0.13, 0.13, 0.13, FLOWERS[(R() * FLOWERS.length) | 0], R());
   }
   // door and step toward the street
   S.box(x0 - 0.03, y0 + 0.95, z0 + d / 2, 0.06, 1.5, 0.8, h.roof);
-  S.box(x0 - 0.35, y0 + 0.1, z0 + d / 2, 0.6, 0.2, 1.1, '#c9c3b8');
+  S.box(x0 - 0.35, y0 + 0.106, z0 + d / 2, 0.6, 0.212, 1.1, '#c9c3b8');            // the step is 12 mm over the house's plinth (its top was the plinth's top)
   LT.box(x0 - 0.1, y0 + 1.95, z0 + d / 2 + 0.6, 0.12, 0.16, 0.12, PAL.bulb);
   // a paved walk to the sidewalk
-  S.slab(c.L.X.walk1 - 0.02, x0 - 0.05, z0 + d / 2 - 0.45, z0 + d / 2 + 0.45, WALK_Y - 0.02, GY - 0.05, PAL.walk);
+  S.slab(c.L.X.walk1 - 0.02, x0 - 0.1, z0 + d / 2 - 0.45, z0 + d / 2 + 0.45, WALK_Y - 0.02, GY - 0.05, PAL.walk);
 }
 
 // ------------------------------------------------------------ nature
@@ -1015,7 +1018,7 @@ function bridge(c, xc, z, len, wid) {
       px = x; py = y;
     }
   }
-  for (const s of [-1, 1]) S.slab(xc + s * len / 2 - 0.3, xc + s * len / 2 + 0.3, z - wid / 2 - 0.1, z + wid / 2 + 0.1, PATH_Y + 0.02, GY - 0.3, PAL.stone);
+  for (const s of [-1, 1]) S.slab(xc + s * len / 2 - 0.3, xc + s * len / 2 + 0.3, z - wid / 2 - 0.1, z + wid / 2 + 0.1, PATH_Y + 0.03, GY - 0.3, PAL.stone);
 }
 
 function pathStrip(S, pts, w, color, y) {
@@ -1027,12 +1030,12 @@ function pathStrip(S, pts, w, color, y) {
     const d = S.vert(bx + nx, y, bz + nz, 0, 1, 0, k), e = S.vert(bx - nx, y, bz - nz, 0, 1, 0, k);
     S.tri(a, d, b); S.tri(b, d, e);
   }
-  for (const [x, z] of pts) S.put(G.disc, x, y - 0.006, z, w, 0.008, w, color);
+  for (const [x, z] of pts) S.put(G.disc, x, y - 0.004, z, w, 0.008, w, color);                // the disc's top is the strip's height, the same colour: nothing can show
 }
 
 function buildPark(c) {
   const { L, S } = c, { b, I, X, river, pz } = L;
-  for (const pl of L.paths) { pathStrip(S, pl, 1.5, PAL.dirtEdge, PATH_Y - 0.003); pathStrip(S, pl, 1.3, PAL.dirt, PATH_Y); }
+  for (const pl of L.paths) { pathStrip(S, pl, 1.5, PAL.dirtEdge, PATH_Y); pathStrip(S, pl, 1.3, PAL.dirt, PATH_Y + 0.012); }
   bridge(c, L.bridge.x, pz, L.bridge.len, 1.5);
   // front lawn: flower beds, benches and park lamps in a tidy row along the path
   const zl = pz - 1.35, x1 = X.walk0 - 2.2, x0 = Math.max(b.x0 + 0.8, L.bridge.x + L.bridge.len / 2 + 1.2);

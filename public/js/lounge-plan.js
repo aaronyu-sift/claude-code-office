@@ -11,7 +11,7 @@
 //   LOUNGE_STYLE  the colours of the pack models in the lounge, the shape of a room style's `pack`
 import { footprint, heightOf, rectOf, hit, lightsOf } from './ofis-styles.js';
 
-export const DECK = Object.freeze({ u0: 1.5, u1: 11.1, v0: 0.9, v1: 5.7, h: 0.016 });
+export const DECK = Object.freeze({ u0: 1.5, u1: 11.1, v0: 0.9, v1: 5.7, h: 0.036 });          // the planks' top: 12 mm over the dark base under them, which is 12 mm over the plaza (ofis-lounge.js); the items and the people stand on it (the depth rule, public/js/ofis.js)
 export const BOARD = Object.freeze({ cu: 6.3, cv: 1.62, w: 6.4, h: 2.15, y0: 0.5, t: 0.14 });
 export const LOUNGE_STYLE = Object.freeze({
   id: 'lounge', name: 'Agent lounge',
@@ -23,16 +23,16 @@ const lamp = (m, x, z, o = {}) => ({ k: 'lamp', m, x, z, tone: 'warm', ...o });
 
 // the items, from the north: the board stands in front of the hall, two sofas turn their backs to it and face the table, two armchairs at the west end, a coffee counter at the east end
 const ITEMS = [
-  { k: 'rug', m: 'rugRounded', x: 6.3, z: 4.1, s: 3.3, role: 'fabric2', y: 0.022 },
+  { k: 'rug', m: 'rugRounded', x: 6.3, z: 4.1, s: 3.3, role: 'fabric2', y: DECK.h + 0.012 },       // 12 mm over the planks
   m('loungeSofa', 4.3, 2.95, { s: 2.2, ry: 0, role: 'fabric' }),
   m('loungeSofa', 8.3, 2.95, { s: 2.2, ry: 0, role: 'fabric' }),
   m('tableCoffee', 6.3, 4.35, { s: 2.2, ry: 0 }),
-  { k: 'candle', x: 6.3, z: 4.35, y: 0.5, n: 2, spread: 0.45, on: true },
-  m('books', 6.0, 4.35, { y: 0.5, s: 2.4, ry: 0.4, on: true }),
+  { k: 'candle', x: 6.3, z: 4.35, y: DECK.h + 0.484, n: 2, spread: 0.45, on: true },               // on the table: its top, 0.5 over a deck of 0.016
+  m('books', 6.0, 4.35, { y: DECK.h + 0.484, s: 2.4, ry: 0.4, on: true }),
   m('loungeChairRelax', 2.8, 3.95, { s: 2.0, ry: Math.PI / 2, role: 'fabric' }),
   m('loungeChairRelax', 2.8, 4.95, { s: 2.0, ry: Math.PI / 2, role: 'fabric' }),
   m('kitchenCabinet', 10.55, 5.05, { s: 2.0, ry: -Math.PI / 2 }),
-  m('kitchenCoffeeMachine', 10.55, 5.05, { s: 2.0, y: 0.9, ry: -Math.PI / 2, on: true }),
+  m('kitchenCoffeeMachine', 10.55, 5.05, { s: 2.0, y: DECK.h + 0.884, ry: -Math.PI / 2, on: true }),
   lamp('lampRoundFloor', 1.95, 2.35, { s: 1.7 }),
   lamp('lampRoundFloor', 10.85, 2.35, { s: 1.7 }),
   m('pottedPlant', 1.75, 5.4, { s: 2.0 }),

@@ -228,12 +228,12 @@ export function createLounge(host) {
     const { deck, board: b } = plan, X = c.X, Z = c.Z;
     // the deck: planks of three tones on a dark base, with a low lip all round
     const dw = deck.u1 - deck.u0, dd = deck.v1 - deck.v0, dcx = X + (deck.u0 + deck.u1) / 2, dcz = Z + (deck.v0 + deck.v1) / 2;
-    B.box(dcx, 0.00675, dcz, dw, 0.0135, dd, '#7a5535');
+    B.box(dcx, 0.012, dcz, dw, 0.024, dd, '#7a5535');                                   // top at 0.024: 12 mm over the plaza (0.012) and 12 mm under the planks (deck.h)
     const n = Math.max(2, Math.round(dd / 0.32)), pw = dd / n;
     for (let k = 0; k < n; k++) B.box(dcx, deck.h / 2, Z + deck.v0 + pw * (k + 0.5), dw, deck.h, pw - 0.014, PLANKS[(k * 7 + (k >> 1)) % PLANKS.length]);
     for (const s of [0, 1]) {
-      B.box(dcx, 0.02, Z + (s ? deck.v1 : deck.v0), dw + 0.1, 0.04, 0.06, '#6d4c33');
-      B.box(X + (s ? deck.u1 : deck.u0), 0.02, dcz, 0.06, 0.04, dd + 0.1, '#6d4c33');
+      B.box(dcx, 0.025, Z + (s ? deck.v1 : deck.v0), dw + 0.1, 0.05, 0.06, '#6d4c33');      // the lip: 14 mm over the planks
+      B.box(X + (s ? deck.u1 : deck.u0), 0.025, dcz, 0.06, 0.05, dd + 0.1, '#6d4c33');
     }
     // the wall: a dark frame, two posts with a beam and caps, feet
     const bx = X + b.cu, bz = Z + b.cv, top = b.y0 + b.h;
