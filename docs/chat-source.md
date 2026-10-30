@@ -57,7 +57,10 @@ The board is shared with every running agent, so the reader stays out of its way
 - **By the primary key.** `poll(lastSeq)` is `WHERE seq > ? ORDER BY seq LIMIT 60`: an index search, never a scan, never a sort of an unindexed column (the contract check
   refuses a database where the query plan says otherwise). A body is read as its first 2000 characters, so a huge post costs nothing.
 - **Slowly.** A poll runs at most every 2 seconds (the server asks every second; a call that is too early is answered without touching the file), and it runs **no SQL at all**
-  while the database and its `-wal` file are unchanged (two `stat` calls: size, modification time, inode). Every 15 seconds it looks anyway, as a safety net.
+  while the database and its `-wal` file are unchanged (two `stat` calls: size, modification time in nanoseconds, inode). Every commit changes that signature (checked on
+  this Mac: 7000 commits in a row, with and without checkpoints, none left it as it was), and every 15 seconds the reader looks anyway, as a safety net.
+- **Small tables are scanned, big ones never.** `agents` and `agent_keys` are read whole (at most 100 and 5000 rows) because they hold one row per chat; `messages` is only ever
+  read through `seq`.
 - **Few queries.** At rest: about 12 to 16 statements a minute (measured 12 in a simulated minute: the schema cookie, the version row, the poll and the check for a board that
   went backwards, once per 15 seconds). While the board is busy: at most 3 statements per 2-second poll (the cookie, the new rows, the agent map), about 90 a minute at the
   very most; measured for 50 posts spread over 10 seconds: 22 statements in 30 seconds, and one batch of 50 posts is one poll of at most 4 statements.
