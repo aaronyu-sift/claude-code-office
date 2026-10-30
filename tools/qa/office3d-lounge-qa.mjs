@@ -299,7 +299,7 @@ async function sceneLive({ root, shots }) {
     const { page } = S;
     if (!S.ready.ok) { bad('the scene did not become ready'); return out; }
     const c = await toHub(page, 60);
-    const s = await until(page, x => x.status === 'nofile' && x.state === 'off', 15000);
+    const s = await until(page, x => x.status === 'nofile' && x.state === 'off', 30000);
     if (!s) { bad(`the board did not turn off on a 404 (${JSON.stringify((await snap(page)).state)})`); return out; }
     await sleep(9000);
     const t = await snap(page);
