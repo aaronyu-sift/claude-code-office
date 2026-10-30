@@ -25,8 +25,7 @@ export function createLoungeCard({ root, msg = k => k, anchor, bounds, onOpen = 
   };
   function body(v) {
     const c = v.card, tone = TONE[c.sign.tone] || TONE.ok;
-    const chip = (name, extra = '') => `<span class="lg-chip" ${extra}>${esc(name)}</span>`;
-    const people = c.people.length ? `<div class="oc-sub">${esc(msg('lounge.in'))}</div><div class="lg-people">${v.people.map(p => `<span class="lg-person" title="${esc(p.sessionName ? msg('lounge.person', { name: p.name, chat: p.sessionName }) : p.name)}"><i style="background:${esc(p.color)}"></i>${esc(p.name)}</span>`).join('')}</div>` : '';
+    const people = c.people.length ? `<div class="oc-sub">${esc(msg('lounge.in'))}</div><div class="lg-people">${v.people.map(p => `<span class="lg-person" title="${esc(p.sessionName ? msg('lounge.person', { name: p.name, chat: p.sessionName }) : p.name)}"><i style="background:${esc(p.color)}"></i>${esc(p.name)}</span>`).join('')}</div>` : (v.state === 'ok' ? `<div class="oc-note">${esc(msg('lounge.nobody'))}</div>` : '');
     const channels = c.channels.length ? `<div class="oc-sub">${esc(msg('lounge.channels'))}</div><div class="lg-people">${c.channels.map(h => `<span class="lg-chip" style="--c:${esc(h.colour)}">${esc(h.name)} <b>${h.n}</b></span>`).join('')}</div>` : '';
     const posts = c.rows.length
       ? `<div class="oc-sub">${esc(msg('lounge.last'))}</div><ol class="lg-posts">${c.rows.map(rowHtml).join('')}</ol>`
@@ -36,7 +35,7 @@ export function createLoungeCard({ root, msg = k => k, anchor, bounds, onOpen = 
       (c.hidden ? '' : `<div class="oc-world"><i class="oc-sw" style="background:${tone}"></i><span>${esc(c.sign.text)}</span></div>`) +
       (c.sign.hint && !c.hidden ? `<div class="oc-note">${esc(c.sign.hint)}</div>` : '') +
       (c.namesOnly ? `<div class="oc-note">${esc(msg('lounge.names'))}</div>` : '') +
-      (c.rows.length || c.hidden ? '' : '') + people + channels + posts +
+      people + channels + posts +
       `<div class="oc-note lg-src">${esc(c.source)}</div>`;
   }
   const keyOf = v => JSON.stringify([v.card.rows.map(r => [r.seq, r.age, r.text.length, r.who]), v.card.people, v.card.sign.text, v.card.sign.hint, v.card.source, v.card.namesOnly, v.card.hidden, v.card.channels.map(c => c.n)]);

@@ -132,7 +132,7 @@ export function createLounge(host) {
   const folk = new Map();                                                                 // key -> { key, c, seat, pop (Spring), label, out, name, session }
   const peopleList = () => [...folk.values()];
   function freeSeat() {
-    const used = new Set(peopleList().map(p => p.seat.id));
+    const used = new Set(peopleList().map(p => p.seatId));
     return plan.seats.find(s => !used.has(s.id)) || null;
   }
   function addPerson(p) {
@@ -145,7 +145,7 @@ export function createLounge(host) {
     c.force = { pose: 'idle', th: seat.ry, scale: 0.001, still: false };
     c.hit.userData.pick = { t: 'lounger', key: p.key };
     const label = host.mkLabel('of-lpl', 36, 'down', 2, 20);
-    const P = { key: p.key, c, seat, pop: new Spring(SPRING.build, 0).to(1), label, out: false, name: p.name, session: p.session, color: p.color };
+    const P = { key: p.key, c, seatId: seat.id, pop: new Spring(SPRING.build, 0).to(1), label, out: false, name: p.name, session: p.session, color: p.color };
     if (reducedNow()) P.pop.jump(1);
     folk.set(p.key, P);
   }
@@ -165,7 +165,7 @@ export function createLounge(host) {
       if (reducedNow()) P.pop.jump(P.out ? 0 : 1); else P.pop.step(dt);
       const s = P.pop.value;
       if (P.out && s < 0.03) { host.person.remove(c); host.dropLabel(P.label); folk.delete(k); continue; }
-      const seat = P.seat;
+      const seat = plan.seats.find(x => x.id === P.seatId) || plan.seats[0];            // by name: a cell of another width has its own plan
       c.root.position.set(cell.X + seat.u, plan.deck.h + seat.lift, cell.Z + seat.v);
       c.force.scale = Math.max(0.001, Math.min(1.15, s));
       c.force.still = reducedNow();
@@ -307,10 +307,11 @@ export function createLounge(host) {
 
   function show() { visible = true; dirty = true; lastOn = canPoll(); poller.kick(); }
   function hide() { visible = false; card.close(); poller.kick(); lastOn = false; }
-  function setVisible(on) {
-    visibleParts = !!on;
-    for (const m of [pavilion, boardMesh, strip]) if (m) m.visible = visibleParts;
-    for (const P of folk.values()) P.c.root.visible = visibleParts;
+  // verification only: hide the lounge to measure it (everything, or only the people, or only the pavilion with its wall and strip)
+  function setVisible(on, part) {
+    const v = !!on;
+    if (part !== 'people') { visibleParts = v; for (const m of [pavilion, boardMesh, strip]) if (m) m.visible = v; }
+    if (part !== 'building') for (const P of folk.values()) P.c.root.visible = v;
   }
 
   // ---- verification only (root.__ofis3d.lounge): what the lounge shows and costs right now
@@ -324,10 +325,10 @@ export function createLounge(host) {
     return {
       mode: mode(), source: src.source, state: view ? view.state : null, status, sign: view ? view.sign : null, quiet: view ? view.quiet : null,
       wall: view ? view.wall.rows.map(r => ({ seq: r.seq, chip: r.chip, who: r.who, lines: r.lines, age: r.age })) : [],
-      people: peopleList().map(P => ({ key: P.key, name: P.name, session: P.session, seat: P.seat.id, pose: P.c.force.pose, out: P.out, scale: +P.c.force.scale.toFixed(3), x: +P.c.root.position.x.toFixed(2), z: +P.c.root.position.z.toFixed(2), label: P.label.shown, labelText: P.label.el.textContent })),
+      people: peopleList().map(P => ({ key: P.key, name: P.name, session: P.session, seat: P.seatId, pose: P.c.force.pose, out: P.out, scale: +P.c.force.scale.toFixed(3), x: +P.c.root.position.x.toFixed(2), z: +P.c.root.position.z.toFixed(2), label: P.label.shown, labelText: P.label.el.textContent })),
       paint: { count: painted.count, texts: painted.texts, scale: painted.scale, rows: painted.rows.length, animating: !!painted.anim, key: painted.key },
       ink: inkCount(), canvas: { w: CANVAS.w, h: CANVAS.h },
-      poll: { requests: poller.stats.requests, starts: [...poller.stats.starts], lastStatus: poller.stats.lastStatus, armed: poller.armed, inflight: poller.inflight, canPoll: canPoll(), pollMs: POLL_MS },
+      poll: { requests: poller.stats.requests, starts: [...poller.stats.starts], lastStatus: poller.stats.lastStatus, armed: poller.armed, inflight: poller.inflight, canPoll: canPoll(), pollMs: POLL_MS, why: { visible, hidden: typeof document !== 'undefined' && document.hidden, mode: mode(), onScreen: cell ? onScreen() : false } },
       activity: view ? view.activity : null, pulse: +pulse.toFixed(4), stripVisible: !!(strip && strip.visible), reduced: reducedNow(),
       card: card.read(), signLabel: sign ? { shown: sign.shown, want: sign.want, text: sign.el.textContent, tabIndex: sign.el.tabIndex, role: sign.el.getAttribute('role'), label: sign.el.getAttribute('aria-label') } : null,
       built, cell: cell ? { X: cell.X, Z: cell.Z, W: cell.W, D: cell.D } : null, onScreen: cell ? onScreen() : false, visibleParts,

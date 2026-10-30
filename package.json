@@ -51,6 +51,7 @@
     "qa:pixel": "node tools/qa/pixel-qa.mjs",
     "qa:3d": "node tools/qa/office3d-qa.mjs",
     "qa:3d-life": "node tools/qa/office3d-life-qa.mjs",
+    "qa:3d-lounge": "node tools/qa/office3d-lounge-qa.mjs",
     "qa:3d-ui": "node tools/qa/office3d-ui-qa.mjs",
     "qa:progress": "node tools/qa/office-progress-qa.mjs",
     "qa:chrome-leak": "node tools/qa/cdp-leak-check.mjs",
