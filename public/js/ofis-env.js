@@ -7,6 +7,9 @@
 //
 // The time of day, the season and the weather come from the atmosphere (office-atmosphere.js: the local clock, or the time chosen in the popover; the month moves
 // sunrise and sunset, the hemisphere turns the months round). Preview another time with ?time=21:30 (or ?hour=21) in the page address; ?env=0 leaves the surroundings out.
+//
+// THE DEPTH RULE (docs/floors.md; tools/qa/office3d-coplanar-qa.mjs holds this file to it too): two visible layers are at least 10 mm apart, or they share no plane. Paint, joints,
+// curbs and the strips of a path stand 12 mm over what they lie on, and an end that meets another face overhangs it by 10 mm or more; never polygonOffset (a material of its own is a draw call).
 import * as THREE from 'three';
 import { RoundedBoxGeometry } from 'three/addons/geometries/RoundedBoxGeometry.js';
 import * as AS from './ofis-assets.js';
