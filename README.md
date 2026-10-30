@@ -21,7 +21,7 @@ That's it: the server starts on <http://127.0.0.1:7321> and your browser opens. 
 > **About this fork.** This is a fork of [azorkai/claude-code-office](https://github.com/azorkai/claude-code-office) (MIT) with these additions:
 > an optional [agent chat bridge](#agent-chat-bridge-optional), optional [Vertex AI pricing](#pricing-like-a-vertex-ai-bill-optional) for the cost tab (and each message id counted once across transcript files),
 > the current tool and its description on the avatar tag, an "Open in VS Code" link in the session drawer, English fallback labels for tool events,
-> and a [pixel-art Office view](#pixel-office) (isometric and front views, time of day, a sprite gallery) that replaces the 3D scene as the default; the 3D scene stays available at `?scene=3d`.
+> and a [pixel-art Office view](#pixel-office) (isometric and front views, time of day, a sprite gallery) that stays available at `?scene=pixel`; the three.js 3D scene is the default Office view again.
 > Run it with `npx github:aaronyu-sift/claude-code-office`. Everything below is the upstream README, extended where the fork differs.
 
 ---
@@ -127,7 +127,7 @@ The Office view draws a pixel-art scene: voxel models written as code in [`tools
 | `?shelf=5` (a whole number from 3 to 200) | How many asleep and closed chats the shelf lists at first; 10 is the default. |
 | `?project=on` (or `off`) | Show the project folder, small, in the bottom-right corner of every room's board (and on the labels of the agents); off is the default. The chat name is always the big text. Works in the 3D office too. |
 | `?gallery=1` | List every sprite of the atlas with its id. Add `&proj=front` for the other atlas. |
-| `?scene=3d` | The three.js office, see [3D office](#3d-office). It has the same card beside an agent, shelf card, zoom buttons, labels and glass bar as the pixel scene. |
+| `?scene=pixel` | The pixel office. Without it (or with `?scene=3d`) the Office view is the three.js office, see [3D office](#3d-office), which has the same card beside an agent, shelf card, zoom buttons, labels and glass bar as the pixel scene. |
 
 **Time, seasons and weather.** The light follows the browser's local clock: a tint over the rooms and the garden, and lit windows, lamps and monitors after dark; the agents and their labels stay readable at every hour. The seasons follow the date (and the hemisphere): spring blossom, summer green, autumn leaves, winter snow with bare trees, a snowman, pumpkins, a bird bath and a pile of leaves; they are baked into the atlas as `<id>@spring`, `@autumn` and `@winter` sprites (summer is the plain sprite), nothing is recoloured while it runs. The weather is optional and **off by default**: clear, cloudy, rain, snow and fog, or `auto`, which picks a weather for the day from a seeded hash of the date and the season (the same day always gives the same weather; nothing is fetched from anywhere). It lives on one overlay canvas with at most 120 particles, drawn at most 10 times a second, never while the page is hidden, and not at all with `prefers-reduced-motion`; with it on, clear days bring petals in spring, falling leaves in autumn, a few flakes in winter and fireflies on summer nights, and a clear day after rain sometimes has a rainbow. Butterflies and birds by day are part of the garden in every setting.
 
@@ -172,11 +172,11 @@ The models are in `tools/sprites/` (`models.mjs`, `props.mjs`, `decor.mjs`; `cat
 
 ## 3D office
 
-`?scene=3d` opens the three.js office: a building of rooms on a diorama island. Its furniture, trees, rocks and people are glTF models from three [Kenney](https://kenney.nl) packs (CC0, listed in [THIRD_PARTY.md](THIRD_PARTY.md), about 1.1 MB in [`public/models/`](public/models/)), recoloured in code to the scene's own palette, baked into the room's single mesh, and given occlusion shading, a mottled floor, tone mapping and contact shadows by `public/js/ofis-polish.js`. Each agent's colour is on its person's top; the chief wears the headset and waves when it is your turn.
+The three.js office is the default Office view (`?scene=3d` names it, `?scene=pixel` opens the pixel office instead): a building of rooms on a diorama island. Its furniture, trees, rocks and people are glTF models from three [Kenney](https://kenney.nl) packs (CC0, listed in [THIRD_PARTY.md](THIRD_PARTY.md), about 1.1 MB in [`public/models/`](public/models/)), recoloured in code to the scene's own palette, baked into the room's single mesh, and given occlusion shading, a mottled floor, tone mapping and contact shadows by `public/js/ofis-polish.js`. Each agent's colour is on its person's top; the chief wears the headset and waves when it is your turn.
 
 | Option | Effect |
 |---|---|
-| `?scene=3d` | The 3D office instead of the pixel office. |
+| `?scene=pixel` | The pixel office instead of the 3D office (the default). |
 | `&assets=procedural` | Draw every piece from the built-in boxes and spheres, load no model file. It is also what a piece falls back to when its file is blocked, slow (10 s) or broken: the browser console says so once for that piece and the scene goes on. |
 | `&polish=off` | No occlusion shading, mottled floor, tone mapping, contact shadows or extra detail on the built-in pieces. With `assets=procedural` this is the scene as it was before the models. |
 | `&time=HH:MM` (also `&hour=21` or `&hour=21.5`) | Pin the time of day instead of following the browser's clock, for example `&time=21:30`. |

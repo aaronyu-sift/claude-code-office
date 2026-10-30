@@ -10,7 +10,13 @@ const CHROME = process.env.CHROME_BIN || [
 ].find(p => existsSync(p));
 export const sleep = ms => new Promise(r => setTimeout(r, ms));
 
-export async function launchChrome({ width = 1500, height = 900, dpr = 1, reducedMotion = false, lang = 'en-US' } = {}) {
+// `defaultScene` ('pixel') is added to the address of every goto that names no scene: the Office page is the 3D scene unless ?scene=pixel
+const withScene = (url, scene) => {
+  if (!scene || /[?&]scene=/.test(url)) return url;
+  const i = url.indexOf('#'), base = i < 0 ? url : url.slice(0, i), hash = i < 0 ? '' : url.slice(i);
+  return base + (base.includes('?') ? '&' : '?') + 'scene=' + scene + hash;
+};
+export async function launchChrome({ width = 1500, height = 900, dpr = 1, reducedMotion = false, lang = 'en-US', defaultScene = null } = {}) {
   if (!CHROME) throw new Error('no Chrome found; set CHROME_BIN');
   const profile = mkdtempSync(join(tmpdir(), 'cco-qa-chrome.'));
   // Chrome does not exit when its parent is killed (a QA run that times out, crashes or is cancelled), and a headless page with software GL
@@ -59,7 +65,7 @@ export async function launchChrome({ width = 1500, height = 900, dpr = 1, reduce
         page.errors.length = 0; page.failed.length = 0; page.requests.length = 0;
         await send('Page.navigate', { url: 'about:blank' });
         await sleep(100);
-        await send('Page.navigate', { url });
+        await send('Page.navigate', { url: withScene(url, defaultScene) });
         await sleep(settleMs);
       },
       async screenshot(file, clip) {

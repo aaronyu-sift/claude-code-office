@@ -284,12 +284,12 @@ if (want('idle')) {
   } finally { await S.done(); }
 }
 
-// ---- 8. ?scene=3d still renders the old scene
+// ---- 8. the Office is the 3D scene by default and with ?scene=3d; ?scene=pixel is the pixel scene (and loads no three.js)
 if (want('scene3d')) {
   const dir = join(tmpdir(), `cco-qa-${process.pid}-3d`);
   const fx = await makeFixture({ dir, n: 4 });
   const srv = await startServer(dir);
-  const page = await launchChrome({ width: VIEW.w, height: VIEW.h });
+  const page = await launchChrome({ width: VIEW.w, height: VIEW.h, defaultScene: 'pixel' });
   try {
     await page.goto(`http://127.0.0.1:${srv.port}/?scene=3d#ofis`, 6000);
     // the old scene probes the optional git-ignored file local/ofis-extras.js and expects a 404 when it is absent (public/js/ofis.js)
@@ -298,9 +298,12 @@ if (want('scene3d')) {
     const probe404 = page.errors.length + page.failed.length - errs3d.length - failed3d.length;
     const info = await page.evaluate(`(()=>{const r=document.querySelector('#view-ofis'); return JSON.stringify({scene:r.dataset.scene, canvas: !!r.querySelector('.of-stage canvas'), rooms: r.__ofis ? r.__ofis.rooms.length : -1, chars: r.__ofis ? r.__ofis.chars : -1, error: r.dataset.hata || null, three: performance.getEntriesByType('resource').some(e => /three\\.module/.test(e.name))})})()`);
     const i = JSON.parse(info);
-    const pixelRes = await (async () => { await page.goto(`http://127.0.0.1:${srv.port}/#ofis`, 2500); return page.requests.some(u => /three\.module/.test(u)); })();
-    check('08-scene-3d', i.scene === '3d' && i.canvas && i.rooms === 4 && !i.error && i.three && errs3d.length === 0 && failed3d.length === 0 && !pixelRes,
-      `?scene=3d: scene ${i.scene}, canvas ${i.canvas}, ${i.rooms} rooms, ${i.chars} figures, error ${i.error}, three.js loaded ${i.three}, console errors ${errs3d.length}${errs3d[0] ? ' first: ' + errs3d[0].slice(0, 160) : ''}, failed requests ${failed3d.length} (not counted: ${probe404} 404 of the old scene's optional local/ofis-extras.js probe); the default pixel scene loads three.js: ${pixelRes}`);
+    const pixelRes = await (async () => { await page.goto(`http://127.0.0.1:${srv.port}/#ofis`, 2500); return page.requests.some(u => /three\.module/.test(u)); })();       // defaultScene makes this ?scene=pixel
+    await page.send('Page.navigate', { url: `http://127.0.0.1:${srv.port}/#ofis` });                                   // the raw address: no scene named
+    await sleep(6000);
+    const dflt = await page.evaluate(`document.querySelector('#view-ofis').dataset.scene || 'pixel'`);
+    check('08-scene-3d', i.scene === '3d' && i.canvas && i.rooms === 4 && !i.error && i.three && errs3d.length === 0 && failed3d.length === 0 && !pixelRes && dflt === '3d',
+      `no scene named: ${dflt}; ?scene=pixel loads three.js ${pixelRes}; ?scene=3d: scene ${i.scene}, canvas ${i.canvas}, ${i.rooms} rooms, ${i.chars} figures, error ${i.error}, three.js loaded ${i.three}, console errors ${errs3d.length}${errs3d[0] ? ' first: ' + errs3d[0].slice(0, 160) : ''}, failed requests ${failed3d.length} (not counted: ${probe404} 404 of the old scene's optional local/ofis-extras.js probe); the default pixel scene loads three.js: ${pixelRes}`);
   } finally { await page.close(); srv.stop(); fx.cleanup(); }
 }
 

@@ -161,15 +161,15 @@ function safeView(name, create) {
   const guard = fn => (...args) => { if (!v) return; try { return fn.apply(v, args); } catch (e) { fail(e); v = null; } };
   return { show: guard(function () { return this.show(); }), hide: guard(function () { return this.hide(); }), update: guard(function (...a) { return this.update(...a); }) };
 }
-// The Office view is the pixel scene. The original three.js scene stays available as ?scene=3d; it is loaded only then, so the
-// default view never fetches three.js.
+// The Office view is the three.js scene (the default again, 2026-10-29). The pixel scene stays available as ?scene=pixel; it is loaded only then,
+// so the default view never fetches the pixel engine. ?scene=3d is the same as no parameter.
 let pixelOffice = null;
 let sceneSettings = null;                       // the scene that the settings popover edits: the pixel scene, or the 3D scene's own settings (office-settings.js)
 function createOffice(root) {
   const q = new URLSearchParams(location.search), proj = q.get('proj');
   // ?proj=iso|front picks the view (without it the stored choice, then isometric); ?time=HH:MM, ?season=, ?weather= and ?hemisphere= override the
   // stored scene settings for this visit
-  if (q.get('scene') !== '3d') return (sceneSettings = pixelOffice = createPixelOffice(root, ctx, { overrides: fromQuery(location.search), proj: proj === 'iso' || proj === 'front' ? proj : null }));
+  if (q.get('scene') === 'pixel') return (sceneSettings = pixelOffice = createPixelOffice(root, ctx, { overrides: fromQuery(location.search), proj: proj === 'iso' || proj === 'front' ? proj : null }));
   root.dataset.scene = '3d';
   // the 3D scene has no camera toggle: the popover shows the rows it supports; the choices are remembered under the same keys as the pixel scene's
   const settings = createOfficeSettings({ overrides: officeQuery(location.search) });
@@ -203,7 +203,7 @@ const views = {
 };
 let current = null;
 
-// The projection toggle in the header belongs to the pixel Office view; it is hidden on every other view and with ?scene=3d. The camera buttons exist twice, in
+// The projection toggle in the header belongs to the pixel Office view; it is hidden on every other view and in the 3D scene (the default). The camera buttons exist twice, in
 // the header and in the settings popover (both are `.proj-seg`). The popover (time, season, hemisphere, weather, shelf) belongs to the Office view of either scene;
 // the scene says which of its rows it supports (settings-panel.js).
 const projSeg = document.getElementById('proj-seg'), setWrap = document.getElementById('set-wrap');

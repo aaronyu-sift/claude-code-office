@@ -34,14 +34,14 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 ```
 
-## three.js (the original 3D office, `?scene=3d`)
+## three.js (the 3D office, the default Office view)
 
 - Project: [mrdoob/three.js](https://github.com/mrdoob/three.js), version 186.
 - Licence: MIT, Copyright © 2010-2026 three.js authors. The licence text is in [public/vendor/three/LICENSE](public/vendor/three/LICENSE).
-- Use: the bundled copy in `public/vendor/three/` is loaded only when the 3D scene is opened with `?scene=3d`; the pixel office does not load it.
+- Use: the bundled copy in `public/vendor/three/` is loaded by the 3D scene (the default) and not by the pixel office (`?scene=pixel`).
 - Add-ons, unmodified copies of the same release (`public/vendor/three/addons/`): `geometries/RoundedBoxGeometry.js`, and for the 3D scene's models `loaders/GLTFLoader.js`, `utils/BufferGeometryUtils.js` (which the loader imports) and `utils/SkeletonUtils.js` (to copy a rigged character).
 
-## 3D models (the 3D office, `?scene=3d`)
+## 3D models (the 3D office, the default Office view)
 
 The 3D scene draws furniture, trees, rocks and people from three packs by [Kenney](https://kenney.nl), all released into the public domain under [Creative Commons Zero (CC0 1.0)](https://creativecommons.org/publicdomain/zero/1.0/). Crediting Kenney is not required; it is done here anyway. Each pack's own `License.txt` sits next to its files. Only the 28 files the scene uses are shipped, in `public/models/`; nothing is loaded for the pixel office, and `?assets=procedural` loads none for the 3D scene either.
 

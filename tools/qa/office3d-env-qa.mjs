@@ -84,7 +84,7 @@ async function runSettings(ctx) {
     const s3 = await load('?scene=3d');                                                      // reload, no parameters: what was chosen is still there
     await d.click('#set-btn'); await sleep(250);
     const s3o = await d.st();
-    const px = await load('', false);                                                         // the pixel scene is the default scene: it reads the same choices
+    const px = await load('?scene=pixel', false);                                                         // the pixel scene (?scene=pixel) reads the same choices
     await d.ev(`new Promise(r => { const t0 = Date.now(); const w = () => (document.querySelector('#view-ofis').__pixel || Date.now() - t0 > 20000 ? r() : setTimeout(w, 200)); w(); })`);
     const pixel = await d.ev(`(() => { const p = document.querySelector('#view-ofis').__pixel; return p ? JSON.stringify({ settings: p.settings, from: p.settingsFrom }) : 'null'; })()`).then(JSON.parse);
     const s4 = await load('?scene=3d&season=spring&weather=fog&time=03:00&hemisphere=north&shelf=7');   // the address wins over what is stored, and is not stored itself
@@ -118,7 +118,7 @@ async function runSettings(ctx) {
     return [make('3d-settings', ok,
       `${ok ? '' : 'FAILED PARTS: ' + bad.join(', ') + '; '}3D scene: popover button shown ${s0.wrapShown}, header camera toggle shown ${s0.headerCamera}, rows ${s1.rows.join('/')} (camera row hidden), after Fixed: ${s1b.rows.join('/')}; `
       + `chosen winter, rain, south, shelf 20, 22:00 -> stored ${s2.stored}, address unchanged ${s2.url}; after a reload the popover reads ${s3o.season}, ${s3o.weather}, ${s3o.hemi}, shelf ${s3o.shelf}, ${s3o.timeMode} ${s3o.sliderOut}; `
-      + `the pixel scene (default scene) starts with ${pixel ? JSON.stringify(pixel.settings) : 'no scene'}; address ?season=spring&weather=fog&time=03:00&hemisphere=north&shelf=7 -> popover ${s4o.season}, ${s4o.weather}, ${s4o.hemi}, shelf ${s4o.shelf}, ${s4o.timeMode} ${s4o.sliderOut}, store unchanged ${same(stored(s4.stored), E)}, note "${s4o.note.replace(/\u2060/g, '').slice(0, 90)}"; `
+      + `the pixel scene (?scene=pixel) starts with ${pixel ? JSON.stringify(pixel.settings) : 'no scene'}; address ?season=spring&weather=fog&time=03:00&hemisphere=north&shelf=7 -> popover ${s4o.season}, ${s4o.weather}, ${s4o.hemi}, shelf ${s4o.shelf}, ${s4o.timeMode} ${s4o.sliderOut}, store unchanged ${same(stored(s4.stored), E)}, note "${s4o.note.replace(/\u2060/g, '').slice(0, 90)}"; `
       + `?hour=21.5 -> ${s5o.timeMode} ${s5o.sliderOut}, then a change of the slider gives address ${s5c.url}; ?season=spring then autumn chosen -> ${s6.url}`)];
   } finally { await S.done(); }
 }

@@ -39,7 +39,7 @@ export async function scenario(n, opts = {}) {
   const dir = join(tmpdir(), `cco-qa-${process.pid}-${n}${opts.tag || ''}`);
   const fx = await makeFixture({ dir, n, ...(opts.fixture || {}) });
   const srv = await startServer(dir, opts.serverEnv);
-  const page = await launchChrome({ width: opts.width || VIEW.w, height: opts.height || VIEW.h, dpr: opts.dpr || 1, reducedMotion: !!opts.reducedMotion, lang: opts.lang || 'en-US' });
+  const page = await launchChrome({ width: opts.width || VIEW.w, height: opts.height || VIEW.h, dpr: opts.dpr || 1, reducedMotion: !!opts.reducedMotion, lang: opts.lang || 'en-US', defaultScene: 'pixel' });       // this harness is the pixel scene's: the page is 3D unless the address says pixel
   const done = async () => { await page.close(); srv.stop(); fx.cleanup(); };
   try {
     if (opts.timezone) await page.send('Emulation.setTimezoneOverride', { timezoneId: opts.timezone });

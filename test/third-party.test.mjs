@@ -21,6 +21,6 @@ test('THIRD_PARTY.md records every folder of shipped models: author, link, CC0, 
   for (const pack of ['furniture-kit', 'nature-kit', 'mini-characters']) assert.ok(third.includes(`https://kenney.nl/assets/${pack}`), `no link to the ${pack} page`);
   assert.ok(third.includes(`Only the ${files} files the scene uses are shipped`), `THIRD_PARTY.md names another number of files than the ${files} that ship`);
   // the one claim about three.js that must stay true: the pixel office does not load it
-  assert.match(third, /loaded only when the 3D scene is opened with `\?scene=3d`; the pixel office does not load it/);
+  assert.match(third, /loaded by the 3D scene \(the default\) and not by the pixel office \(`\?scene=pixel`\)/);
   for (const f of ['GLTFLoader.js', 'BufferGeometryUtils.js', 'SkeletonUtils.js']) assert.ok(third.includes(f), `${f} is vendored but not listed`);
 });
