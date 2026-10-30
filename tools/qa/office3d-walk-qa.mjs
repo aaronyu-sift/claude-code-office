@@ -14,13 +14,13 @@
 //   3d-walk-brief    a sub-agent whose job ends 0.7 s after it came, a burst of five that end before most of them have left the entrance, a chat that ends 0.5 s and one that ends 2 s after it came,
 //                    and one that comes and ends within one sync: each turns around where it stands, walks back out and is removed at the entrance, never seen at its seat, no seat stays taken
 //   3d-walk-leave    a chat that closes (the real server) while its chief and two sub-agents sit: they stand up (and stand still while they do), walk the way they came, the door of the office
-//                    that is vacant now opens for them, they are removed at the entrance, and a sub-agent that finishes leaves too, after its 4.5 s
+//                    that is vacant now opens for them, they are removed at the entrance, and a sub-agent that finishes leaves too, after its 4.5 s, clear of the furniture
 //   3d-walk-flap     appears, ends, appears again: a chat and a sub-agent come back while they walk out, one figure each, seated at the end, no stuck seat, no ghost label
 //   3d-walk-rebuild  the 20th chat adds a bay and moves the entrance while 30 people are walking in: nobody jumps, nobody is dropped, everybody is seated at the end
 //   3d-walk-growout  the building grows (the entrance moves 14 units) while a closed chat's chief and sub-agent walk out of their vacant office: they go on to today's entrance
 //   3d-walk-seats    a chat with 12 sub-agents (an office with desks, lounge seats and stools): all 13 walk in and sit on their own seat (every reading inside the office keeps 0.2 m from the
-//                    furniture, nobody jumps, each ends facing as its seat does with its hip at that seat's cushion, nobody shares a seat); the chat closes and all stand up on the spot where
-//                    they sit and walk out clear of the furniture, to the entrance
+//                    furniture, nobody jumps, each ends facing as its seat does with its hip at that seat's cushion, nobody shares a seat); a job ends on each kind of seat while the chat goes
+//                    on and the person gets up where it sits and walks out clear of the furniture; the chat closes and all do the same
 //   3d-walk-turnback twelve jobs and a chat end while the person is inside the office, each a little deeper in than the one before: the walk back is the way it came in, clear of the furniture
 //   3d-walk-reseat  a sub-agent walking out of its seat is wanted again, a newcomer has taken that seat: it goes back along the way out and in along the route of another seat, not
 //                    straight through the table (a pair of seats of an arrangement where the straight line does cut through furniture)
@@ -125,7 +125,7 @@ function ends(list, offs, { removed = true } = {}) {
 // the scene's own books: nobody is in the scene graph twice or after removal, every label and balloon belongs to a figure, nobody sits on a seat that another figure sits on, and every
 // seat in use has the figure whose seat it is (there is no chair of a figure's own any more: the seats are the room's furniture and stay where they are when a person gets up)
 async function books(page) {
-  const r = await ev(page, '({ roots: o.roots(), desks: o.seats(), figs: o.figures().map(f => ({ id: f.id, main: f.main, mode: f.mode, x: f.x, z: f.z })) })');
+  const r = await ev(page, '({ roots: o.roots(), seats: o.seats(), figs: o.figures().map(f => ({ id: f.id, main: f.main, mode: f.mode, x: f.x, z: f.z })) })');
   const bad = [], ids = r.figs.map(f => f.id), set = new Set(ids);
   const same = (a, b) => a.length === b.length && [...a].sort().join('|') === [...b].sort().join('|');
   if (new Set(r.roots.ids).size !== r.roots.ids.length) bad.push('a figure is in the scene twice');
@@ -136,13 +136,13 @@ async function books(page) {
   if (r.roots.balloons.length !== ids.length) bad.push(`${r.roots.balloons.length} balloons for ${ids.length} figures`);
   const sitting = r.figs.filter(f => f.mode === 'seated');
   for (let i = 0; i < sitting.length; i++) for (let j = i + 1; j < sitting.length; j++) if (Math.hypot(sitting[i].x - sitting[j].x, sitting[i].z - sitting[j].z) < 0.3) bad.push(`${short(sitting[i].id)} and ${short(sitting[j].id)} sit on the same seat`);
-  for (const room of r.desks.rooms) room.seats.forEach((id, i) => {
+  for (const room of r.seats.rooms) room.seats.forEach((id, i) => {
     if (!id) return;
-    const f = r.desks.figures.find(x => x.id === id);
+    const f = r.seats.figures.find(x => x.id === id);
     if (!f || f.slot !== i || f.room !== room.id) bad.push(`seat ${i} of ${short(room.id)} is taken by ${short(id)}, who ${f ? `has seat ${f.slot} of ${short(f.room)}` : 'is gone'}`);
   });
-  for (const f of r.desks.figures) if (f.slot >= 0) {
-    const room = r.desks.rooms.find(x => x.id === f.room);
+  for (const f of r.seats.figures) if (f.slot >= 0) {
+    const room = r.seats.rooms.find(x => x.id === f.room);
     if (!room || room.seats[f.slot] !== f.id) bad.push(`${short(f.id)} has seat ${f.slot} that is not marked as its own`);
   }
   return bad;
@@ -350,7 +350,7 @@ async function runBrief(ctx) {
     const after = (await ev(page, 'o.seats()')).rooms.find(r => r.id === chat1).seats;
     if (after[0] !== 'after-burst') problems.push(`the next sub-agent sat at seat ${after.indexOf('after-burst')}, not the first (${JSON.stringify(after)})`);
     if (errorsOf(page).length) problems.push(`console error: ${errorsOf(page)[0].slice(0, 120)}`);
-    return [report('3d-walk-brief', problems, `${brief.length} figures (one sub-agent, a burst of five, two chats and a chat that ends within one sync): each was made at the entrance, turned round (${turned} seen turning) and was removed at the entrance, none was ever seated, no jump, all ${vacantNow} offices that are not a chat's are vacant again, no desk stayed taken; a seated sub-agent taken out of the data stood up and walked out`)];
+    return [report('3d-walk-brief', problems, `${brief.length} figures (one sub-agent, a burst of five, two chats and a chat that ends within one sync): each was made at the entrance, turned round (${turned} seen turning) and was removed at the entrance, none was ever seated, no jump, all ${vacantNow} offices that are not a chat's are vacant again, no seat stayed taken; a seated sub-agent taken out of the data stood up and walked out`)];
   } finally { await S.done(); }
 }
 
@@ -420,6 +420,7 @@ async function runLeave(ctx) {
     problems.push(...(await books(page)));
     // a sub-agent that finishes sits for 4.5 s (the check mark), then stands up and walks out
     const other = fx.agents.find(a => a.id !== pick.id), sub = other.subs[0];
+    const room2 = await roomOf(page, other.id), keys2 = await seatKeys(page);                   // read while the sub-agent still sits
     await ev(page, 's.rec.take().length');
     const tFinish = Date.now();
     fx.finishSub(sub.id);
@@ -445,9 +446,11 @@ async function runLeave(ctx) {
     if (l2.length && l2.at(-1).k !== 'remove') problems.push('the finished sub-agent was not removed');
     else if (l2.length && !nearAny([off0, st.office], l2.at(-1).x, l2.at(-1).z, 1.3)) problems.push('the finished sub-agent was removed away from the entrance');
     problems.push(...jumps(l2));
+    if (l2.length && keys2.has(sub.id)) problems.push(...crossings(l2, room2, keys2.get(sub.id), 'the finished sub-agent').bad);
+    else if (l2.length) problems.push('the finished sub-agent had no seat to compare its walk out with');
     problems.push(...(await books(page)));
     if (errorsOf(page).length) problems.push(`console error: ${errorsOf(page)[0].slice(0, 120)}`);
-    return [report('3d-walk-leave', problems, `the chat closed with its chief and ${pick.subs.length} sub-agents seated: ${stood} of ${mine.length} stood up first (still for 0.25 s or more), walked out clear of the office's furniture and were removed at the entrance with no jump, the vacant office is vacant, ${hinged ? `its door was open in ${doorOpen} of ${doorSamples} readings of the chief in the doorway and ${subOpen} of ${subSamples} of a sub-agent` : 'its door is an opening'}; a finished sub-agent sat ${seatedFor.toFixed(1)} s after the data said it was done, then stood up, walked out and was removed at the entrance (${((Date.now() - tFinish) / 1000).toFixed(0)} s on the wall clock in all)`)];
+    return [report('3d-walk-leave', problems, `the chat closed with its chief and ${pick.subs.length} sub-agents seated: ${stood} of ${mine.length} stood up first (still for 0.25 s or more), walked out clear of the office's furniture and were removed at the entrance with no jump, the vacant office is vacant, ${hinged ? `its door was open in ${doorOpen} of ${doorSamples} readings of the chief in the doorway and ${subOpen} of ${subSamples} of a sub-agent` : 'its door is an opening'}; a finished sub-agent (its walk out clear of the furniture too) sat ${seatedFor.toFixed(1)} s after the data said it was done, then stood up, walked out and was removed at the entrance (${((Date.now() - tFinish) / 1000).toFixed(0)} s on the wall clock in all)`)];
   } finally { await S.done(); }
 }
 
@@ -897,6 +900,29 @@ async function runSeats(ctx) {
     }
     problems.push(...(await books(page)));
     if (Object.keys(kinds).length < 2 || !(kinds.lounge || kinds.stool)) problems.push(`the 13 people sit on ${Object.entries(kinds).map(([k, n]) => n + ' ' + k).join(', ')}: want more than one kind of seat, a lounge seat or a stool among them`);
+    // a sub-agent's job ends while the chat goes on (leaveRoom, not the vacated office's walk out): one on each kind of seat stands up where it sits and walks the way it came, clear of the
+    // furniture, to the entrance
+    const leavers = [];
+    for (const id of mine.slice(1)) { const seat = room.arr.seats.find(x => x.key === keys.get(id)); if (seat && !leavers.some(p => p.kind === seat.kind)) leavers.push({ id, kind: seat.kind, seat }); }
+    await ev(page, 's.rec.take().length');
+    await qa(page, `${leavers.map(p => `q.remove('${p.id}');`).join(' ')} q.sync();`);
+    for (const p of leavers) if (!(await gone(page, p.id, 180000))) problems.push(`${short(p.id)} (${p.kind} seat) never left when its job ended`);
+    const left = byId(await ev(page, 's.rec.take()'));
+    let leaverReadings = 0;
+    for (const p of leavers) {
+      const l = left.get(p.id);
+      if (!l) { problems.push(`${short(p.id)}: not recorded when its job ended`); continue; }
+      const w = l.filter(e => e.k === 'frame' && e.after === 'gone');
+      const at = [room.box.X + p.seat.pos[0], room.box.Z + p.seat.pos[1]];
+      if (!w.length) problems.push(`${short(p.id)}: never walked out when its job ended`);
+      else if (Math.hypot(w[0].x - at[0], w[0].z - at[1]) > 0.02) problems.push(`${short(p.id)}: it got up ${Math.hypot(w[0].x - at[0], w[0].z - at[1]).toFixed(2)} from its ${p.kind} seat when its job ended (it stands up where it sits)`);
+      problems.push(...jumps(l));
+      const last = l[l.length - 1];
+      if (last.k !== 'remove' || !nearAny([off], last.x, last.z, 1.3)) problems.push(`${short(p.id)}: its walk out when its job ended did not end at the entrance`);
+      const c = crossings(l, room, keys.get(p.id), `${short(p.id)} (job ended, ${p.kind} seat)`);
+      problems.push(...c.bad);
+      leaverReadings += c.inside;
+    }
     // the chat closes: everybody stands up on the seat and walks out
     await ev(page, 's.rec.take().length');
     await qa(page, `q.remove('sc'); q.sync();`);
@@ -920,7 +946,7 @@ async function runSeats(ctx) {
     }
     problems.push(...(await books(page)));
     if (errorsOf(page).length) problems.push(`console error: ${errorsOf(page)[0].slice(0, 120)}`);
-    return [report('3d-walk-seats', problems, `a chat with ${SUBS} sub-agents (${room.arr ? room.arr.work + ' + ' + room.arr.soft : '?'}; seats: ${Object.entries(kinds).map(([k, n]) => n + ' ' + k).join(', ')}): ${sat} of ${mine.length} walked in and sat down on their own seat (${inside} readings inside the office, none within ${CLEAR} m of a piece, no jump, facing and cushion height as the seat says, nobody sharing a seat), then the chat closed and all stood up on their seat and walked out (${outside} readings inside the office, clear of everything) to the entrance`)];
+    return [report('3d-walk-seats', problems, `a chat with ${SUBS} sub-agents (${room.arr ? room.arr.work + ' + ' + room.arr.soft : '?'}; seats: ${Object.entries(kinds).map(([k, n]) => n + ' ' + k).join(', ')}): ${sat} of ${mine.length} walked in and sat down on their own seat (${inside} readings inside the office, none within ${CLEAR} m of a piece, no jump, facing and cushion height as the seat says, nobody sharing a seat), then ${leavers.length} jobs ended on a ${leavers.map(p => p.kind).join(', ')} seat while the chat went on: each got up where it sat and walked out clear of everything (${leaverReadings} readings inside the office); then the chat closed and all stood up on their seat and walked out (${outside} readings inside the office, clear of everything) to the entrance`)];
   } finally { await S.done(); }
 }
 
