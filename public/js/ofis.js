@@ -788,6 +788,12 @@ export function createOfis(root, ctx, opts = {}) {
       };
     },
     doors() { return [...world.rooms.values(), ...(world.vacant || [])].filter(r => r.doorPivot).map(r => ({ id: r.id, slot: r.slot, vacant: !!r.vacant, door: r.door, open: +r.doorOpen.toFixed(3), x: r.doorPt.x, z: r.doorPt.z })); },
+    // the colour every screen of the building has now (the instanced mesh of the monitors and laptops), as a number: `off` is the colour of a screen that is off, `list` is { room, kind: 'chef' | 'slot',
+    // slot (the seat of a sub-agent's screen, -1 for a seat nobody uses; 0 for the chief's), hex } in the order of the mesh
+    screens() {
+      const sm = world.screenMesh, c = new THREE.Color();
+      return { off: new THREE.Color(SCR_OFF).getHex(), list: sm ? world.screens.map((s, i) => { sm.getColorAt(i, c); return { room: s.room, kind: s.kind, slot: s.slot, hex: c.getHex() }; }) : [] };
+    },
     // the rooms' life (ofis-decor.js): panes, lamps, candles and the light they give right now; the style of every room; the living meshes can be hidden to compare pictures
     get life() { return decor.stats(); },
     get lounge() { return lounge.snapshot(); },                   // the lounge: mode, state, the wall's posts and picture, the people, the poll, the card, what it cost (ofis-lounge.js)
