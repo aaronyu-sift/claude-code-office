@@ -10,6 +10,15 @@ const CHROME = process.env.CHROME_BIN || [
 ].find(p => existsSync(p));
 export const sleep = ms => new Promise(r => setTimeout(r, ms));
 
+// A helper process that dies with its runner (the QA server): own process group under a shell that polls the runner, so a run that times out,
+// crashes or is cancelled leaves nothing behind (the same watchdog as the Chrome below). kill() ends the whole group.
+export function spawnWatched(cmd, args, opts = {}) {
+  const WATCH = 'runner=$PPID; "$@" & child=$!; while kill -0 "$runner" 2>/dev/null && kill -0 "$child" 2>/dev/null; do sleep 1; done; kill -KILL -- -$$ 2>/dev/null';
+  const proc = spawn('/bin/sh', ['-c', WATCH, 'sh', cmd, ...args], { stdio: 'ignore', detached: true, ...opts });
+  proc.unref();
+  return { proc, kill() { try { process.kill(-proc.pid, 'SIGKILL'); } catch { /* gone */ } } };
+}
+
 // `defaultScene` ('pixel') is added to the address of every goto that names no scene: the Office page is the 3D scene unless ?scene=pixel
 const withScene = (url, scene) => {
   if (!scene || /[?&]scene=/.test(url)) return url;

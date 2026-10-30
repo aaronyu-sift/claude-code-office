@@ -1,10 +1,9 @@
 // What the QA tools share: the server against a fake ~/.claude, headless Chrome in a throw-away profile, and a ready-made scenario with
 // N sessions open on the Office view. Used by pixel-qa.mjs (the checks) and shot.mjs (pictures for a look by eye).
-import { spawn } from 'node:child_process';
 import { createServer } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { launchChrome, sleep } from './cdp.mjs';
+import { launchChrome, spawnWatched, sleep } from './cdp.mjs';
 import { makeFixture } from './fixture.mjs';
 
 export const ROOT = new URL('../../', import.meta.url).pathname;
@@ -15,9 +14,9 @@ const freePort = () => new Promise(res => { const s = createServer(); s.listen(0
 
 export async function startServer(dir, env = {}, args = []) {
   const port = await freePort();
-  const proc = spawn('node', [ROOT + 'server.js', '--claude-dir', dir, '--data-dir', join(dir, 'data'), '--port', String(port), ...args], { stdio: 'ignore', env: { ...process.env, CCO_CHAT_DB: '', CCO_DEMO: '', ...env } });
+  const proc = spawnWatched('node', [ROOT + 'server.js', '--claude-dir', dir, '--data-dir', join(dir, 'data'), '--port', String(port), ...args], { env: { ...process.env, CCO_CHAT_DB: '', CCO_DEMO: '', ...env } });
   for (let i = 0; i < 60; i++) { try { if ((await fetch(`http://127.0.0.1:${port}/api/config`)).ok) break; } catch { /* starting */ } await sleep(150); }
-  return { port, stop() { try { proc.kill('SIGKILL'); } catch { /* gone */ } } };
+  return { port, stop() { proc.kill(); } };
 }
 // the agents as the server reports them (what the page shows)
 export const apiAgents = async port => (await (await fetch(`http://127.0.0.1:${port}/api/state`)).json()).agents;

@@ -1,7 +1,7 @@
-// Checks that the headless Chrome of the QA harness dies with its runner. A child process launches Chrome through launchChrome (its temp
+// Checks that the headless Chrome and the Office server of the QA harness die with their runner. A child process launches Chrome through launchChrome (its temp
 // directory is unique to this check, so the profile path is a marker) and is killed with SIGKILL, the way a timed-out or cancelled QA
 // run ends; the check then looks for processes that still use that marker. A normal close() must leave nothing behind either.
-// Run: node tools/qa/cdp-leak-check.mjs   (CDP=file:///path/to/an/older/cdp.mjs shows that the old launcher leaks)
+// Run: node tools/qa/cdp-leak-check.mjs   (CDP=file:///path/to/an/older/cdp.mjs and HARNESS=file:///path/to/an/older/harness.mjs show that the old launchers leak)
 import { spawn, execFileSync } from 'node:child_process';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -33,6 +33,28 @@ async function run(mode) {
   return { mode, ok: (mode === 'kill' ? running > 0 : true) && after === 0, processesWhileRunning: running, processesAfter: after };
 }
 
-const results = [await run('kill'), await run('close')];
-for (const r of results) console.log(`CHECK chrome-${r.mode} ${r.ok ? 'PASS' : 'FAIL'} ${JSON.stringify(r)}`);
+// The QA server (harness.mjs startServer): its folder is unique to this check, so the path is a marker; a runner killed with SIGKILL must leave no server.
+async function runServer() {
+  const dir = mkdtempSync(join(tmpdir(), 'cco-leak-server.'));
+  const HARNESS = process.env.HARNESS || new URL('./harness.mjs', import.meta.url).href;
+  const child = spawn(process.execPath, ['--input-type=module', '-e', `
+    import { startServer } from ${JSON.stringify(HARNESS)};
+    await startServer(${JSON.stringify(dir)});
+    console.log('READY');
+    await new Promise(() => {});
+  `], { stdio: ['ignore', 'pipe', 'inherit'] });
+  let out = '';
+  child.stdout.on('data', d => { out += d; });
+  for (let i = 0; i < 120 && !/READY/.test(out); i++) await sleep(250);
+  if (!/READY/.test(out)) { child.kill('SIGKILL'); return { mode: 'server-kill', ok: false, why: 'server did not start' }; }
+  const running = leftovers(dir).length;
+  child.kill('SIGKILL');
+  let after = leftovers(dir).length;
+  for (let i = 0; i < 16 && after; i++) { await sleep(500); after = leftovers(dir).length; }
+  rmSync(dir, { recursive: true, force: true });
+  return { mode: 'server-kill', ok: running > 0 && after === 0, processesWhileRunning: running, processesAfter: after };
+}
+
+const results = [await run('kill'), await run('close'), await runServer()];
+for (const r of results) console.log(`CHECK ${r.mode === 'server-kill' ? 'server-kill' : 'chrome-' + r.mode} ${r.ok ? 'PASS' : 'FAIL'} ${JSON.stringify(r)}`);
 process.exit(results.every(r => r.ok) ? 0 : 1);

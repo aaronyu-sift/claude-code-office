@@ -1,11 +1,10 @@
 // What the 3D scene's QA tools share (office3d-qa.mjs, office3d-shot.mjs): the server against a fake ~/.claude, headless Chrome with software
 // WebGL in a throw-away profile (cdp.mjs) and the Office view open on ?scene=3d with N sessions. `root.__ofis3d` and `root.__ofis` are the
 // read-only state the scene exposes (public/js/ofis.js).
-import { spawn } from 'node:child_process';
 import { createServer } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { launchChrome, sleep } from './cdp.mjs';
+import { launchChrome, spawnWatched, sleep } from './cdp.mjs';
 import { makeFixture } from './fixture.mjs';
 import { startServer, apiAgents, VIEW, ROOT } from './harness.mjs';
 
@@ -15,9 +14,9 @@ const freePort = () => new Promise(res => { const s = createServer(); s.listen(0
 // the server of another copy of the repo (the mutation tests serve a copy with one line broken)
 async function startServerAt(root, dir) {
   const port = await freePort();
-  const proc = spawn('node', [join(root, 'server.js'), '--claude-dir', dir, '--data-dir', join(dir, 'data'), '--port', String(port)], { stdio: 'ignore', env: { ...process.env, CCO_CHAT_DB: '', CCO_DEMO: '' } });
+  const proc = spawnWatched('node', [join(root, 'server.js'), '--claude-dir', dir, '--data-dir', join(dir, 'data'), '--port', String(port)], { env: { ...process.env, CCO_CHAT_DB: '', CCO_DEMO: '' } });
   for (let i = 0; i < 60; i++) { try { if ((await fetch(`http://127.0.0.1:${port}/api/config`)).ok) break; } catch { /* starting */ } await sleep(150); }
-  return { port, stop() { try { proc.kill('SIGKILL'); } catch { /* gone */ } } };
+  return { port, stop() { proc.kill(); } };
 }
 // an expression evaluated with `o` = the 3D view's QA state and `v` = its element
 export const o3 = expr => `(()=>{const v=document.querySelector('#view-ofis'), o=v.__ofis3d, s=v.__ofis; return ${expr}})()`;
