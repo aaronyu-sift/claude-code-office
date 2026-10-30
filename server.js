@@ -795,7 +795,7 @@ function handler(req, res, next) {
     req.on('close', () => clients.delete(res));
     return;
   }
-  if (url.pathname === '/api/config') return json(res, { version: VERSION, demo: DEMO, site: SITE, cswap: !!CSWAP_URL && !DEMO });
+  if (url.pathname === '/api/config') return json(res, { version: VERSION, demo: DEMO, site: SITE, cswap: !!CSWAP_URL && !DEMO, chat: { state: 'off' } });   // chat.state: the agent message board, shown read-only in the Settings tab ('off' | 'on' | 'unsupported'); the chat source makes it real
   if (url.pathname === '/api/state') return json(res, snapshot());
   if (url.pathname === '/api/closed') return json(res, { closed: closedList, days: RECENT_OPTS.days, max: RECENT_OPTS.max, scan: recent ? recent.stats : null });
   if (url.pathname === '/api/cost') {

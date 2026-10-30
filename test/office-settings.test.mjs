@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { createOfficeSettings, officeQuery, urlAfterChange, rowsOf, ROWS, OFFICE3D_ROWS } from '../public/js/office-settings.js';
+import { createOfficeSettings, createSettingsHub, officeQuery, urlAfterChange, rowsOf, tabRowsOf, sceneChoice, sourceOf, shelfChoices, fixedNow, minutesOf, ROWS, TAB_ROWS, OFFICE3D_ROWS } from '../public/js/office-settings.js';
 import { KEY, load, save, merge } from '../public/js/pixel/settings.js';
 
 const memory = (init = {}) => { const m = { ...init }; return { m, getItem: k => (k in m ? m[k] : null), setItem: (k, v) => { m[k] = String(v); } }; };
@@ -9,8 +9,8 @@ test('office settings: defaults, then what is stored, then the address, and each
   const store = memory();
   save(store, { season: 'winter', weather: 'rain' });
   const s = createOfficeSettings({ storage: store, overrides: officeQuery('?season=spring&time=06:30') });
-  assert.deepEqual(s.get(), { time: '06:30', season: 'spring', weather: 'rain', hemisphere: 'north', shelf: 10, project: 'off' });
-  assert.deepEqual(s.from(), { time: 'url', season: 'url', weather: 'stored', hemisphere: 'default', shelf: 'default', project: 'default' });
+  assert.deepEqual(s.get(), { time: '06:30', season: 'spring', weather: 'rain', hemisphere: 'north', shelf: 10, project: 'off', scene: '3d' });
+  assert.deepEqual(s.from(), { time: 'url', season: 'url', weather: 'stored', hemisphere: 'default', shelf: 'default', project: 'default', scene: 'default' });
   assert.equal(s.get('weather'), 'rain');
   assert.equal(createOfficeSettings({ storage: memory() }).get('time'), 'auto');
 });
@@ -25,7 +25,7 @@ test('office settings: a choice is validated, remembered under the pixel scene\'
   assert.equal(s.set('shelf', 1000), false);
   assert.equal(s.get('weather'), 'rain');
   assert.deepEqual(JSON.parse(store.m[KEY]), { weather: 'rain', time: '21:30' });
-  assert.deepEqual(merge(load(store), {}).values, { time: '21:30', season: 'auto', weather: 'rain', hemisphere: 'north', shelf: 10, project: 'off' }, 'the pixel scene would start with the same choices');
+  assert.deepEqual(merge(load(store), {}).values, { time: '21:30', season: 'auto', weather: 'rain', hemisphere: 'north', shelf: 10, project: 'off', scene: '3d' }, 'the pixel scene would start with the same choices');
   // and the other way round: a choice made in the pixel scene is the starting point here
   save(store, { season: 'autumn' });
   assert.equal(createOfficeSettings({ storage: store }).get('season'), 'autumn');
@@ -79,7 +79,7 @@ test('office query: ?time ?season ?weather ?hemisphere ?shelf, and ?hour= is the
   assert.deepEqual(officeQuery('?hour=25'), { time: '01:00' }, 'the hour wraps round the day, as it did');
   assert.deepEqual(officeQuery('?hour=-1'), { time: '23:00' });
   assert.deepEqual(officeQuery('?hour=21&time=06:15'), { time: '06:15' }, '?time= wins');
-  assert.deepEqual(officeQuery('?hour=&scene=3d'), {}); assert.deepEqual(officeQuery('?hour=noon'), {});
+  assert.deepEqual(officeQuery('?hour=&scene=3d'), { scene: '3d' }, 'the scene is a setting of the address too'); assert.deepEqual(officeQuery('?hour=noon'), {});
   assert.deepEqual(officeQuery('?hour=21&time=bogus'), { time: '21:00' }, 'a ?time= that is not a time does not hide a good ?hour=');
   assert.deepEqual(officeQuery(''), {}); assert.deepEqual(officeQuery(undefined), {});
 });
@@ -94,9 +94,9 @@ test('address after a change: a parameter that the address names follows the con
 });
 
 test('popover rows: a scene lists the rows it supports; a scene that lists none (the pixel scene) shows them all; the 3D scene has no camera row', () => {
-  assert.deepEqual(ROWS, ['camera', 'time', 'season', 'hemisphere', 'weather', 'shelf']);
+  assert.deepEqual(ROWS, ['camera', 'time', 'season', 'hemisphere', 'weather', 'shelf', 'project']);
   assert.deepEqual(rowsOf({}), ROWS); assert.deepEqual(rowsOf(null), ROWS); assert.deepEqual(rowsOf(undefined), ROWS);
-  assert.deepEqual(rowsOf({ settingRows: OFFICE3D_ROWS }), ['time', 'season', 'hemisphere', 'weather', 'shelf'], 'in the popover\'s order, whatever order the scene wrote');
+  assert.deepEqual(rowsOf({ settingRows: OFFICE3D_ROWS }), ['time', 'season', 'hemisphere', 'weather', 'shelf', 'project'], 'in the popover\'s order, whatever order the scene wrote');
   assert.ok(!rowsOf({ settingRows: OFFICE3D_ROWS }).includes('camera'));
   assert.deepEqual(rowsOf({ settingRows: ['weather', 'bogus'] }), ['weather'], 'a name the popover does not have is ignored');
   assert.deepEqual(rowsOf({ settingRows: [] }), [], 'a scene can support none');

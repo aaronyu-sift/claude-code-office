@@ -4,9 +4,11 @@ import { createPano } from './pano.js';
 import { createPixelOffice } from './pixel/index.js';
 import { createOpenMenu } from './pixel/open-menu.js';
 import { fromQuery } from './pixel/settings.js';
-import { createOfficeSettings, officeQuery, urlAfterChange, OFFICE3D_ROWS } from './office-settings.js';
+import { createOfficeSettings, createSettingsHub, officeQuery, urlAfterChange, sceneChoice, OFFICE3D_ROWS } from './office-settings.js';
 import { createAtmosphere } from './office-atmosphere.js';
 import { createSettingsPanel } from './settings-panel.js';
+import { createSettingsTab } from './settings-tab.js';
+import { createTablist } from './tabs.js';
 import { createAkis } from './akis.js';
 import { createMaliyet } from './maliyet.js';
 import './site.js';
@@ -161,18 +163,22 @@ function safeView(name, create) {
   const guard = fn => (...args) => { if (!v) return; try { return fn.apply(v, args); } catch (e) { fail(e); v = null; } };
   return { show: guard(function () { return this.show(); }), hide: guard(function () { return this.hide(); }), update: guard(function (...a) { return this.update(...a); }) };
 }
-// The Office view is the three.js scene (the default again, 2026-10-29). The pixel scene stays available as ?scene=pixel; it is loaded only then,
-// so the default view never fetches the pixel engine. ?scene=3d is the same as no parameter.
+// The Office view is the three.js scene (the default again, 2026-10-29). The pixel scene is chosen with ?scene=pixel or in the Settings tab (kept as the setting `scene`,
+// the address wins and is not stored); it is loaded only then, so the default view never fetches the pixel engine. ?scene=3d is the same as no parameter.
+// The scene is decided once, when the page loads: a new choice in the Settings tab takes effect at the next load.
 let pixelOffice = null;
-let sceneSettings = null;                       // the scene that the settings popover edits: the pixel scene, or the 3D scene's own settings (office-settings.js)
+let sceneSettings = null;                       // the scene that the controls edit: the pixel scene, or the 3D scene's own settings (office-settings.js)
+// What the popover and the Settings tab both talk to: a change made in either is applied to the scene, kept in step in the address, and told to the other
+const hub = createSettingsHub({ getOffice: () => sceneSettings, afterChange: (key, value) => keepUrl(key, value) });
 function createOffice(root) {
   const q = new URLSearchParams(location.search), proj = q.get('proj');
   // ?proj=iso|front picks the view (without it the stored choice, then isometric); ?time=HH:MM, ?season=, ?weather= and ?hemisphere= override the
   // stored scene settings for this visit
-  if (q.get('scene') === 'pixel') return (sceneSettings = pixelOffice = createPixelOffice(root, ctx, { overrides: fromQuery(location.search), proj: proj === 'iso' || proj === 'front' ? proj : null }));
+  if (sceneChoice({ search: location.search }) === 'pixel') return (sceneSettings = pixelOffice = createPixelOffice(root, ctx, { overrides: fromQuery(location.search), proj: proj === 'iso' || proj === 'front' ? proj : null }));
   root.dataset.scene = '3d';
   // the 3D scene has no camera toggle: the popover shows the rows it supports; the choices are remembered under the same keys as the pixel scene's
   const settings = createOfficeSettings({ overrides: officeQuery(location.search) });
+  settings.on('*', (value, key) => hub.heard(key, value));          // a change that came from another tab reaches the controls too
   const atmosphere = createAtmosphere({ settings });              // the clock, season and weather of the surroundings (time of day: ofis-env.js)
   root.__office = { settings, atmosphere };                       // read-only state for QA (tools/qa/office3d-env-qa.mjs)
   let real = null, weather = null, visible = false;
@@ -200,6 +206,7 @@ const views = {
   ofis: safeView('ofis', root => createOffice(root)),
   akis: safeView('akis', root => createAkis(root, ctx)),
   maliyet: safeView('maliyet', root => createMaliyet(root, ctx)),
+  settings: safeView('settings', root => createSettingsTab(root, { hub, running: () => (pixelOffice ? 'pixel' : '3d') })),
 };
 let current = null;
 
@@ -211,7 +218,7 @@ const keepUrl = (key, value) => {                                   // an explic
   const search = urlAfterChange(location.search, key, value);
   if (search != null) history.replaceState(null, '', search + location.hash);
 };
-const panel = createSettingsPanel({ wrap: setWrap, getOffice: () => sceneSettings, afterChange: keepUrl });
+const panel = createSettingsPanel({ wrap: setWrap, hub });
 function syncProjSeg() {
   const on = current === 'ofis' && !!sceneSettings;
   projSeg.hidden = !(on && pixelOffice);
@@ -219,12 +226,14 @@ function syncProjSeg() {
   if (!on) panel.close();
   for (const b of document.querySelectorAll('.proj-seg button')) b.setAttribute('aria-pressed', String(!!pixelOffice && b.dataset.proj === pixelOffice.projection));
 }
-for (const seg of document.querySelectorAll('.proj-seg')) seg.addEventListener('click', async e => {
-  const b = e.target.closest('button[data-proj]');
+// the camera buttons exist in the header, in the popover and in the Settings tab (all `.proj-seg`); one listener serves them all
+document.addEventListener('click', async e => {
+  const b = e.target.closest('.proj-seg button[data-proj]');
   if (!b || !pixelOffice) return;
   await pixelOffice.setProjection(b.dataset.proj);
   keepUrl('proj', pixelOffice.projection);
   syncProjSeg();
+  hub.heard('proj', pixelOffice.projection);                         // the Settings tab says where the camera comes from
 });
 
 // --top-h: where the page content and the controls of the map start (the bottom edge of the bar, which floats over every page); --strip-h: the room the your-turn
@@ -249,11 +258,12 @@ function setView(name) {
   document.getElementById('view-' + name).hidden = false;
   views[name].show();
   syncProjSeg();
-  document.querySelectorAll('.top .seg button[data-view]').forEach(b => b.setAttribute('aria-selected', String(b.dataset.view === name)));
+  tablist.select(name);
   try { localStorage.setItem('ajan-ofisi.view', name); } catch { /* storage disabled */ }
   if (location.hash !== '#' + name) history.replaceState(null, '', '#' + name);
 }
-document.querySelectorAll('.top .seg button[data-view]').forEach(b => b.addEventListener('click', () => setView(b.dataset.view)));
+// the tabs of the header: a tablist with the arrow keys, Home and End, and one stop of the Tab key (tabs.js)
+const tablist = createTablist(document.querySelector('.top nav[role="tablist"]'), { onSelect: setView });
 
 function changed(full, d) {
   renderKpis();
@@ -660,13 +670,14 @@ export function drawSpark(cv, data, color, opts = {}) {
 // ---------------------------------------------------------------- keyboard / startup
 
 addEventListener('keydown', e => {
-  if (e.target.matches('input, textarea')) return;
+  if (e.target.matches('input, textarea, select')) return;
   if (e.key === 'Escape' && !drawerMenu.escape()) closeDrawer();
   if (e.ctrlKey || e.metaKey || e.altKey) return;
   if (e.key === '1') setView('pano');
   if (e.key === '2') setView('ofis');
   if (e.key === '3') setView('akis');
   if (e.key === '4') setView('maliyet');
+  if (e.key === '5') setView('settings');
 });
 addEventListener('hashchange', () => { const v = location.hash.slice(1); if (views[v]) setView(v); });
 

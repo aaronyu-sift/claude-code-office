@@ -1,4 +1,4 @@
-// QA of the room boards (public/js/board-text.js, board-setting.js, ofis.js `paintPlaque`, pixel/board.js): headless Chrome in a throw-away profile, the server against a
+// QA of the room boards (public/js/board-text.js, office-settings.js, ofis.js `paintPlaque`, pixel/board.js): headless Chrome in a throw-away profile, the server against a
 // fake ~/.claude, one `CHECK <name> PASS|FAIL <detail>` line per check and a final `QA PASS` or `QA FAIL`.
 //   node tools/qa/office-board-qa.mjs [--only board-3d|board-pixel|board-setting] [--shots <dir>] [--mutations]
 //
@@ -70,7 +70,7 @@ const SPY = `(() => {
   };
   return true;
 })()`;
-const setProject = (page, on) => page.evaluate(`import('/js/board-setting.js').then(m => { m.setProject(${on ? "'on'" : "'off'"}); return m.projectOn(); })`);
+const setProject = (page, on) => page.evaluate(`(() => { const s = document.querySelector('#view-ofis').__office.settings; s.set('project', '${on ? 'on' : 'off'}'); return s.get('project') === 'on'; })()`);
 const FALLBACK = `[...document.querySelectorAll('#view-ofis .of-signl')].map(e => { const b = e.querySelector('b'), sp = e.querySelector('.of-sp'); return { id: e.dataset.id, name: b && b.textContent, nameSize: b && parseFloat(getComputedStyle(b).fontSize), nameWeight: b && getComputedStyle(b).fontWeight, proj: sp ? sp.textContent : null, projSize: sp ? parseFloat(getComputedStyle(sp).fontSize) : null, projAlign: sp ? getComputedStyle(sp).alignSelf : null }; })`;
 
 if (want('board-3d')) {
@@ -366,10 +366,10 @@ if (want('board-setting')) {
 // one line broken in a copy of the repo, the check that guards it must fail there
 const MUTATIONS = [
   { name: 'the small project line is bigger than the name (3D plaque)', file: 'public/js/ofis.js', from: 'const sfs = Math.min(Math.round(h * 0.15), Math.round(fit.fs * 0.62));', to: 'const sfs = Math.round(h * 0.5);', fails: ['board-3d'] },
-  { name: 'the project is shown by default (setting default on)', file: 'public/js/pixel/settings.js', from: "shelf: DEFAULT_CAP, project: 'off' }", to: "shelf: DEFAULT_CAP, project: 'on' }", fails: ['board-3d', 'board-pixel', 'board-setting'] },
+  { name: 'the project is shown by default (setting default on)', file: 'public/js/pixel/settings.js', from: "shelf: DEFAULT_CAP, project: 'off', scene: '3d' }", to: "shelf: DEFAULT_CAP, project: 'on', scene: '3d' }", fails: ['board-3d', 'board-pixel', 'board-setting'] },
   { name: 'the project is bigger than the name (pixel board)', file: 'public/js/pixel/board.js', from: 'small: Math.max(9, Math.round(name * 0.62))', to: 'small: Math.round(name * 1.3)', fails: ['board-pixel'] },
   { name: 'a click on a board does nothing', file: 'public/js/pixel/index.js', from: 'if (onBoard) return { t: \'agent\', id: onBoard };', to: '', fails: ['board-pixel'] },
-  { name: 'the address is ignored by the 3D scene', file: 'public/js/board-setting.js', from: 'merge(load(storage), fromQuery(search))', to: 'merge(load(storage), {})', fails: ['board-setting'] },
+  { name: 'the address is ignored by the 3D scene', file: 'public/js/main.js', from: 'createOfficeSettings({ overrides: officeQuery(location.search) })', to: 'createOfficeSettings({ overrides: {} })', fails: ['board-setting'] },
   { name: 'the labels show the project folder whatever the setting says', file: 'public/app.css', from: '.view-ofis[data-project="off"] .px-l .px-proj { display: none; }', to: '', fails: ['board-pixel'] },
   { name: 'a board takes pointer events', file: 'public/app.css', from: 'position: absolute; left: 0; top: 0; box-sizing: border-box; pointer-events: none; transform-origin: 50% 100%;', to: 'position: absolute; left: 0; top: 0; box-sizing: border-box; pointer-events: auto; transform-origin: 50% 100%;', fails: ['board-pixel'] },
   { name: 'the setting is never stored (the key is refused)', file: 'public/js/pixel/settings.js', from: "project: v => { const t = typeof v === 'string' ? v.trim().toLowerCase() : ''; return t === 'on' || t === 'off' ? t : null; },", to: 'project: () => null,', fails: ['board-pixel', 'board-setting'] },
