@@ -746,6 +746,7 @@ export function createOfis(root, ctx, opts = {}) {
     get models() { return { loaded: Object.keys(PK), failed: [...AS.packs.failed.keys()] }; },
     get look() { return { assets: AS.look.assets, polish: POLISH }; },
     figures() { return [...chars.values()].map(c => ({ id: c.id, main: c.main, pack: !!c.pk, shirt: c.shirt, tinted: c.tinted, mode: c.mode, after: c.after, vis: c.root.visible, x: c.root.position.x, z: c.root.position.z })); },
+    seatOf(id) { const c = chars.get(id); return c && c.seatPos ? { x: c.seatPos.x, z: c.seatPos.z } : null; },       // the seat a figure walks to (the end of its route)
     draw() { renderer.render(scene, camera); return this.info; },
     figureVisible(id, on) { const c = chars.get(id); if (c) c.root.visible = !!on; },
     rebuildNow() { world.sig = ''; sync(); return this.rebuildMs; },

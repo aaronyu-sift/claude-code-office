@@ -39,6 +39,9 @@ async function scenario3d(n, opts = {}) {
     await page.goto(`http://127.0.0.1:${srv.port}/?${q}#ofis`, 800);
     const roomed = agents.filter(a => a.kind === 'main' && a.status !== 'dormant');             // an asleep chat has no room: it is on the shelf
     const ready = await until(async () => page.evaluate(`(() => { const r = document.querySelector('#view-ofis'); return !!r.__ofis && !!r.__ofisUi && r.__ofis.rooms.length >= ${roomed.length} && r.__ofis.chars >= ${roomed.length} && r.__ofisUi.shelf().rows.length > 0; })()`), 25000, 250);
+    // everybody in the data walks in from the entrance at page load (up to about 10 s: public/js/ofis-arrive.js); these checks click, measure and lay out figures at their seats,
+    // so the walks are ended at once (the QA hook __ofis.settle(); the app never calls it). Walking has its own QA: office3d-walk-qa.mjs.
+    if (ready) await page.evaluate(`document.querySelector('#view-ofis').__ofis.settle()`);
     if (ready) await sleep(1500);                                                                // the first frames, and the fit that the shelf card's arrival asks for
     return { fx, srv, page, agents, roomed, ready: !!ready, done, dir };
   } catch (e) { await done(); throw e; }
