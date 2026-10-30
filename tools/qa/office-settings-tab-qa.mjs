@@ -4,7 +4,7 @@
 //   npm run qa:settings-tab
 //
 //   settings-tab-open     the tab is the fifth of the header's tablist and opens from a click and from #settings, the rows follow the 3D scene (no camera row), each row says where its value
-//                         comes from, the page fades in (only opacity; 150 ms under reduced motion), the message board line follows /api/config (absent: nothing)
+//                         comes from, the page fades in (only opacity; 150 ms under reduced motion), the message board line follows /api/config (absent: nothing), and the server's own answer follows its chat database (on when it reads one, off when it cannot)
 //   settings-tab-store    one store behind two controls: every row changed in the tab shows in the popover, in the 3D scene and in storage without a reload, and the other way round; an
 //                         address that names a setting follows the control and is not stored
 //   settings-tab-scene    the scene choice is kept, `?scene=` wins and is not stored, the new scene arrives at the next load (a button reloads now), the camera row exists in the pixel scene only
@@ -19,7 +19,7 @@ import { spawnSync } from 'node:child_process';
 import { cpSync, mkdtempSync, mkdirSync, readFileSync, readdirSync, writeFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { ROOT, sleep } from './harness.mjs';
+import { ROOT, sleep, startServer } from './harness.mjs';
 import { scenario3d, o3 } from './harness3d.mjs';
 
 const args = process.argv.slice(2);
@@ -161,6 +161,24 @@ if (want('open')) {
     if (!(!b1.shown && !b4.shown && !b5.shown)) bad.push(`a server that says nothing shows a board line: ${JSON.stringify([b1, b4, b5])}`);
     if (!(b2.shown && b2.text === 'Connected' && b3.shown && b3.text === 'Unsupported' && b6.text === 'Not enabled')) bad.push(`board states: ${JSON.stringify([b2, b3, b6])}`);
     notes.push(`board line: server says ${JSON.stringify(server.chat)} -> "${b0.text}"; absent, null, unknown -> hidden; on -> "${b2.text}"; unsupported -> "${b3.text}"`);
+    // a server started with a chat database says "on" (the line must not claim the board is off while it is being read), one pointed at a file it cannot read says "off"
+    const sq = await import('node:sqlite').catch(() => null);
+    if (!sq) notes.push('no node:sqlite in this Node: the bridge answer was not checked');
+    else {
+      const cdir = mkdtempSync(join(tmpdir(), 'cco-st-chat-'));
+      let a = null, b = null;
+      try {
+        const dbFile = join(cdir, 'chat.db'), db = new sq.DatabaseSync(dbFile);
+        db.exec('CREATE TABLE messages (seq INTEGER PRIMARY KEY, ts_ms INTEGER, channel TEXT, author TEXT, to_list TEXT, body TEXT); CREATE TABLE agent_keys (key TEXT, agent TEXT)');
+        db.close();
+        a = await startServer(cdir, { CCO_CHAT_DB: dbFile });
+        b = await startServer(cdir, { CCO_CHAT_DB: join(cdir, 'missing', 'chat.db') });
+        const on = await (await fetch(`http://127.0.0.1:${a.port}/api/config`)).json(), off = await (await fetch(`http://127.0.0.1:${b.port}/api/config`)).json();
+        if (!(on.chat && on.chat.state === 'on')) bad.push(`a server reading a chat database says ${JSON.stringify(on.chat)}, not on`);
+        if (!(off.chat && off.chat.state === 'off')) bad.push(`a server whose chat database cannot be read says ${JSON.stringify(off.chat)}, not off`);
+        notes.push(`/api/config with a chat database: ${JSON.stringify(on.chat)}; with an unreadable one: ${JSON.stringify(off.chat)}`);
+      } finally { if (a) a.stop(); if (b) b.stop(); rmSync(cdir, { recursive: true, force: true }); }
+    }
     await S.shot('settings-open.png');
     // reduced motion: the page fades in 150 ms and nothing else moves
     await page.send('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-reduced-motion', value: 'reduce' }] });
@@ -470,7 +488,8 @@ const MUTATIONS = [
   { name: 'the page does not fade in', file: 'public/js/settings-tab.js', from: "if (typeof page.animate === 'function') page.animate(", to: "if (false) page.animate(", fails: ['open'] },
   { name: 'the fade is as long under reduced motion', file: 'public/js/settings-tab.js', from: 'duration: reduced() ? DUR.hover : DUR.fast', to: 'duration: DUR.fast', fails: ['open'] },
   { name: 'the board line shows when the server says nothing', file: 'public/js/settings-tab.js', from: '    r.hidden = !state;\n', to: '    r.hidden = false;\n', fails: ['open'] },
-  { name: 'the server says nothing about the message board', file: 'server.js', from: ", chat: { state: 'off' } });", to: ' });', fails: ['open'] },
+  { name: 'the server says nothing about the message board', file: 'server.js', from: ", chat: { state: chatState() } });", to: ' });', fails: ['open'] },
+  { name: 'the server says the message board is off while it reads the chat database', file: 'server.js', from: "const chatState = () => (CHAT ? (typeof CHAT.status === 'function' ? CHAT.status() : 'on') : 'off');", to: "const chatState = () => 'off';", fails: ['open'] },
   { name: 'the camera row shows in the 3D scene', file: 'public/js/office-settings.js', from: "export const tabRowsOf = office => ['scene', ...rowsOf(office)];", to: "export const tabRowsOf = office => TAB_ROWS;", fails: ['open'] },
   { name: 'the tab does not follow a change made in the popover', file: 'public/js/settings-tab.js', from: 'hub.on(refresh);', to: '', fails: ['store'] },
   { name: 'the popover does not follow a change made in the tab', file: 'public/js/settings-panel.js', from: 'hub.on(refresh);', to: '', fails: ['store'] },
