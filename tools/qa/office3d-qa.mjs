@@ -14,9 +14,11 @@
 //                the X (no change); the 12th chat adds a bay (two offices): the first eleven offices, the hub, the reception, their chats and the sub-agents
 //                still walking stay as they are, and the view refits once
 //   3d-fit       the X fills the window: at 1440 x 900 and 1920 x 1080 the fit zoom is at least FIT_GAIN above the two rows of before (measured with the
-//                same fixture: 21.41 and 26.2), the building covers at least FOOT_SHARE of the window and half of its own box, and the box is between 16:10 and 16:9
+//                same fixture: 21.41 and 26.2), the building covers at least FOOT_SHARE of the window and half of its own box, and the box is between 16:10 and 16:9;
+//                a building grown past the hexagon (?rooms=21, 11 bays) is framed as the layout module calculates
 //   3d-walk      a sub-agent of a chat in the bar, in the north arm and in the south arm comes in from the street side along its hall's lane, over the paved
-//                path (an arm's hall is shorter than the building) and the plinth only, and sits at its desk
+//                path (an arm's hall is shorter than the building) and the plinth only, and sits at its desk; in the X and in a building grown to 11 bays
+//                (the bar has a fifth bay, so the entrance has moved)
 //
 // --mutations breaks the code in a copy of the repo, one line at a time, and runs the check that guards that line: every one must FAIL there
 // (a check that cannot fail guards nothing). Timing is the one thing a busy machine can bend: the rebuild time is the best of three, and a failing
@@ -26,7 +28,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { scenario3d, lookAt, o3, sleep, ROOT } from './harness3d.mjs';
 import { MANIFEST } from '../../public/js/ofis-rig.js';
-import { MIN_ROOMS, baysFor, officesIn } from '../../public/js/ofis-layout.js';
+import { MIN_ROOMS, baysFor, officesIn, buildingPlan, projectedBox, fitZoom } from '../../public/js/ofis-layout.js';
 import { MEASURE } from './map-measure.mjs';
 import { writeGlb } from '../models/strip-glb.mjs';
 
@@ -329,7 +331,8 @@ async function runStable(ctx) {
         if (rectKey(a.office.slots[i]) !== rectKey(b.office.slots[i])) bad.push(`${label}: office ${i} changed its rectangle ${rectKey(a.office.slots[i])} -> ${rectKey(b.office.slots[i])}`);
         if (!grow.includes(i) && a.office.slots[i].cap !== b.office.slots[i].cap) bad.push(`${label}: office ${i} changed its desks`);
       }
-      if (JSON.stringify(a.office.halls[0]) !== JSON.stringify(b.office.halls[0])) bad.push(`${label}: the first hall (the reception) changed`);
+      for (const f of ['row', 'x0', 'z0', 'z1', 'lane']) if (a.office.halls[0][f] !== b.office.halls[0][f]) bad.push(`${label}: the first hall (the reception) changed its ${f}`);
+      if (b.office.halls[0].x1 < a.office.halls[0].x1) bad.push(`${label}: the first hall (the reception) got shorter at its entrance end`);
       if (JSON.stringify(a.office.lounge) !== JSON.stringify(b.office.lounge)) bad.push(`${label}: the hub changed`);
       a.office.halls.forEach((h, i) => {
         const g = b.office.halls[i];
@@ -493,8 +496,25 @@ async function runFit(ctx) {
       if (m.offices !== OFFICES) problems.push(`${tag}: ${m.offices} offices (want ${OFFICES})`);
     } finally { await S.done(); }
   }
+  // a building that has grown past the hexagon (?rooms=21: 11 bays, the bar has a fifth bay, the entrance has moved right): the scene frames what the layout
+  // module says it should (the zoom within 3 percent of the node calculation, the shelf card open at 1440 wide), and it holds the offices it should
+  let grown = null;
+  {
+    const S = await scenario3d(10, { tag: 'fit21', root: ctx.root, width: 1440, height: 900, query: 'rooms=21' });
+    try {
+      await sleep(700);
+      const m = await S.page.evaluate(o3(MEASURE)), bays = baysFor(21), pred = fitZoom(projectedBox(buildingPlan(bays).plinth), 1440, 900, { right: 322 });
+      grown = { m, pred, bays };
+      if (!S.ready.ok) problems.push('1440x900 with ?rooms=21: the scene did not become ready');
+      if (!m.autoFit) problems.push('1440x900 with ?rooms=21: the view is not the automatic fit');
+      if (m.offices !== officesIn(bays)) problems.push(`1440x900 with ?rooms=21: ${m.offices} offices (want ${officesIn(bays)})`);
+      if (Math.abs(m.zoom / pred - 1) > 0.03) problems.push(`1440x900 with ?rooms=21: fit zoom ${m.zoom}, the layout module says ${pred.toFixed(2)} for ${bays} bays`);
+      if (m.aspect < 1.3 || m.aspect > 2.4) problems.push(`1440x900 with ?rooms=21: its box is ${m.aspect} wide for 1 high (want 1.3 to 2.4)`);
+    } finally { await S.done(); }
+  }
   return [make('3d-fit', problems.length === 0,
     rows.map(r => `${r.w}x${r.h}, ${r.n} chats: fit zoom ${r.m.zoom} (two rows ${OLD_FIT[`${r.w}x${r.h}x${r.n}`].zoom}, +${((r.gain - 1) * 100).toFixed(0)} percent), building covers ${(r.m.footShare * 100).toFixed(0)} percent of the window (two rows ${(OLD_FIT[`${r.w}x${r.h}x${r.n}`].foot * 100).toFixed(0)}), fills ${(r.m.fill * 100).toFixed(0)} percent of its box, box ${r.m.boxW}x${r.m.boxH} px = ${r.m.aspect} wide`).join('; ')
+    + `; grown to ${grown.bays} bays (?rooms=21, ${grown.m.offices} offices): fit zoom ${grown.m.zoom} against ${grown.pred.toFixed(2)} from the layout module, ${(grown.m.footShare * 100).toFixed(0)} percent of the window covered, box ${grown.m.aspect} wide`
     + ` (need +${((FIT_GAIN - 1) * 100).toFixed(0)} percent zoom, ${FOOT_SHARE * 100} percent covered with 3 chats, ${FILL_MIN * 100} percent of its box, aspect ${ASPECT.join(' to ')})`
     + (problems.length ? '; PROBLEMS: ' + problems.slice(0, 4).join(' | ') + (problems.length > 4 ? ` (and ${problems.length - 4} more)` : '') : ''))];
 }
@@ -502,20 +522,22 @@ async function runFit(ctx) {
 // ---- 3d-walk: a sub-agent in the bar, the north arm and the south arm walks in from the street side. Its walk is replayed from the entrance (s.replayEnter);
 // every few frames the figure is read: the first reading is at the entrance on the hall's lane, until the door it stays on the lane, every reading is on paved
 // ground (the plinth under the building or the path from an arm's hall to the street, o.office().stubs), and it ends on the desk it started from.
+// It runs in the X and in a building that has grown past the hexagon (?rooms=21: the bar has a fifth bay, so the entrance has moved and the arms' paths are longer).
 async function runWalk(ctx) {
-  const S = await scenario3d(10, { tag: 'walk', root: ctx.root });
   const problems = [], notes = [];
+  for (const [which, query] of [['X', ''], ['11 bays', 'rooms=21']]) {
+  const S = await scenario3d(10, { tag: 'walk' + (query ? 'g' : ''), root: ctx.root, query });
   try {
     const { page } = S;
-    if (!S.ready.ok) problems.push('the scene did not become ready');
+    if (!S.ready.ok) problems.push(`${which}: the scene did not become ready`);
     const info = await page.evaluate(o3('({ office: o.office(), foot: o.footprint(), subs: s.subs(), figs: o.figures() })'));
     const hallOf = new Map(info.office.slots.filter(r => r.id).map(r => [r.id, r.hall]));
     const seated = info.subs.filter(x => x.mode === 'seated' && hallOf.has(x.room));
     const pick = [];
-    for (let h = 0; h < info.office.halls.length; h++) { const c = seated.find(x => hallOf.get(x.room) === h); if (c) pick.push({ id: c.id, hall: h, room: c.room }); else problems.push(`no sub-agent sits in hall ${h} (the bar and the two arms each have a chat with one)`); }
+    for (let h = 0; h < info.office.halls.length; h++) { const c = seated.find(x => hallOf.get(x.room) === h); if (c) pick.push({ id: c.id, hall: h, room: c.room }); else problems.push(`${which}: no sub-agent sits in hall ${h} (the bar and the two arms each have a chat with one)`); }
     const at0 = new Map(info.figs.map(f => [f.id, [f.x, f.z]]));
     const rect = new Map(info.office.slots.filter(r => r.id).map(r => [r.id, r]));
-    for (const w of pick) if (!(await page.evaluate(o3(`s.replayEnter(${JSON.stringify(w.id)})`)))) problems.push(`hall ${w.hall}: the walk could not be replayed`);
+    for (const w of pick) if (!(await page.evaluate(o3(`s.replayEnter(${JSON.stringify(w.id)})`)))) problems.push(`${which}, hall ${w.hall}: the walk could not be replayed`);
     const trace = new Map(pick.map(w => [w.id, []]));
     const t0 = Date.now();
     while (Date.now() - t0 < 60000) {
@@ -528,7 +550,7 @@ async function runWalk(ctx) {
       || info.office.stubs.some(r => r.hall === hall && x >= r.x0 - 0.05 && x <= r.x1 + 0.05 && z >= r.z0 && z <= r.z1);
     for (const w of pick) {
       const t = trace.get(w.id), hall = info.office.halls[w.hall], r = rect.get(w.room), doorX = r.X + r.W - 1.0, seat = at0.get(w.id);
-      const tag = `hall ${w.hall} (${w.hall === 0 ? 'bar' : hall.row < 0 ? 'north arm' : 'south arm'})`;
+      const tag = `${which}, hall ${w.hall} (${w.hall === 0 ? 'bar' : hall.row < 0 ? 'north arm' : 'south arm'})`;
       if (t.length < 4) { problems.push(`${tag}: the walk was not seen`); continue; }
       const first = t[0], last = t[t.length - 1];
       if (first.x < E - 1.2 || Math.abs(first.z - hall.lane) > 0.7) problems.push(`${tag}: the walk starts at (${first.x.toFixed(1)}, ${first.z.toFixed(1)}), not at the entrance (${E.toFixed(1)}, lane ${hall.lane.toFixed(1)})`);
@@ -540,8 +562,9 @@ async function runWalk(ctx) {
       const stub = info.office.stubs.find(x => x.hall === w.hall);
       notes.push(`${tag}: ${t.length} readings from x ${first.x.toFixed(1)} to the door ${doorX.toFixed(1)}${stub ? `, ${(stub.x1 - stub.x0).toFixed(1)} m of it on the paved path` : ''}`);
     }
-    if (pick.length < 3) problems.push(`only ${pick.length} halls had a sub-agent to replay`);
+    if (pick.length < 3) problems.push(`${which}: only ${pick.length} halls had a sub-agent to replay`);
   } finally { await S.done(); }
+  }
   return [make('3d-walk', problems.length === 0, `${notes.join('; ')}${problems.length ? '; PROBLEMS: ' + problems.slice(0, 4).join(' | ') + (problems.length > 4 ? ` (and ${problems.length - 4} more)` : '') : ''}`)];
 }
 
