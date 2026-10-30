@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  WALK, STAGGER_S, SPREAD_MAX_S, LOAD_BUDGET_S, CALM_QUEUE, PACE_MAX, RAMP_UNITS, RAMP_FLOOR,
+  WALK, STAGGER_S, SPREAD_MAX_S, MIN_STAGGER_S, LOAD_BUDGET_S, CALM_QUEUE, PACE_MAX, RAMP_UNITS, RAMP_FLOOR,
   pathLength, compact, rampFactor, etaSeconds, arrivalPlan, stepWalk, turnBack, nearestOnPath, repath, routeSig, dist,
 } from '../public/js/ofis-arrive.js';
 
@@ -106,12 +106,62 @@ test('arrivalPlan: four or fewer are never hurried, and a calm reload never is',
   assert.ok(arrivalPlan(many, { rush: true }).some(p => p.pace > 1));
 });
 
-test('arrivalPlan: a big queue is released within SPREAD_MAX_S', () => {
-  const plan = arrivalPlan(Array.from({ length: 40 }, () => 30), { rush: true });
+test('arrivalPlan: a hurried queue that fits is released within SPREAD_MAX_S, a bigger one never closer than MIN_STAGGER_S', () => {
+  const lens = Array.from({ length: 16 }, (_, i) => 66 - i * 3);                  // the far offices of the bar down to the near ones
+  const plan = arrivalPlan(lens, { rush: true });
   const last = Math.max(...plan.map(p => p.delay));
-  assert.ok(last <= SPREAD_MAX_S + 1e-6 && last > SPREAD_MAX_S - 0.2, `last delay ${last}`);
-  const plan2 = arrivalPlan(Array.from({ length: 40 }, (_, i) => 66 - i), { rush: true });
-  assert.ok(plan2.every((p, i) => p.delay + etaSeconds(66 - i, p.pace) <= LOAD_BUDGET_S + 0.6), 'a queue of 40 is still in within the budget (long walks first)');
+  assert.ok(last <= SPREAD_MAX_S + 1e-6 && last > SPREAD_MAX_S - 0.3, `last delay ${last}`);
+  assert.ok(plan.every((p, i) => p.delay + etaSeconds(lens[i], p.pace) <= LOAD_BUDGET_S + 0.6), 'a queue of 16 is in within the budget (long walks first)');
+  const big = arrivalPlan(Array.from({ length: 40 }, (_, i) => 66 - i), { rush: true });
+  const delays = big.map(p => p.delay).sort((a, b) => a - b), gaps = delays.slice(1).map((d, i) => d - delays[i]);
+  assert.ok(Math.min(...gaps) >= MIN_STAGGER_S - 1e-3, `the closest two leave ${Math.min(...gaps)} s apart`);
+  assert.ok(Math.max(...big.map(p => p.pace)) <= PACE_MAX + 1e-9);
+});
+
+test('arrivalPlan: a calm queue is not squeezed however long it is (the stagger shrinks only for a hurried one)', () => {
+  const plan = arrivalPlan(Array.from({ length: 30 }, () => 30));
+  const delays = plan.map(p => p.delay).sort((a, b) => a - b);
+  assert.ok(delays.slice(1).every((d, i) => Math.abs(d - delays[i] - STAGGER_S) < 1e-3), 'every figure leaves 0.35 s after the one before');
+  assert.ok(plan.every(p => p.pace === 1));
+});
+
+test('arrivalPlan: start is when the first figure leaves (the entrance clock of a second queue)', () => {
+  const a = arrivalPlan([30, 30], { start: 1.2 });
+  assert.deepEqual(a.map(p => p.delay), [1.2, 1.55]);
+  assert.deepEqual(arrivalPlan([30, 30], { start: -3 }).map(p => p.delay), [0, STAGGER_S], 'a negative start is 0');
+  // two queues made 0.4 s apart: the second leaves after the first, not with it
+  const first = arrivalPlan([40, 40, 40, 40]), t = 0.4;
+  const second = arrivalPlan([40, 40], { start: Math.max(0, Math.max(...first.map(p => p.delay)) + STAGGER_S - t) });
+  assert.ok(Math.min(...second.map(p => p.delay)) + t >= Math.max(...first.map(p => p.delay)) + STAGGER_S - 1e-9, 'the second queue leaves a stagger after the last of the first');
+});
+
+test('arrivalPlan: nobody overtakes: a figure is never faster than the ones that left before it', () => {
+  const cases = [
+    [66, 60, 55, 50, 44, 40, 33, 30, 22, 18, 12, 9],
+    Array.from({ length: 30 }, (_, i) => 40 - (i % 3) * 0.5),                  // three figures of a chat: walks of about the same length
+    Array.from({ length: 40 }, () => 30),
+    [30, 30, 30, 30, 30, 30, 60, 10],
+  ];
+  for (const lengths of cases) {
+    const plan = arrivalPlan(lengths, { rush: true });
+    const order = lengths.map((_, i) => i).sort((a, b) => plan[a].delay - plan[b].delay || a - b);
+    for (let r = 1; r < order.length; r++) assert.ok(plan[order[r]].pace <= plan[order[r - 1]].pace + 1e-9, `figure ${order[r]} (pace ${plan[order[r]].pace}) is faster than the one before it (${plan[order[r - 1]].pace})`);
+  }
+  // and so, on one lane, the closest two never touch: simulate the hall of a page load
+  const lengths = Array.from({ length: 30 }, (_, i) => 60 - Math.floor(i / 3) * 4);
+  const plan = arrivalPlan(lengths, { rush: true });
+  const routes = lengths.map(len => [P(70, 0), P(70 - (len - 6), 0), P(70 - (len - 6), 3), P(70 - (len - 4), 3)]);
+  const ws = routes.map((r, i) => ({ r, i, w: { x: 70, z: 0, path: r, pi: 1, travelled: 0, plen: pathLength(r) }, done: false }));
+  let closest = 9;
+  for (let t = 0; t < 90; t += 0.1) {
+    const live = [];
+    for (const f of ws) {
+      if (f.done || t < plan[f.i].delay) continue;
+      if (stepWalk(f.w, 0.1, { pace: plan[f.i].pace }).done) f.done = true; else live.push(f);
+    }
+    for (let a = 0; a < live.length; a++) for (let b = a + 1; b < live.length; b++) closest = Math.min(closest, dist(live[a].w, live[b].w));
+  }
+  assert.ok(closest > 0.25, `the closest two walkers in a page load were ${closest.toFixed(2)} units apart`);
 });
 
 // ---------------------------------------------------------------- turning around, re-pathing

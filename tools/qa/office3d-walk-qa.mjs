@@ -1,6 +1,6 @@
 // QA of the walkers: nothing in the 3D scene appears or disappears inside a room (public/js/ofis.js, public/js/ofis-arrive.js). Headless Chrome with software WebGL in a throw-away
 // profile (harness3d.mjs), the server against a fake ~/.claude, one `CHECK <name> PASS|FAIL <detail>` line per check and a final `QA PASS` or `QA FAIL`.
-//   node tools/qa/office3d-walk-qa.mjs [--only load|calm|brief|leave|flap|rebuild|hidden|follow|settle|reduced] [--mutations [--mutation <words>|<more words>]] [--verify-mutations]
+//   node tools/qa/office3d-walk-qa.mjs [--only load|calm|brief|leave|flap|rebuild|growout|hidden|follow|settle|reduced] [--mutations [--mutation <words>|<more words>]] [--verify-mutations]
 //
 // How it sees: the scene's recorder (s.rec, started the moment the scene exists: harness3d.mjs recordFromStart) has the creation, every frame and the removal of every figure, with the
 // frame's step. A check that changes the data itself does it in the page, on the store (a copy of a chat, a sub-agent, a status), and asks the scene to update (s.sync()), so that the
@@ -17,6 +17,7 @@
 //                    that is vacant now opens for them, they are removed at the entrance, and a sub-agent that finishes leaves too, after its 4.5 s
 //   3d-walk-flap     appears, ends, appears again: a chat and a sub-agent come back while they walk out, one figure each, seated at the end, no stuck desk, no ghost label or chair
 //   3d-walk-rebuild  the 20th chat adds a bay and moves the entrance while 30 people are walking in: nobody jumps, nobody is dropped, everybody is seated at the end
+//   3d-walk-growout  the building grows (the entrance moves 14 units) while a closed chat's chief and sub-agent walk out of their vacant office: they go on to today's entrance
 //   3d-walk-hidden   the Office view is left while people walk, a chat ends and another comes meanwhile; back in the view nobody jumps and the ended chat walks out instead of vanishing
 //   3d-walk-follow   the label, the balloon, the hover tooltip and the click card follow a walking figure, and the camera stays where it is
 //   3d-walk-settle   s.settle() ends every walk at once (QA hook), and nothing in the app calls it
@@ -103,6 +104,9 @@ function ends(list, offs, { removed = true } = {}) {
   if (first.k !== 'create') bad.push(`${short(first.id)}: its first event is ${first.k}, not its creation`);
   else if (!nearAny(offs, first.x, first.z, 1.0)) bad.push(`${short(first.id)}: made at (${f1(first.x)}, ${f1(first.z)}), not at the entrance`);
   else if (offs.some(o => inRoom(o, first.x, first.z))) bad.push(`${short(first.id)}: made inside a room`);
+  // a figure that waits for its turn at the entrance is not drawn; the first frame it is drawn in is at the entrance too (jumps() does not look at the step from not drawn to drawn)
+  const shown = list.find(e => e.vis !== false);
+  if (shown && shown !== first && !nearAny(offs, shown.x, shown.z, 1.3)) bad.push(`${short(first.id)}: first drawn at (${f1(shown.x)}, ${f1(shown.z)}), not at the entrance`);
   if (removed) {
     if (last.k !== 'remove') bad.push(`${short(first.id)}: never removed (last event ${last.k})`);
     else if (!nearAny(offs, last.x, last.z, 1.3)) bad.push(`${short(first.id)}: removed at (${f1(last.x)}, ${f1(last.z)}), not at the entrance`);
@@ -133,14 +137,53 @@ async function books(page) {
   }
   return bad;
 }
-// every figure of the page is seated at the seat its route leads to
+// every figure of the page is seated at its desk as the room has it (o.deskOf: the room's own geometry, not the end of the figure's route, which is where the figure goes by
+// construction: a route that ends 0.8 away from the chair must fail here)
 async function seated(page) {
-  const r = await ev(page, 'o.figures().map(f => ({ id: f.id, mode: f.mode, after: f.after, x: f.x, z: f.z, seat: o.seatOf(f.id) }))');
+  const r = await ev(page, 'o.figures().map(f => ({ id: f.id, mode: f.mode, after: f.after, x: f.x, z: f.z, seat: o.deskOf(f.id) }))');
   return r.filter(f => f.mode !== 'seated' || !f.seat || Math.hypot(f.x - f.seat.x, f.z - f.seat.z) > 0.1).map(f => `${short(f.id)} is ${f.mode}${f.after ? ' ' + f.after : ''} at (${f1(f.x)}, ${f1(f.z)}), seat ${f.seat ? `(${f1(f.seat.x)}, ${f1(f.seat.z)})` : 'unknown'}`);
 }
 const report = (name, problems, text) => make(name, problems.length === 0, `${text}${problems.length ? '; PROBLEMS: ' + problems.slice(0, 5).join(' | ') + (problems.length > 5 ? ` (and ${problems.length - 5} more)` : '') : ''}`);
 
 // ---- 3d-walk-load
+// The entrance clock (public/js/ofis.js): sub-agents of a chat that come over three polls, 0.4 s and 0.3 s apart, are three queues, and the figures of a later queue leave a stagger after
+// the last of the one before (a queue's own stagger and pace plan, ofis-arrive.js, know nothing of another). Read on the page once it has settled, from the recorder: the times the five
+// figures are first drawn (at least 0.25 s apart: the frames are 0.1 to 0.125 s) and, frame by frame, how close two of them ever are.
+async function queues(page) {
+  const problems = [];
+  await page.evaluate(HELPERS);
+  await qa(page, `q.chat('qhost'); q.sync();`);
+  await ev(page, 's.settle()');
+  await sleep(900);
+  await ev(page, 's.rec.take().length');
+  await qa(page, `q.sub('qhost', 'qa-0'); q.sub('qhost', 'qa-1'); q.sub('qhost', 'qa-2'); q.sync();`);
+  await sleep(400);
+  await qa(page, `q.sub('qhost', 'qb-0'); q.sync();`);
+  await sleep(300);
+  await qa(page, `q.sub('qhost', 'qc-0'); q.sync();`);
+  const ids = ['qa-0', 'qa-1', 'qa-2', 'qb-0', 'qc-0'];
+  if (!(await idle(page))) problems.push('the sub-agents of the three queues were still walking after 2 minutes');
+  const rec = await ev(page, 's.rec.take()');
+  const lists = byId(rec);
+  const shown = ids.map(id => { const e = (lists.get(id) || []).find(x => x.vis !== false); return e ? e.t : null; });
+  if (shown.some(t => t === null)) problems.push(`${shown.filter(t => t === null).length} of the 5 sub-agents of the three queues were never drawn`);
+  const ts = shown.filter(t => t !== null).sort((a, b) => a - b), gaps = ts.slice(1).map((t, i) => t - ts[i]);
+  if (gaps.length && Math.min(...gaps) < 250) problems.push(`two sub-agents of different queues left the entrance ${f1(Math.min(...gaps))} ms apart (want 250 or more)`);
+  // frame by frame: a frame ends where one of the figures comes again
+  const frames = []; let cur = new Map();
+  for (const e of rec) { if (e.k !== 'frame' || !ids.includes(e.id)) continue; if (cur.has(e.id)) { frames.push(cur); cur = new Map(); } cur.set(e.id, e); }
+  frames.push(cur);
+  let closest = 9;
+  for (const fr of frames) {
+    const v = [...fr.values()].filter(e => e.vis !== false && e.mode === 'walk');
+    for (let i = 0; i < v.length; i++) for (let j = i + 1; j < v.length; j++) closest = Math.min(closest, Math.hypot(v[i].x - v[j].x, v[i].z - v[j].z));
+  }
+  if (closest < 0.12) problems.push(`two sub-agents of the three queues walked ${closest.toFixed(2)} units apart (they walk through each other; want 0.12 or more)`);
+  for (const id of ids) { const l = lists.get(id); if (l) problems.push(...jumps(l)); }
+  problems.push(...(await books(page)), ...(await seated(page)));
+  return { problems, note: `three queues (3, 1 and 1 sub-agents, 0.4 s and 0.3 s apart): left the entrance at least ${f1(gaps.length ? Math.min(...gaps) : 0)} ms apart, the closest two were ${closest.toFixed(2)} units apart, all seated` };
+}
+
 // While the figures walk in, the page is read every 120 ms: the camera, and the doors next to a walking chief (the chief's own door must be open when it is in the doorway).
 async function runLoad(ctx) {
   const problems = [];
@@ -149,7 +192,7 @@ async function runLoad(ctx) {
     const { page } = S;
     if (!S.ready.ok) problems.push('the scene did not become ready');
     const cam0 = await ev(page, '[s.zoom, ...s.project(0, 0, 0)]');
-    let cam = cam0, camMoved = 0, doorSamples = 0, doorOpen = 0, samples = 0;
+    let cam = cam0, camMoved = 0, doorSamples = 0, doorOpen = 0, subDoorSamples = 0, subDoorOpen = 0, samples = 0;
     const t0 = Date.now();
     while (Date.now() - t0 < 120000) {
       const r = await ev(page, '({ walking: s.walking.length, cam: [s.zoom, ...s.project(0, 0, 0)], doors: o.doors(), figs: o.figures().map(f => [f.id, f.main, f.mode, f.x, f.z, f.vis]) })');
@@ -159,6 +202,9 @@ async function runLoad(ctx) {
       for (const d of r.doors) {
         const chief = r.figs.find(f => f[0] === d.id && f[1] && f[2] === 'walk' && f[5]);
         if (chief && Math.abs(chief[3] - d.x) < 0.6 && Math.abs(chief[4] - d.z) < 0.8) { doorSamples++; if (d.open >= 0.3) doorOpen++; }
+        // a sub-agent in a doorway, with no chief near enough to be the one who opened it: the door is open for the sub-agent as well
+        const sub = r.figs.find(f => !f[1] && f[2] === 'walk' && f[5] && Math.abs(f[3] - d.x) < 0.6 && Math.abs(f[4] - d.z) < 0.8);
+        if (sub && !r.figs.some(f => f[1] && f[2] === 'walk' && f[5] && Math.abs(f[3] - d.x) < 1.8 && Math.abs(f[4] - d.z) < 2.0)) { subDoorSamples++; if (d.open >= 0.3) subDoorOpen++; }
       }
       if (!r.walking) break;
       await sleep(120);
@@ -188,12 +234,16 @@ async function runLoad(ctx) {
     if (!(Math.max(...hy) - Math.min(...hy) > 0.02)) problems.push(`the step does not bounce (hip height ${Math.min(...hy)} to ${Math.max(...hy)})`);
     if (doorSamples < 3) problems.push(`only ${doorSamples} readings of a chief in a doorway (nothing to judge the doors by)`);
     else if (doorOpen / doorSamples < 0.9) problems.push(`the door was open in ${doorOpen} of ${doorSamples} readings of the chief in its doorway`);
+    if (subDoorSamples < 3) problems.push(`only ${subDoorSamples} readings of a sub-agent in a doorway (nothing to judge the doors by)`);
+    else if (subDoorOpen / subDoorSamples < 0.9) problems.push(`the door was open in ${subDoorOpen} of ${subDoorSamples} readings of a sub-agent in its doorway`);
     if (camMoved) problems.push(`the camera moved in ${camMoved} of ${samples} readings`);
     problems.push(...(await books(page)), ...(await seated(page)));
+    const q2 = await queues(page);
+    problems.push(...q2.problems);
     if (errorsOf(page).length) problems.push(`console error: ${errorsOf(page)[0].slice(0, 120)}`);
     return [report('3d-walk-load', problems,
       `${all.length} figures (${all.filter(l => l[0].main).length} chiefs) made at the entrance at ${f1(delays[0])} to ${delays[delays.length - 1].toFixed(2)} s, ${f1(Math.min(...gaps) * 1000)} to ${f1(Math.max(...gaps) * 1000)} ms apart, ${hurried} hurried (up to ${Math.max(...Object.values(st.paces)).toFixed(1)} times), `
-      + `all seated after ${lastArrival.toFixed(1)} s of the scene's time (earliest ${Math.min(...arrive).toFixed(1)}), ${all.reduce((n, l) => n + l.length, 0)} events and no jump, ${doorOpen} of ${doorSamples} readings with the chief's door open, step bounce ${f1((Math.max(...hy) - Math.min(...hy)) * 100)} cm, the camera stayed`)];
+      + `all seated after ${lastArrival.toFixed(1)} s of the scene's time (earliest ${Math.min(...arrive).toFixed(1)}), ${all.reduce((n, l) => n + l.length, 0)} events and no jump, ${doorOpen} of ${doorSamples} readings with the chief's door open and ${subDoorOpen} of ${subDoorSamples} with a sub-agent's, step bounce ${f1((Math.max(...hy) - Math.min(...hy)) * 100)} cm, the camera stayed; ${q2.note}`)];
   } finally { await S.done(); }
 }
 
@@ -312,7 +362,7 @@ async function runLeave(ctx) {
     const paces0 = await ev(page, 's.pace');                                                      // (the page load hurried this crowd: they walked in at more than the normal pace)
     if (!mine.some(id => paces0[id] > 1)) problems.push('nobody of the chat was hurried at the page load, so the pace of the walk out proves nothing');
     fx.closeSession(pick.id);
-    let doorSamples = 0, doorOpen = 0;
+    let doorSamples = 0, doorOpen = 0, subSamples = 0, subOpen = 0;
     const t0 = Date.now();
     while (Date.now() - t0 < 120000) {
       const r = await ev(page, '({ doors: o.doors(), figs: o.figures().map(f => [f.id, f.main, f.mode, f.x, f.z]) })');
@@ -320,6 +370,9 @@ async function runLeave(ctx) {
         if (!d.vacant || d.slot !== slotOf(pick.id).slot) continue;
         const chief = r.figs.find(f => f[0] === pick.id && f[2] === 'walk');
         if (chief && Math.abs(chief[3] - d.x) < 0.6 && Math.abs(chief[4] - d.z) < 0.8) { doorSamples++; if (d.open >= 0.3) doorOpen++; }
+        // the sub-agents of the chat walk out through the same door: it is open for them as well (a reading counts when no chief is near enough to be the one who opened it)
+        const sub = r.figs.find(f => f[0] !== pick.id && mine.includes(f[0]) && f[2] === 'walk' && Math.abs(f[3] - d.x) < 0.6 && Math.abs(f[4] - d.z) < 0.8);
+        if (sub && !(chief && Math.abs(chief[3] - d.x) < 1.8 && Math.abs(chief[4] - d.z) < 2.0)) { subSamples++; if (d.open >= 0.3) subOpen++; }
       }
       if (!r.figs.some(f => mine.includes(f[0]))) break;
       await sleep(100);
@@ -348,14 +401,18 @@ async function runLeave(ctx) {
       if (!inRoom(off0, out[0].x, out[0].z)) problems.push(`${short(id)}: it got up outside its room at (${f1(out[0].x)}, ${f1(out[0].z)})`);
     }
     if (!st.office.slots[slotOf(pick.id).slot].vacant) problems.push('the office is not vacant after its chat closed');
-    if (hinged) { if (doorSamples < 2) problems.push(`only ${doorSamples} readings of the chief in the doorway of the vacant office`); else if (doorOpen / doorSamples < 0.9) problems.push(`the door of the vacant office was open in ${doorOpen} of ${doorSamples} readings of the chief in its doorway`); }
+    if (hinged) {
+      if (doorSamples < 2) problems.push(`only ${doorSamples} readings of the chief in the doorway of the vacant office`); else if (doorOpen / doorSamples < 0.9) problems.push(`the door of the vacant office was open in ${doorOpen} of ${doorSamples} readings of the chief in its doorway`);
+      if (subSamples < 2) problems.push(`only ${subSamples} readings of a sub-agent in the doorway of the vacant office`); else if (subOpen / subSamples < 0.9) problems.push(`the door of the vacant office was open in ${subOpen} of ${subSamples} readings of a sub-agent in its doorway`);
+    }
     problems.push(...(await books(page)));
     // a sub-agent that finishes sits for 4.5 s (the check mark), then stands up and walks out
     const other = fx.agents.find(a => a.id !== pick.id), sub = other.subs[0];
     await ev(page, 's.rec.take().length');
     const tFinish = Date.now();
     fx.finishSub(sub.id);
-    // the page clock at the moment the data says it is done (the scene sits it out for 4.5 s of that clock, then it stands up)
+    // the page clock at the moment the data says it is done (the scene sits it out for 4.5 s of that clock, then it stands up: the scene's own record of that moment, `doneAt` in the
+    // recorder, is what the wait is measured from, so that the lag of this poll can't move it)
     let tDone = null;
     await until(async () => {
       const r = await page.evaluate(`(async () => { const { store } = await import('/js/main.js'); const a = store.agents.get(${JSON.stringify(sub.id)}); return a ? { status: a.status, now: performance.now() } : null; })()`);
@@ -367,16 +424,18 @@ async function runLeave(ctx) {
     const st2 = await ev(page, 's.rec.take()');
     const l2 = byId(st2).get(sub.id) || [];
     const out2 = l2.find(e => e.after === 'gone');
-    const seatedFor = out2 && tDone !== null ? (out2.t - tDone) / 1000 : 0;
+    const seatedFor = out2 && out2.doneAt ? (out2.t - out2.doneAt) / 1000 : 0;
     if (!out2) problems.push('the finished sub-agent never walked out');
     else if (!out2.stand) problems.push('the finished sub-agent started walking out without standing up first');
-    else if (seatedFor < 4.3 || seatedFor > 9) problems.push(`the finished sub-agent stood up ${seatedFor.toFixed(1)} s after the data said it was done (want 4.5 s of sitting: 4.3 to 9)`);
+    else if (!out2.doneAt) problems.push('the recorder has no time at which the data said the sub-agent was done');
+    // the frame-clock sweep (step in ofis.js) stands it up within 0.5 s of its 4.5 s plus a frame: without it the sub-agent sits until the next update from the data (8 s was measured)
+    else if (seatedFor < 4.45 || seatedFor > 5.8) problems.push(`the finished sub-agent stood up ${seatedFor.toFixed(2)} s after the data said it was done (want its 4.5 s of sitting plus at most the 0.5 s step of the frame-clock sweep and a frame: 4.45 to 5.8)`);
     if (l2.length && l2.at(-1).k !== 'remove') problems.push('the finished sub-agent was not removed');
     else if (l2.length && !nearAny([off0, st.office], l2.at(-1).x, l2.at(-1).z, 1.3)) problems.push('the finished sub-agent was removed away from the entrance');
     problems.push(...jumps(l2));
     problems.push(...(await books(page)));
     if (errorsOf(page).length) problems.push(`console error: ${errorsOf(page)[0].slice(0, 120)}`);
-    return [report('3d-walk-leave', problems, `the chat closed with its chief and ${pick.subs.length} sub-agents seated: ${stood} of ${mine.length} stood up first (still for 0.25 s or more), walked out and were removed at the entrance with no jump, the vacant office is vacant, ${hinged ? `its door was open in ${doorOpen} of ${doorSamples} readings of the chief in the doorway` : 'its door is an opening'}; a finished sub-agent sat ${seatedFor.toFixed(1)} s after the data said it was done, then stood up, walked out and was removed at the entrance (${((Date.now() - tFinish) / 1000).toFixed(0)} s on the wall clock in all)`)];
+    return [report('3d-walk-leave', problems, `the chat closed with its chief and ${pick.subs.length} sub-agents seated: ${stood} of ${mine.length} stood up first (still for 0.25 s or more), walked out and were removed at the entrance with no jump, the vacant office is vacant, ${hinged ? `its door was open in ${doorOpen} of ${doorSamples} readings of the chief in the doorway and ${subOpen} of ${subSamples} of a sub-agent` : 'its door is an opening'}; a finished sub-agent sat ${seatedFor.toFixed(1)} s after the data said it was done, then stood up, walked out and was removed at the entrance (${((Date.now() - tFinish) / 1000).toFixed(0)} s on the wall clock in all)`)];
   } finally { await S.done(); }
 }
 
@@ -451,7 +510,8 @@ async function runRebuild(ctx) {
     await ev(page, 's.rec.take().length');
     const off0 = await ev(page, 'o.office()');
     await qa(page, `for (let i = 1; i <= 14; i++) { q.chat('g' + i); q.sub('g' + i, 'g' + i + '-sub'); } q.sync();`);
-    await sleep(3000);
+    // the 28 figures leave the entrance 0.35 s apart (a queue that is not hurried keeps its stagger, however long it is): wait until a dozen are drawn and on the way
+    await until(async () => (await ev(page, 'o.figures().filter(f => f.mode === "walk" && f.vis).length')) >= 12, 30000, 150);
     const mid = await ev(page, '({ walking: s.walking.length, builds: o.builds })');
     if (mid.walking < 10) problems.push(`only ${mid.walking} figures were walking when the building grew (want 10 or more)`);
     // while they walk: the 19th chat comes (no new bay) with a sub-agent that still waits its turn at the entrance when the 20th comes 150 ms later and the building grows
@@ -483,6 +543,57 @@ async function runRebuild(ctx) {
     if (st.office.bays <= off0.bays) problems.push(`${st.office.bays} bays (was ${off0.bays}): the building did not grow`);
     if (errorsOf(page).length) problems.push(`console error: ${errorsOf(page)[0].slice(0, 120)}`);
     return [report('3d-walk-rebuild', problems, `${off0.bays} to ${st.office.bays} bays, the entrance moved ${f1(off0.entryX)} to ${f1(grown.office.entryX)} with ${mid.walking} people walking: ${n} figures recorded (${st.figs.length} in the scene at the end, all seated), ${onTheWay.length} of them drawn and on the way when the 20th chat came: none jumped, none was dropped or made twice, all went on to their seats`)];
+  } finally { await S.done(); }
+}
+
+// ---- 3d-walk-growout
+// ?rooms=19 with 19 chats; one of them (a chief and a sub-agent) is taken out of the data and the two stand up and walk out of their vacant office, a long walk. While they are on the
+// way two more chats open: the 20th adds a bay and the entrance moves 14 units. The route of the two was made for the building as it was (it ends at the old entrance), and their
+// office was vacant already at the earlier rebuild, so nothing of it is left but that route: they must walk on to the entrance of the building as it is now and be removed there,
+// not 14 units short of it, in the open and at full size.
+async function runGrowOut(ctx) {
+  const problems = [];
+  const S = await scenario3d(4, { tag: 'wgrowout', root: ctx.root, width: 900, height: 560, query: 'rooms=19', intercept: recordFromStart, fixture: { statuses: ['working', 'working', 'working', 'working'], subs: i => (i === 0 ? ['working'] : []) } });
+  try {
+    const { page } = S;
+    if (!S.ready.ok) problems.push('the scene did not become ready');
+    await page.evaluate(HELPERS);
+    await qa(page, `q.chat('v1'); q.sub('v1', 'v1-sub'); for (let i = 1; i <= 14; i++) q.chat('g' + i); q.sync();`);
+    await ev(page, 's.settle()');
+    await sleep(900);
+    const off0 = await ev(page, 'o.office()');
+    await ev(page, 's.rec.take().length');
+    const leaving = ['v1', 'v1-sub'];
+    await qa(page, `q.remove('v1'); q.sync();`);
+    const up = await until(async () => ev(page, `o.figures().filter(f => ${JSON.stringify(leaving)}.includes(f.id) && f.after === 'gone' && f.mode === 'walk').length === 2`), 20000, 100);
+    if (!up) problems.push('the chief and the sub-agent of the closed chat did not both start to walk out');
+    await sleep(1800);                                                                         // they are on the hall by now, far from the entrance
+    const before = await ev(page, `o.figures().filter(f => ${JSON.stringify(leaving)}.includes(f.id)).map(f => [f.id, f.x, f.z, f.mode, f.after])`);
+    await qa(page, `q.chat('x1'); q.chat('x2'); q.sync();`);
+    const grown = await ev(page, '({ office: o.office(), builds: o.builds })');
+    if (grown.office.entryX <= off0.entryX + 1) problems.push(`the building did not grow to the right (entrance ${f1(off0.entryX)} to ${f1(grown.office.entryX)}): the case was not made`);
+    const onTheWay = before.filter(f => f[3] === 'walk' && f[4] === 'gone');
+    if (onTheWay.length < 2) problems.push(`${onTheWay.length} of the 2 leavers were walking out when the building grew`);
+    if (!(await idle(page))) problems.push('somebody was still walking after 2 minutes');
+    const st = await ev(page, '({ rec: s.rec.take(), office: o.office(), figs: o.figures().map(f => f.id) })');
+    const lists = byId(st.rec);
+    const at = [];
+    for (const id of leaving) {
+      const l = lists.get(id);
+      if (!l) { problems.push(`${id}: not recorded`); continue; }
+      const last = l[l.length - 1];
+      if (last.k !== 'remove') { problems.push(`${id}: never removed (last event ${last.k})`); continue; }
+      at.push(`${short(id)} at ${f1(last.x)}`);
+      if (!near(st.office, last.x, last.z, 1.3)) problems.push(`${short(id)}: removed at (${f1(last.x)}, ${f1(last.z)}), ${f1(st.office.entryX - last.x)} units short of the entrance of the building as it is now (${f1(st.office.entryX)}; it was ${f1(off0.entryX)})`);
+      if (inRoom(st.office, last.x, last.z)) problems.push(`${short(id)}: removed inside a room`);
+      if (last.x < off0.entryX + 2) problems.push(`${short(id)}: removed at the old entrance (${f1(off0.entryX)})`);
+      problems.push(...jumps(l));
+    }
+    if (st.figs.some(id => leaving.includes(id))) problems.push('a leaver is still in the scene');
+    for (const id of ['x1', 'x2']) if (!st.figs.includes(id)) problems.push(`${id} is missing from the scene at the end`);
+    problems.push(...(await books(page)));
+    if (errorsOf(page).length) problems.push(`console error: ${errorsOf(page)[0].slice(0, 120)}`);
+    return [report('3d-walk-growout', problems, `${off0.bays} to ${st.office.bays} bays, the entrance moved ${f1(off0.entryX)} to ${f1(grown.office.entryX)} while the chief and the sub-agent of a closed chat walked out of their vacant office: both went on to the entrance of today and were removed there (${at.join(', ')}), no jump`)];
   } finally { await S.done(); }
 }
 
@@ -538,13 +649,19 @@ async function runFollow(ctx) {
     await ev(page, `o.view(${pick.x}, 0.6, ${pick.z}, 40)`);
     await sleep(250);
     const cam0 = await ev(page, '[s.zoom, ...s.project(0, 0, 0)]');
+    // the free part of the view: the figure is judged only while it is in it. The chief keeps walking, and once it is behind the top bar or off the stage there is no card or label
+    // to compare it with (the card sits against the bottom of the bar): a reading there says nothing about the following, and how many such readings the loop took depended on the
+    // machine's load, which made this check pass or fail by it
+    const free = await ev(page, '(() => { const c = v.__ofisUi.covered(), [w, h] = s.size; return { x0: 20, x1: w - c.right - 20, y0: c.top + 8, y1: h - 20 }; })()');
+    const inFree = at => !!at && at[0] >= free.x0 && at[0] <= free.x1 && at[1] >= free.y0 && at[1] <= free.y1;
+    const figAt = () => ev(page, `(() => { const f = o.figures().find(f => f.id === ${JSON.stringify(chat.id)}); return f ? [f.x, f.z] : null; })()`);
     const tagSel = id => `.of-l.of-tagl[data-id="${id}"]`, ballSel = id => `.of-l.of-ball[data-id="${id}"]`;
     const readLabel = (id, sel) => page.evaluate(`(() => { const e = document.querySelector(${JSON.stringify(sel(id))}); if (!e) return null; const r = e.getBoundingClientRect(), a = document.querySelector('#view-ofis .of-stage').getBoundingClientRect(); return { visible: e.style.visibility === 'visible', x: r.left + r.width / 2 - a.left, y: r.top + r.height / 2 - a.top }; })()`);
     const labels = { tag: 0, tagOk: 0, ball: 0, ballOk: 0 }, camMoved = [];
     let first = null, last = null;
     for (let i = 0; i < 14; i++) {
       const at = await ev(page, `s.charScreen(${JSON.stringify(chat.id)})`), mode = await ev(page, `(o.figures().find(f => f.id === ${JSON.stringify(chat.id)}) || {}).mode`);
-      if (!at || mode !== 'walk') break;
+      if (!at || mode !== 'walk' || !inFree(at)) break;
       first = first || at; last = at;
       const t = await readLabel(chat.id, tagSel), b = await readLabel(chat.id, ballSel);
       if (t) { labels.tag++; if (t.visible && Math.hypot(t.x - at[0], t.y - at[1]) < 200) labels.tagOk++; }
@@ -558,8 +675,14 @@ async function runFollow(ctx) {
     if (labels.ball < 6 || labels.ballOk / labels.ball < 0.9) problems.push(`the balloon stayed above the walking chief in ${labels.ballOk} of ${labels.ball} readings`);
     if (travelled < 40) problems.push(`the chief moved only ${f1(travelled)} px on the screen in the readings (nothing to follow)`);
     if (camMoved.length) problems.push(`the camera moved in ${camMoved.length} readings`);
-    // hover: the tooltip of the agent appears on a walking figure; click: the card opens beside it and follows it
-    await ev(page, `o.view(${pick.x}, 0.6, ${pick.z}, 40)`);
+    // hover: the tooltip of the agent appears on a walking figure; click: the card opens beside it and follows it. The camera goes 5 units ahead of the chief on its way (two readings
+    // of its place tell the way), so that it walks through the middle of the view while the card is open
+    const a0 = await figAt();
+    await sleep(300);
+    const a1 = await figAt();
+    let lead = a1 || [pick.x, pick.z];
+    if (a0 && a1) { const dx = a1[0] - a0[0], dz = a1[1] - a0[1], d = Math.hypot(dx, dz); if (d > 0.05) lead = [a1[0] + dx / d * 5, a1[1] + dz / d * 5]; }
+    await ev(page, `o.view(${lead[0]}, 0.6, ${lead[1]}, 40)`);
     const target = await until(async () => {
       const m = await ev(page, `(() => { const f = o.figures().find(f => f.id === ${JSON.stringify(chat.id)}); return f && f.mode === 'walk' ? s.charScreen(f.id) : null; })()`);
       return m;
@@ -587,7 +710,7 @@ async function runFollow(ctx) {
       await sleep(450);                                                  // (the card comes in with a short scale: measure it once it has settled)
       for (let i = 0; i < 14; i++) {
         const { c, at } = await ev(page, `({ c: v.__ofisUi.card, at: s.charScreen(${JSON.stringify(chat.id)}) })`);       // one reading: no frame comes between the card and the figure
-        if (!c.open || !at) break;
+        if (!c.open || !at || !inFree(at)) break;
         rel.push([c.rect.x - at[0], at[1] - c.rect.y, c.rect.h]); fig.push(at);
         await sleep(160);
       }
@@ -679,14 +802,14 @@ async function runReduced(ctx) {
   } finally { await S.done(); }
 }
 
-const CHECKS = { load: runLoad, calm: runCalm, brief: runBrief, leave: runLeave, flap: runFlap, rebuild: runRebuild, hidden: runHidden, follow: runFollow, settle: runSettle, reduced: runReduced };
-const NAME = { load: '3d-walk-load', calm: '3d-walk-calm', brief: '3d-walk-brief', leave: '3d-walk-leave', flap: '3d-walk-flap', rebuild: '3d-walk-rebuild', hidden: '3d-walk-hidden', follow: '3d-walk-follow', settle: '3d-walk-settle', reduced: '3d-walk-reduced' };
+const CHECKS = { load: runLoad, calm: runCalm, brief: runBrief, leave: runLeave, flap: runFlap, rebuild: runRebuild, growout: runGrowOut, hidden: runHidden, follow: runFollow, settle: runSettle, reduced: runReduced };
+const NAME = { load: '3d-walk-load', calm: '3d-walk-calm', brief: '3d-walk-brief', leave: '3d-walk-leave', flap: '3d-walk-flap', rebuild: '3d-walk-rebuild', growout: '3d-walk-growout', hidden: '3d-walk-hidden', follow: '3d-walk-follow', settle: '3d-walk-settle', reduced: '3d-walk-reduced' };
 
 // ---- mutations: break one line in a copy of the repo and expect the check that guards it to fail
 const MUTATIONS = [
   { name: 'a figure is made at its seat instead of at the entrance', file: 'public/js/ofis.js', from: 'c.root.position.set(route[0].x, 0, route[0].z);', to: 'c.root.position.set(route[route.length - 1].x, 0, route[route.length - 1].z);', fails: ['load', 'brief'] },
   { name: 'a figure that waits for its turn is drawn at the entrance', file: 'public/js/ofis.js', from: 'c.root.visible = c.delay <= 0;', to: 'c.root.visible = true;', fails: 'load' },
-  { name: 'the figures all leave the entrance at once', file: 'public/js/ofis-arrive.js', from: 'const delay = rank * st;', to: 'const delay = 0;', fails: 'load' },
+  { name: 'the figures all leave the entrance at once', file: 'public/js/ofis-arrive.js', from: '(_, rank) => Math.max(0, start) + rank * st);', to: '(_, rank) => 0);', fails: 'load' },
   { name: 'a big queue is not hurried', file: 'public/js/ofis-arrive.js', from: 'if (rush && n > calm) {', to: 'if (false && n > calm) {', fails: 'load' },
   { name: 'the walk is faster than its pace', file: 'public/js/ofis-arrive.js', from: 'const stp = speed * pace * rampFactor', to: 'const stp = speed * pace * 2.2 * rampFactor', fails: 'load' },
   { name: 'the door does not open for the chief', file: 'public/js/ofis.js', from: "if (c.mode !== 'walk' || c.delay > 0) continue;", to: "if (c.mode !== 'walk' || c.delay > 0 || c.main) continue;", fails: 'load' },
@@ -704,10 +827,17 @@ const MUTATIONS = [
   { name: 'the name label stays where the figure was made', file: 'public/js/ofis.js', from: '    c.tag.pos.set(pos.x, 0, pos.z);\n    if (c.pk) applyPack(c);', to: "    if (c.mode !== 'walk') c.tag.pos.set(pos.x, 0, pos.z);\n    if (c.pk) applyPack(c);", fails: 'follow' },
   { name: 'the card is not placed again after each frame', file: 'public/js/ofis.js', from: "        placeLabels();\n        ui.card.place();", to: "        placeLabels();", fails: 'follow' },
   { name: 'a walk out keeps the pace of the page load', file: 'public/js/ofis.js', from: "if (after === 'gone') c.pace = 1;", to: "", fails: 'leave' },
+  { name: 'a walk out of a vacated office is made for the old entrance', file: 'public/js/ofis.js', from: "else if (c.route) path = repath(c.route = rebaseRoute(c.route, c.cell), pos, 'entrance');", to: "else if (c.route) path = repath(c.route, pos, 'entrance');", fails: 'growout' },
+  { name: 'a sub-agent ends 0.8 units from its chair', file: 'public/js/ofis.js', from: 'p.push(V(s.aisle, s.z), s.seat.clone());', to: 'p.push(V(s.aisle, s.z), s.seat.clone().add(V(0.8, 0, 0)));', fails: 'load' },
+  { name: 'a chief ends 0.8 units from its chair', file: 'public/js/ofis.js', from: 'p.push(V(ax, seat.z), seat.clone());', to: 'p.push(V(ax, seat.z), seat.clone().add(V(0.8, 0, 0)));', fails: 'load' },
+  { name: 'a figure comes into view 6 units inside the hall when its turn comes', file: 'public/js/ofis.js', from: 'if (c.delay <= 0) { c.delay = 0; c.root.visible = true; lastRelease = sceneT; }', to: 'if (c.delay <= 0) { c.delay = 0; c.root.visible = true; lastRelease = sceneT; pos.x -= 6; }', fails: 'load' },
+  { name: 'the door does not open for a sub-agent', file: 'public/js/ofis.js', from: "if (c.mode !== 'walk' || c.delay > 0) continue;", to: "if (c.mode !== 'walk' || c.delay > 0 || !c.main) continue;", fails: ['load', 'leave'] },
+  { name: 'the frame-clock sweep of finished sub-agents is gone', file: 'public/js/ofis.js', from: 'if (T - lastDoneSweep > 0.5) {', to: 'if (false && T - lastDoneSweep > 0.5) {', fails: 'leave' },
+  { name: 'the entrance clock is ignored: a later queue starts at once', file: 'public/js/ofis.js', from: 'start: entranceFreeIn() });', to: 'start: 0 });', fails: 'load' },
   { name: 'settle does nothing', file: 'public/js/ofis.js', from: '        n++;\n        finishWalk(c);', to: '        n++;', fails: 'settle' },
   { name: 'the app calls settle', file: 'public/js/ofis.js', from: "    if (born.length) {\n      for (const b of born)", to: "    if (born.length) {\n      setTimeout(() => root.__ofis.settle(), 60000);\n      for (const b of born)", fails: 'settle' },
   { name: 'reduced motion keeps the bounce of the step', file: 'public/js/ofis.js', from: "pose === 'walk' && !atmosphere.state.reducedMotion ?", to: "pose === 'walk' ?", fails: 'reduced' },
-  { name: '?arrive=calm is ignored', file: 'public/js/ofis.js', from: "{ rush: instant && !CALM_LOAD }", to: "{ rush: instant }", fails: 'calm' },
+  { name: '?arrive=calm is ignored', file: 'public/js/ofis.js', from: "{ rush: instant && !CALM_LOAD,", to: "{ rush: instant,", fails: 'calm' },
 ];
 
 async function runMutations() {

@@ -251,6 +251,7 @@ const MUTATIONS = [
   { name: 'the fit frames the box around the whole plan, not the footprint', file: 'public/js/ofis.js', from: 'for (const r of [...(world.footprint || [b]), ...(world.lots || [])])', to: 'for (const r of [b, ...(world.lots || [])])', group: 'fit', fails: '3d-fit' },
   { name: 'one plinth around the whole plan: the corners between the arms are paved and framed', file: 'public/js/ofis-layout.js', from: '  const bounds = { x0: Infinity, x1: -Infinity, z0: Infinity, z1: -Infinity };', to: '  { const rs = plinth.splice(0); plinth.push({ x0: Math.min(...rs.map(r => r.x0)), x1: Math.max(...rs.map(r => r.x1)), z0: Math.min(...rs.map(r => r.z0)), z1: Math.max(...rs.map(r => r.z1)), hall: 0 }); }\n  const bounds = { x0: Infinity, x1: -Infinity, z0: Infinity, z1: -Infinity };', group: 'fit', fails: '3d-fit' },
   { name: 'the walk starts beside the lane instead of on it', file: 'public/js/ofis.js', from: 'const p = [V(world.entryX, lane), V(room.doorX, lane)];', to: 'const p = [V(world.entryX, lane + 2.2), V(room.doorX, lane)];', group: 'walk', fails: '3d-walk' },
+  { name: 'a sub-agent ends 0.8 units from its desk', file: 'public/js/ofis.js', from: 'p.push(V(s.aisle, s.z), s.seat.clone());', to: 'p.push(V(s.aisle, s.z), s.seat.clone().add(V(0.8, 0, 0)));', group: 'walk', fails: '3d-walk' },
   { name: 'the arms have no path to the street', file: 'public/js/ofis.js', from: 'if (px1 - px0 > 0.1) {', to: 'if (false && px1 - px0 > 0.1) {', group: 'walk', fails: '3d-walk' },
 ];
 
@@ -528,7 +529,7 @@ async function runFit(ctx) {
 // ---- 3d-walk: a sub-agent in the bar, the north arm and the south arm walks in from the street side. The page opens with 10 chats and everybody in the data walks in; the scene's
 // recorder (s.rec, started the moment the scene exists: recordFromStart) has every frame of every figure. The first position of the figure is at the entrance on the hall's lane,
 // until the door it stays on the lane, every position is on paved ground (the plinth under the building or the path from an arm's hall to the street, o.office().stubs), and it
-// ends seated on the desk its route leads to (inside its room). It runs in the X and in a building that has grown past the hexagon (?rooms=21: the bar has a fifth bay, so the
+// ends seated on its desk as the room has it (o.deskOf, not the end of the figure's own route; inside its room). It runs in the X and in a building that has grown past the hexagon (?rooms=21: the bar has a fifth bay, so the
 // entrance has moved and the arms' paths are longer). (Until the walkers' work it replayed a seated sub-agent's walk; now it watches the real one, from the page load.)
 async function runWalk(ctx) {
   const problems = [], notes = [];
@@ -539,7 +540,7 @@ async function runWalk(ctx) {
     if (!S.ready.ok) problems.push(`${which}: the scene did not become ready`);
     const t0 = Date.now();
     while (Date.now() - t0 < 90000 && (await page.evaluate(o3('s.walking.length'))) > 0) await sleep(250);
-    const info = await page.evaluate(o3('({ office: o.office(), foot: o.footprint(), subs: s.subs(), seats: Object.fromEntries(o.figures().map(f => [f.id, o.seatOf(f.id)])), rec: s.rec.take() })'));
+    const info = await page.evaluate(o3('({ office: o.office(), foot: o.footprint(), subs: s.subs(), seats: Object.fromEntries(o.figures().map(f => [f.id, o.deskOf(f.id)])), rec: s.rec.take() })'));
     const hallOf = new Map(info.office.slots.filter(r => r.id).map(r => [r.id, r.hall]));
     const pick = [];
     for (let h = 0; h < info.office.halls.length; h++) { const c = info.subs.find(x => hallOf.get(x.room) === h); if (c) pick.push({ id: c.id, hall: h, room: c.room }); else problems.push(`${which}: no sub-agent in hall ${h} (the bar and the two arms each have a chat with one)`); }

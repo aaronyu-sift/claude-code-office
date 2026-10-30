@@ -2,7 +2,8 @@
 // ofis.js draws what this file decides. Nobody in the scene appears or vanishes inside a room: a figure is made at the building entrance, walks in, sits, and
 // when its job ends it stands up and walks the way it came, to be removed at the entrance again. Points are plain { x, z } (a THREE.Vector3 fits).
 //
-//   arrivalPlan(lengths, opts)    when each figure of a queue leaves the entrance (delay) and how fast it walks (pace): the stagger, and the speed-up of a big queue
+//   arrivalPlan(lengths, opts)    when each figure of a queue leaves the entrance (delay) and how fast it walks (pace): the stagger, the speed-up of a big queue, a start that
+//                                 carries the queue of an earlier pass on (the entrance clock), and no figure faster than the ones that left before it (nobody overtakes)
 //   stepWalk(w, dt, opts)         one frame along a path: constant speed (WALK x pace) with a short speed-up and slow-down at the two ends of the path
 //   turnBack(path, pi, pos)       the way back along the points a walk has passed: a brief job that ends before the desk turns around where it stands
 //   repath(route, pos, toward)    a path from where a figure stands to the end of a route ('seat') or to its start ('entrance'), joined at the nearest point of it:
@@ -11,7 +12,8 @@
 
 export const WALK = 2.2;                 // units per second at pace 1 (about 1 unit to the metre)
 export const STAGGER_S = 0.35;           // time between two figures leaving the entrance
-export const SPREAD_MAX_S = 4;           // a big queue is released within this long (the stagger shrinks), so that the last one still has time to walk
+export const SPREAD_MAX_S = 4;           // a big hurried queue is released within this long (the stagger shrinks), so that the last one still has time to walk
+export const MIN_STAGGER_S = 0.25;       // ...but never closer than this: a hurried queue of 40 is released over 10 s, because figures that leave the entrance 0.05 s apart walk through each other
 export const LOAD_BUDGET_S = 10;         // a page load: everybody who is in the data is in their seat within about this long
 export const CALM_QUEUE = 4;             // up to this many in a queue walk at pace 1; more are sped up when the budget asks for it
 export const PACE_MAX = 3;               // the fastest a crowd is hurried: 6.6 units per second
@@ -55,25 +57,30 @@ export function etaSeconds(len, pace = 1, speed = WALK) {
 }
 
 // A queue of figures that are all to come in now (a page load, a scene switch, a burst of sub-agents): `lengths` are the lengths of their walks, in any order.
-// The longest walks leave first, so that the nearest rooms are the last to be reached and everybody arrives at about the same time; each leaves STAGGER_S after
-// the one before (a queue of more than SPREAD_MAX_S / STAGGER_S figures is released within SPREAD_MAX_S). With `rush` and more than CALM_QUEUE figures every
-// walk that would not be over within `budget` seconds is sped up (at most PACE_MAX); without it everybody walks at pace 1, however many they are.
+// The longest walks leave first, so that the nearest rooms are the last to be reached and everybody arrives at about the same time; each leaves STAGGER_S after the one before.
+// With `rush` and more than CALM_QUEUE figures every walk that would not be over within `budget` seconds is sped up (at most PACE_MAX), and a queue of more than
+// SPREAD_MAX_S / STAGGER_S figures is released within SPREAD_MAX_S (the stagger shrinks, but never below MIN_STAGGER_S); without `rush` everybody walks at pace 1 and leaves
+// STAGGER_S after the one before, however many they are. `start` is when the first leaves (0: now): the entrance clock of ofis.js passes the time at which the entrance is free
+// again, so that a second queue (the sub-agents that come in the next poll) does not leave together with the first.
+// The figures of a queue share the hall, so none is faster than the ones that left before it: it would catch up and walk through them. Each walks at the fastest pace
+// that it or any figure after it needs (a longer walk with an earlier start never needs less), so everybody still makes the budget.
 // Returns { delay, pace } for each figure, in the order of `lengths`.
-export function arrivalPlan(lengths, { rush = false, budget = LOAD_BUDGET_S, stagger = STAGGER_S, spread = SPREAD_MAX_S, speed = WALK, paceMax = PACE_MAX, calm = CALM_QUEUE } = {}) {
+export function arrivalPlan(lengths, { rush = false, budget = LOAD_BUDGET_S, stagger = STAGGER_S, spread = SPREAD_MAX_S, minStagger = MIN_STAGGER_S, speed = WALK, paceMax = PACE_MAX, calm = CALM_QUEUE, start = 0 } = {}) {
   const n = lengths.length;
-  const st = n > 1 ? Math.min(stagger, spread / (n - 1)) : 0;
+  const st = n > 1 ? (rush ? Math.max(Math.min(stagger, minStagger), Math.min(stagger, spread / (n - 1))) : stagger) : 0;
   const order = lengths.map((_, i) => i).sort((a, b) => lengths[b] - lengths[a] || a - b);
-  const out = new Array(n);
-  order.forEach((i, rank) => {
-    const delay = rank * st;
-    let pace = 1;
+  const delay = order.map((_, rank) => Math.max(0, start) + rank * st);
+  const pace = order.map((i, rank) => {
+    let p = 1;
     if (rush && n > calm) {
-      const room = Math.max(budget - delay, 1);
-      pace = 1;
-      for (let k = 0; k < 24 && pace < paceMax && etaSeconds(lengths[i], pace, speed) > room; k++) pace = Math.min(paceMax, pace * 1.1);
+      const room = Math.max(budget - delay[rank], 1);
+      for (let k = 0; k < 24 && p < paceMax && etaSeconds(lengths[i], p, speed) > room; k++) p = Math.min(paceMax, p * 1.1);
     }
-    out[i] = { delay: +delay.toFixed(4), pace: +pace.toFixed(3) };
+    return p;
   });
+  for (let r = n - 2; r >= 0; r--) pace[r] = Math.max(pace[r], pace[r + 1]);        // nobody overtakes
+  const out = new Array(n);
+  order.forEach((i, rank) => { out[i] = { delay: +delay[rank].toFixed(4), pace: +pace[rank].toFixed(3) }; });
   return out;
 }
 
