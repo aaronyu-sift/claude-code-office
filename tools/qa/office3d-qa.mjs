@@ -230,8 +230,9 @@ const MUTATIONS = [
   // the stable layout: each of these breaks one rule of public/js/ofis-layout.js or of the way ofis.js draws it
   { name: 'slots are not sticky: every chat is handed a slot again on every update', file: 'public/js/ofis-layout.js', from: 'const fresh = chats.filter(c => !slotOf.has(c.id))', to: 'const fresh = chats.filter(() => true)', group: 'stable', fails: ['3d-stable-layout', '3d-expand'] },
   { name: 'an added bay recentres the building: every office shifts with the number of bays', file: 'public/js/ofis-layout.js', from: 'x0 = mm(c * PITCH), x1 = mm(x0 + CELL_W);', to: 'x0 = mm((c + bays * 0.01) * PITCH), x1 = mm(x0 + CELL_W);', group: 'stable', fails: '3d-expand' },
-  { name: 'the hub is given to a chat: slots do not skip it', file: 'public/js/ofis-layout.js', from: 'export const siteOfSlot = s => (s < LOUNGE_SITE ? s : s + 1);', to: 'export const siteOfSlot = s => s;', group: 'stable', fails: ['3d-stable-layout', '3d-expand'] },
-  { name: 'a hall that gains a bay moves its lane', file: 'public/js/ofis-layout.js', from: 'h.x0 = Math.min(h.x0, x0); h.x1 = Math.max(h.x1, x1); h.bays++;', to: 'h.x0 = Math.min(h.x0, x0); h.x1 = Math.max(h.x1, x1); h.bays++; h.lane = mm(h.lane + 0.01 * h.bays);', group: 'stable', fails: ['3d-stable-layout', '3d-expand'] },
+  { name: 'slots do not skip the hub: the bays a slot needs are counted without it', file: 'public/js/ofis-layout.js', from: 'export const siteOfSlot = s => (s < LOUNGE_SITE ? s : s + 1);', to: 'export const siteOfSlot = s => s;', group: 'stable', fails: '3d-expand' },
+  { name: 'the hub is an office with a chat slot like the others', file: 'public/js/ofis-layout.js', from: "    if (c.site === LOUNGE_SITE) lounge = { ...c, slot: -1, lounge: true };\n    else cells.push({ ...c, slot: cells.length });", to: "    cells.push({ ...c, slot: cells.length });", group: 'stable', fails: ['3d-stable-layout', '3d-expand'] },
+  { name: 'a hall that gains a bay moves its lane', file: 'public/js/ofis-layout.js', from: 'h.x0 = Math.min(h.x0, x0); h.x1 = Math.max(h.x1, x1); h.bays++;', to: 'h.x0 = Math.min(h.x0, x0); h.x1 = Math.max(h.x1, x1); h.bays++; h.lane = mm(h.lane + 0.01 * h.bays);', group: 'stable', fails: '3d-expand' },
   { name: 'the camera refits at every rebuild, not only when the building changed', file: 'public/js/ofis.js', from: 'const changed = key !== fitKey;', to: 'const changed = true;', group: 'stable', fails: ['3d-stable-layout', '3d-expand'] },
   { name: 'a room is built for 3 desks: the fourth sub-agent changes it', file: 'public/js/ofis-layout.js', from: 'export const BASE_CLS = 1;', to: 'export const BASE_CLS = 0;', group: 'stable', fails: '3d-stable-layout' },
   // the vacant office: cheap, so the building stays light while few chats are open
@@ -484,7 +485,7 @@ async function runFit(ctx) {
       const tag = `${w}x${h} with ${n} chats`;
       if (!S.ready.ok) problems.push(`${tag}: the scene did not become ready`);
       if (!m.autoFit) problems.push(`${tag}: the view is not the automatic fit`);
-      if (gain < FIT_GAIN) problems.push(`${tag}: fit zoom ${m.zoom} is ${((gain - 1) * 100).toFixed(0)} percent above the two rows' ${old.zoom} (need ${((FIT_GAIN - 1) * 100).toFixed(0)})`);
+      if (gain < FIT_GAIN) problems.push(`${tag}: fit zoom ${m.zoom} against ${old.zoom} for the two rows is ${gain >= 1 ? '+' : ''}${((gain - 1) * 100).toFixed(0)} percent (need +${((FIT_GAIN - 1) * 100).toFixed(0)})`);
       if (n === 3 && m.footShare < FOOT_SHARE) problems.push(`${tag}: the building covers ${(m.footShare * 100).toFixed(0)} percent of the window (need ${FOOT_SHARE * 100})`);
       if (n === 10 && m.footShare < old.foot * FOOT_GAIN_SHELF) problems.push(`${tag}: the building covers ${(m.footShare * 100).toFixed(0)} percent of the window, two rows covered ${(old.foot * 100).toFixed(0)} (need ${FOOT_GAIN_SHELF} times)`);
       if (m.fill < FILL_MIN) problems.push(`${tag}: the building fills ${(m.fill * 100).toFixed(0)} percent of its box (need ${FILL_MIN * 100})`);

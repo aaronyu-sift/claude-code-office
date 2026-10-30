@@ -234,7 +234,9 @@ if (want('card')) {
     await T.settle();
     const cB = await T.card(), aB = bOpen ? await around(B.agent.id, cB) : null;
     if (!bOpen || cB.id !== B.agent.id || aB.covers) bad.push('a click on another agent did not open its card beside it');
-    const aOpen = await T.openAgent(A.agent.id);                          // with B's card open: the card moves to A
+    // with B's card open: the card moves to another agent that B's card does not cover (the card is 344 px wide: in the X the neighbours of B can lie under it)
+    let aOpen = null;
+    for (const a of mains) { if (a.id === B.agent.id) continue; aOpen = await T.openAgent(a.id); if (aOpen) break; }
     if (!aOpen) bad.push('a click on an agent while another card is open did not move the card to it');
     // the labels are laid out around the card (none under it), so they move when it closes: read the label once the card is gone and the label has stopped moving
     await T.closeCard();
@@ -255,6 +257,7 @@ if (want('card')) {
     } else bad.push('no label of the second agent is shown');
 
     // 4. the Open button and its menu are the pixel scene's (the card is the same module): Esc closes the menu first and then the card
+    await T.closeCard();
     if (!(await T.openAgent(A.agent.id))) bad.push('could not open the card again');
     const caret = await T.centre('.of-card .oc-caret');
     await S.page.mouse.click(caret.x, caret.y); await sleep(250);
