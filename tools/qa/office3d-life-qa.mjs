@@ -240,7 +240,7 @@ const MUTATIONS = [
   { name: 'the flicker is three times as strong', file: L, from: 'candle: 0.07', to: 'candle: 0.3', scenes: ['night'] },
   { name: 'the flicker never moves', file: L, from: 'if (reduced) return 1;', to: 'if (true) return 1;', scenes: ['night'] },
   { name: 'every lamp is its own mesh: 40 more draw calls', file: D, from: "      out.lights = lights;\n", to: "      out.lights = lights;\n      for (let i = 0; i < 40; i++) g.add(new THREE.Mesh(new THREE.BoxGeometry(0.01, 0.01, 0.01), new THREE.MeshBasicMaterial()));\n", scenes: ['day'] },
-  { name: 'a vacant office has its lamps and windows lit at night', file: 'public/js/ofis-presence.js', from: 'out.set(r.slot, inside || (r.owner !== null && st.entered));', to: 'out.set(r.slot, true);', scenes: ['night'] },
+  { name: 'a vacant office has its lamps and windows lit at night', file: 'public/js/ofis-presence.js', from: 'out.set(r.slot, st.lit);', to: 'out.set(r.slot, true);', scenes: ['night'] },
   { name: 'a vacant office has no lamp: it is furnished without its lights', file: D, from: "      for (const l of plan.lights) build.lights.push(", to: "      for (const l of plan.lights.filter(l => roomId.startsWith('vacant') ? l.kind === 'screen' : true)) build.lights.push(", scenes: ['night'] },
 ];
 

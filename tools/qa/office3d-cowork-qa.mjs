@@ -14,7 +14,8 @@
 //   3d-cowork-slot          the look and the furniture are the slot's: a slot read vacant, with a chat and vacant again is the same room (the plan's hash, its triangles, its look);
 //                           its light follows the people (public/js/ofis-presence.js): exactly 0 (and the switch thrown to 0) while it is vacant and while a chat has taken it but its chief is
 //                           not through the door yet, then it eases to 1 from the moment the chief is inside (never back down), stays exactly 1 while the chief walks out of the vacant
-//                           office after its chat has closed, and eases to 0 once the chief is out of the door (never back up): vacant == occupied furniture, the lights the only difference.
+//                           office after its chat has closed, stays 1 for the hold (1 s of the scene's clock, read on that clock) after the chief is out of the door and then eases to 0 (never back up): vacant == occupied
+//                           furniture, the lights the only difference.
 //                           The page never times the ease: that is test/ofis-decor-light.test.mjs (a clock it controls: strictly between 0 and 1 on the way, 200 ms, ease-out coming on,
 //                           ease-in going off, a step with reduced motion), which --mutations runs against an instant switch and a switch that never moves; the rule itself is
 //                           test/ofis-presence.test.mjs, and tools/qa/office3d-walk-qa.mjs 3d-walk-lights reads it against every person of the scene
@@ -29,6 +30,7 @@ import { buildingPlan } from '../../public/js/ofis-layout.js';
 import { neighbourSlots, STYLE_IDS } from '../../public/js/ofis-styles.js';
 import { WORK_IDS, SOFT_IDS } from '../../public/js/ofis-arrange.js';
 import { distToPoly } from '../../public/js/ofis-geom.js';
+import { LIGHT_HOLD_S } from '../../public/js/ofis-presence.js';
 
 const args = process.argv.slice(2);
 const val = f => { const i = args.indexOf('--' + f); return i >= 0 ? args[i + 1] : undefined; };
@@ -274,7 +276,7 @@ async function runSlot(ctx) {
       if (id !== window.__litRun) return;
       const r = o.office().slots.find(q => q.slot === 3), f = o.figures().find(q => q.id === ${JSON.stringify(chat)});
       const at = f && r ? (f.x > r.X + 0.1 && f.x < r.X + r.W - 0.1 && f.z > r.Z + 0.1 && f.z < r.Z + r.D - 0.1 ? 'in' : f.x < r.X - 0.1 || f.x > r.X + r.W + 0.1 || f.z < r.Z - 0.1 || f.z > r.Z + r.D + 0.1 ? 'out' : 'edge') : 'none';
-      window.__lit.push([Math.round(performance.now() - t0), o.lit(3), o.litTarget(3), at, f ? f.mode : null]);
+      window.__lit.push([Math.round(performance.now() - t0), o.lit(3), o.litTarget(3), at, f ? f.mode : null, s.sceneTime]);
       if (performance.now() - t0 < 170000) setTimeout(tick, 25); }; tick(); return 1; })()`));
     const p = [];
     const s3 = await settle(3, st => st.looks.length >= 11).then(() => settleLights());
@@ -318,7 +320,7 @@ async function runSlot(ctx) {
     if (lv[0] !== 0 || lv[lv.length - 1] !== 1) p.push(`the light of slot 3 went ${lv[0]} -> ${lv[lv.length - 1]} (want 0 -> 1)`);
     if (down) p.push(`the light of slot 3 went down ${down} times while it came on`);
 
-    // the chat leaves: its office is vacant again, the same room; the chief stands up and walks out, the light stays exactly 1 while the chief is inside and goes down once it is out of the door
+    // the chat leaves: its office is vacant again, the same room; the chief stands up and walks out, the light stays exactly 1 while the chief is inside and for the hold after it is out of the door, then goes down
     const agent = fx.agents[3];
     await sample(agent.id);
     fx.closeSession(agent.id);
@@ -330,7 +332,7 @@ async function runSlot(ctx) {
     same(o1, v2, 'the chat leaves slot 3');
     same(v1, v2, 'slot 3 vacant before and after its chat');
     if (!v2 || !v2.vacant || v2.lit !== 0) p.push(`slot 3 vacant again has its light at ${v2 && v2.lit} (want 0)`);
-    let up2 = 0; for (let i = 1; i < down2.length; i++) if (down2[i] > down2[i - 1] + 1e-9) up2++;
+    let up2 = 0, heldN = 0; for (let i = 1; i < down2.length; i++) if (down2[i] > down2[i - 1] + 1e-9) up2++;
     if (down2[0] !== 1 || down2[down2.length - 1] !== 0) p.push(`the light of slot 3 went ${down2[0]} -> ${down2[down2.length - 1]} when its chat left (want 1 -> 0)`);
     if (up2) p.push(`the light of slot 3 went up ${up2} times while it went off`);
     const inside2 = down2s.filter(x => x[3] === 'in'), firstOut = down2s.findIndex(x => x[3] === 'out'), walked = inside2.filter(x => x[4] === 'walk');
@@ -338,11 +340,20 @@ async function runSlot(ctx) {
     const dimmed = inside2.filter(x => x[1] !== 1 || x[2] !== 1);
     if (dimmed.length) p.push(`the light of slot 3 was ${dimmed[0][1]} (switch thrown to ${dimmed[0][2]}) while the chief of the closed chat was still inside it, ${dimmed.length} of ${inside2.length} readings`);
     if (firstOut < 0) p.push('the chief of the closed chat was never read outside the office');
-    else if (down2s.slice(firstOut + 1).some(x => x[3] === 'out' && x[2] !== 0)) p.push('the switch of slot 3 was still on after the chief was out of the door');
+    else {
+      // the light is held for LIGHT_HOLD_S of the scene's clock after the last person is out of the box (ofis-presence.js), read on that clock (the readings carry it): the switch is still on
+      // while the chief has been out of the strict inside for less than the hold, and thrown off once it has been out of the box for the hold and a frame (a frame is 0.1 s at most)
+      const edge = down2s.findIndex(x => x[3] === 'edge' || x[3] === 'out'), tEdge = down2s[edge][5], tOut = down2s[firstOut][5];
+      const held = down2s.slice(edge).filter(x => x[5] - tEdge < LIGHT_HOLD_S - 1e-6), early = held.filter(x => x[2] !== 1), late = down2s.slice(firstOut).filter(x => x[3] === 'out' && x[5] - tOut >= LIGHT_HOLD_S + 0.2 && x[2] !== 0);
+      heldN = held.length;
+      if (held.length < 10) p.push(`only ${held.length} readings of the hold (a ${LIGHT_HOLD_S} s hold of the scene's clock after the chief left the strict inside)`);
+      if (early.length) p.push(`the switch of slot 3 was thrown off ${(early[0][5] - tEdge).toFixed(2)} s after the chief left the inside (the hold is ${LIGHT_HOLD_S} s), ${early.length} of ${held.length} readings`);
+      if (late.length) p.push(`the switch of slot 3 was still on ${(late[0][5] - tOut).toFixed(2)} s after the chief was out of the door (the hold is ${LIGHT_HOLD_S} s), ${late.length} readings`);
+    }
     const errs = errorsOf(page);
     if (errs.length) p.push(`console errors: ${errs[0].slice(0, 120)}`);
     res.push(make('3d-cowork-slot', S.ready.ok && p.length === 0,
-      `slot 3 read vacant, with a chat, vacant again: the same furniture (${v1 && v1.items} items, hash ${v1 && v1.sig}, ${v1 && Math.round(v1.tris)} triangles) and look (${v1 && v1.style}, ${v1 && v1.work}, ${v1 && v1.soft}) each time; its light stayed 0 while the chief of its chat was outside the door (${outside.length} readings), came on 0 -> 1 once the chief was inside (${lv.length} readings, never back down, settled at 1), stayed 1 for ${inside2.length} readings of the chief inside the vacant office after the chat left and went 1 -> 0 (${down2.length} readings, never back up, settled at 0); at 3 chats every vacant office is dark and every office with a chat is lit`
+      `slot 3 read vacant, with a chat, vacant again: the same furniture (${v1 && v1.items} items, hash ${v1 && v1.sig}, ${v1 && Math.round(v1.tris)} triangles) and look (${v1 && v1.style}, ${v1 && v1.work}, ${v1 && v1.soft}) each time; its light stayed 0 while the chief of its chat was outside the door (${outside.length} readings), came on 0 -> 1 once the chief was inside (${lv.length} readings, never back down, settled at 1), stayed 1 for ${inside2.length} readings of the chief inside the vacant office after the chat left, stayed 1 for the hold of ${LIGHT_HOLD_S} s of the scene's clock after the chief left the inside (${heldN} readings, and off by ${LIGHT_HOLD_S} s and a frame after it was out of the door) and went 1 -> 0 (${down2.length} readings, never back up, settled at 0); at 3 chats every vacant office is dark and every office with a chat is lit`
       + (p.length ? '; PROBLEMS: ' + p.slice(0, 4).join(' | ') + (p.length > 4 ? ` (and ${p.length - 4} more)` : '') : '')));
   } finally { await S.done(); }
   return res;
@@ -361,12 +372,14 @@ const MUTATIONS = [
   { name: 'every seat is as high as the old office chair', file: 'public/js/ofis.js', from: '(c.seat && c.seat.hip) || PK_SEAT', to: 'PK_SEAT', group: 'seats', fails: '3d-cowork-seats' },
   { name: 'the look follows the chat\'s folder, not the slot', file: 'public/js/ofis.js', from: 'const look = world.looks.get(it.slot);', to: 'const look = world.looks.get(it.vacant ? it.slot : hash(store.agents.get(it.id).project) % world.looks.size);', group: 'seats', fails: '3d-cowork-folder' },
   { name: 'the look follows the chat, not the slot: a chat taking a slot changes its room', file: 'public/js/ofis.js', from: 'const look = world.looks.get(it.slot);', to: 'const look = world.looks.get(it.vacant ? it.slot : (it.slot + 1) % world.looks.size);', group: 'slot', fails: '3d-cowork-slot' },
-  { name: 'a vacant office keeps its lights on', file: 'public/js/ofis-presence.js', from: 'out.set(r.slot, inside || (r.owner !== null && st.entered));', to: 'out.set(r.slot, true);', group: 'slot', fails: '3d-cowork-slot' },
+  { name: 'a vacant office keeps its lights on', file: 'public/js/ofis-presence.js', from: 'out.set(r.slot, st.lit);', to: 'out.set(r.slot, true);', group: 'slot', fails: '3d-cowork-slot' },
   { name: 'the lights switch at once: setLit throws the switch without an ease', file: 'public/js/ofis-decor.js', from: 'switches.set(slot, on, performance.now(), instant || follower.reduced);', to: 'switches.set(slot, on, performance.now(), true);', group: 'unit', fails: 'unit-ofis-decor-light' },
   { name: 'the lights never move: the frame does not step the switches', file: 'public/js/ofis-decor.js', from: 'const moved = switches.step(performance.now());', to: 'const moved = false;', group: 'unit', fails: 'unit-ofis-decor-light' },
-  { name: 'the lights stay off when a chat takes the office', file: 'public/js/ofis-presence.js', from: 'out.set(r.slot, inside || (r.owner !== null && st.entered));', to: 'out.set(r.slot, false);', group: 'slot', fails: '3d-cowork-slot' },
-  { name: 'the lights come on when a chat takes the office, before its chief is through the door', file: 'public/js/ofis-presence.js', from: 'out.set(r.slot, inside || (r.owner !== null && st.entered));', to: 'out.set(r.slot, inside || r.owner !== null);', group: 'slot', fails: '3d-cowork-slot' },
-  { name: 'the lights go off the moment the chat closes, with its chief still walking out', file: 'public/js/ofis-presence.js', from: 'out.set(r.slot, inside || (r.owner !== null && st.entered));', to: 'out.set(r.slot, r.owner !== null && (inside || st.entered));', group: 'slot', fails: '3d-cowork-slot' },
+  { name: 'the lights stay off when a chat takes the office', file: 'public/js/ofis-presence.js', from: 'out.set(r.slot, st.lit);', to: 'out.set(r.slot, false);', group: 'slot', fails: '3d-cowork-slot' },
+  { name: 'the lights come on when a chat takes the office, before its chief is through the door', file: 'public/js/ofis-presence.js', from: 'out.set(r.slot, st.lit);', to: 'out.set(r.slot, st.lit || r.owner !== null);', group: 'slot', fails: '3d-cowork-slot' },
+  { name: 'the lights go off the moment the chat closes, with its chief still walking out', file: 'public/js/ofis-presence.js', from: 'out.set(r.slot, st.lit);', to: 'out.set(r.slot, r.owner !== null && st.lit);', group: 'slot', fails: '3d-cowork-slot' },
+  { name: 'no hold: the lights go off the moment the chief is out of the door', file: 'public/js/ofis-presence.js', from: 'if (now - st.offAt >= hold) { st.lit = false; st.offAt = null; }', to: '{ st.lit = false; st.offAt = null; }', group: 'slot', fails: '3d-cowork-slot' },
+  { name: 'a hold three times as long: the lights stay on for three seconds after the chief is out of the door', file: 'public/js/ofis-presence.js', from: 'if (now - st.offAt >= hold) {', to: 'if (now - st.offAt >= hold * 3) {', group: 'slot', fails: '3d-cowork-slot' },
 ];
 
 async function runMutations() {
