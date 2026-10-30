@@ -429,10 +429,26 @@ export function createDecor({ atmosphere, aniso = 4 } = {}) {
         rooms: build ? Object.fromEntries([...build.rooms]) : {},
         byRoom: live.lights.reduce((o, l) => { (o[l.room] = o[l.room] || []).push(l.kind); return o; }, {}),
         windowsByRoom: live.paneList.reduce((o, p) => { if (p.kind === 'window') o[p.room] = (o[p.room] || 0) + 1; return o; }, {}),
+        // what each room's first lamp and first window show now (the colour that went to the GPU), and where the lamp stands: the QA reads them next to the picture
+        lampAt: live.lights.reduce((o, l) => { if (l.kind === 'lamp' && !o[l.room]) o[l.room] = { x: l.x, y: l.y, z: l.z }; return o; }, {}),
+        lampGlow: live.quads ? live.quads.reduce((o, { l, kind }, i) => {
+          if (l.kind === 'lamp' && kind === 'glow' && !(l.room in o)) { const a = live.glows.instanceColor.array; o[l.room] = +Math.max(a[i * 3], a[i * 3 + 1], a[i * 3 + 2]).toFixed(4); }
+          return o;
+        }, {}) : {},
+        paneRGB: live.panes ? live.paneList.reduce((o, p, i) => {
+          if (p.kind === 'window' && !o[p.room]) { const a = live.panes.instanceColor.array; o[p.room] = [a[i * 3], a[i * 3 + 1], a[i * 3 + 2]].map(v => +v.toFixed(3)); }
+          return o;
+        }, {}) : {},
+        glowNow: live.quads ? live.quads.map((q, i) => { const a = live.glows.instanceColor.array; return Math.max(a[i * 3], a[i * 3 + 1], a[i * 3 + 2]); }) : [],
+        glowKinds: live.quads ? live.quads.map(q => q.l.kind + ':' + q.kind) : [],
       };
     },
-    // verification only: hide the whole living part (to compare pictures with and without it)
-    setVisible(on) { if (!live) return; for (const m of [live.panes, live.bulbs, live.glows]) if (m) m.visible = !!on; },
+    // verification only: hide the living part (to compare pictures with and without it): all of it, or only the panes, or only the lights (bulbs, flames, glows and pools)
+    setVisible(on, part) {
+      if (!live) return;
+      const parts = part === 'panes' ? [live.panes] : part === 'lights' ? [live.bulbs, live.glows] : [live.panes, live.bulbs, live.glows];
+      for (const m of parts) if (m) m.visible = !!on;
+    },
     get live() { return live; },
     get collected() { return build; },
   };

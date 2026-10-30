@@ -745,7 +745,7 @@ export function createOfis(root, ctx, opts = {}) {
     rebuildNow() { world.sig = ''; sync(); return this.rebuildMs; },
     // the rooms' life (ofis-decor.js): panes, lamps, candles and the light they give right now; the style of every room; the living meshes can be hidden to compare pictures
     get life() { return decor.stats(); },
-    lifeVisible(on) { decor.setVisible(on); },
+    lifeVisible(on, part) { decor.setVisible(on, part); },
     styles() { return Object.fromEntries([...world.rooms.keys()].map(id => { const a = store.agents.get(id), key = (a && a.project) || id; return [id, styleAt(styleOf.get(key) ?? hash(key)).id]; })); },
     view(x, y, z, zm) { autoFit = false; camA = PV.set(x, y, z).dot(R); camB = PV.dot(U); lim = { a0: -1e9, a1: 1e9, b0: -1e9, b1: 1e9 }; zoom = clamp(zm, 1, 400); applyCam(); return [camA, camB, zoom]; },
     room(id) { const r = world.rooms.get(id) || (world.vacant || []).find(v => v.id === id); return r ? { X: r.X, Z: r.Z, W: r.W, D: r.D } : null; },
