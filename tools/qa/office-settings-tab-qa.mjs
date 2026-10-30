@@ -12,7 +12,9 @@
 //   settings-tab-lounge   the agent lounge row (3D scene only): the tab's Text / Names only / Off and the popover's select are one store, and a choice made with either reaches the lounge live, with no
 //                         reload (the demo conversation of ?lounge=demo on the wall: names only draws no text, off draws nothing and has no people, text brings it back, also when the choice was made
 //                         while the Office view was hidden); the source tag (default, saved, the address's own words ?lounge=demo,names), the note under the row when the address plays the demo,
-//                         ?lounge=demo kept in the address when a control changes the mode, and a kept choice is still there after a reload
+//                         ?lounge=demo kept in the address when a control changes the mode, and a kept choice is still there after a reload; the lounge's own subscription to the setting is read in the
+//                         task that makes the change (an open card closes and the poll timer is cleared on Off, the timer is armed on Text), because its frame loop and its one-second view would
+//                         make up for a lounge that never heard of the change
 //   settings-tab-keys     the tablist by keyboard (one stop of the Tab key, arrows, Home, End, wrapping), every control reachable and operable with the keyboard, a visible focus ring, the
 //                         number shortcuts do not fire inside a select
 //   settings-tab-narrow   375 px wide in English and Turkish: no horizontal overflow, all five tabs inside the bar, controls inside the cards; 360 and 320 px keep the five tabs inside the bar, 280 px
@@ -28,6 +30,7 @@ import { ROOT, sleep, startServer } from './harness.mjs';
 import { scenario3d, o3 } from './harness3d.mjs';
 import { DEMO_SCRIPT } from '../../public/js/lounge-source.js';
 import { clipChars, splitLines, LIMITS } from '../../public/js/lounge-model.js';
+import { BOARD } from '../../public/js/lounge-plan.js';
 
 const args = process.argv.slice(2);
 const val = f => { const i = args.indexOf('--' + f); return i >= 0 ? args[i + 1] : undefined; };
@@ -485,6 +488,37 @@ if (want('lounge')) {
     const p3 = await snap(page);
     if (!(p3.tab.lounge === 'text' && p3.store.lounge === 'text' && stored(p3.stored).lounge === 'text' && /lounge=demo%2Ctext/.test(p3.search) && p3.mark === mark)) bad.push(`after Text in the popover: ${JSON.stringify({ tab: p3.tab.lounge, store: p3.store.lounge, stored: p3.stored, search: p3.search, kept: p3.mark === mark })}`);
     notes.push(`demo wall ${t0 ? t0.wall.length : 0} rows and ${t0 ? t0.people.length : 0} people -> popover Names only: ${nm ? nm.wall.length + ' rows without text' : 'not reached'} (address ${a1.search}) -> tab Off while the Office was hidden: ${off ? 'no people, no text' : 'not reached'} -> popover Text: ${back ? back.wall.length + ' rows with text, ' + back.people.length + ' people' : 'not reached'}; the page was never reloaded (mark kept ${p3.mark === mark})`);
+    // 3b. the lounge's own subscription to the setting (ofis-lounge.js `settings.on('lounge', ...)`). The waits above cannot prove it: the lounge's frame loop notices a mode that changed within a
+    // frame, and its view is made again every second, whether or not it heard of the change. So this reads the lounge in the very task that makes the change, with no frame and no timer in between:
+    // Off closes an open card and clears the poll timer at once (the poll is not merely idle), and Text arms the timer at once; then a request starts within one cadence of Text, and none does after Off.
+    const flip = to => page.evaluate(o3(`(() => {
+      const read = () => { const l = o.lounge; return { mode: l.mode, card: l.card.open, armed: l.poll.armed, inflight: l.poll.inflight, can: l.poll.canPoll, requests: l.poll.requests, pollMs: l.poll.pollMs }; };
+      const before = read(), pick = document.querySelector('#set-lounge');
+      pick.value = ${JSON.stringify(to)}; pick.dispatchEvent(new Event('change', { bubbles: true }));
+      return { before, after: read() };
+    })()`));
+    const at = c => page.evaluate(o3(`(() => { const a = v.querySelector('.of-area').getBoundingClientRect(), p = s.project(${c.X + BOARD.cu}, ${BOARD.y0 + BOARD.h / 2}, ${c.Z + BOARD.cv}); return [a.left + p[0], a.top + p[1]]; })()`));
+    const [wx, wy] = await at(cell);
+    if ((await snap(page)).pop.open) { await click(page, '#set-btn'); await sleep(300); }          // the popover covers the wall: close it for the click, open it again for the choice
+    await page.mouse.move(2, 2); await sleep(150); await page.mouse.move(wx, wy); await sleep(250);
+    await page.mouse.click(wx, wy);
+    const opened = await until(x => x.card.open && x.poll.canPoll && (x.poll.armed || x.poll.inflight), 6000);
+    if (!opened) bad.push(`the card did not open from a click on the wall, or the poll was not running: ${JSON.stringify(await lsnap().then(x => ({ card: x.card.open, poll: x.poll })))} (clicked at ${Math.round(wx)},${Math.round(wy)}, under the pointer: ${await page.evaluate(`(() => { const e = document.elementFromPoint(${wx}, ${wy}); return e ? e.tagName + '.' + String(e.className).slice(0, 40) + '#' + e.id : null; })()`)})`);
+    else {
+      await click(page, '#set-btn'); await sleep(300);
+      const pp = await snap(page);
+      if (!(pp.pop.open && pp.pop.lounge === 'text')) bad.push(`the popover did not open beside the open card: ${JSON.stringify({ open: pp.pop.open, lounge: pp.pop.lounge })}`);
+      const f1 = await flip('off');
+      if (!(f1.before.card && f1.before.armed && f1.after.mode === 'off' && !f1.after.card && !f1.after.armed && !f1.after.inflight && !f1.after.can)) bad.push(`Off in the same task (the card was open, the poll timer armed): ${JSON.stringify(f1)}`);
+      await sleep(f1.after.pollMs + 1200);
+      const quiet = await lsnap();
+      if (!(quiet.poll.requests === f1.after.requests && !quiet.card.open && quiet.mode === 'off')) bad.push(`a request started or the card came back while the lounge was Off: ${JSON.stringify({ requests: [f1.after.requests, quiet.poll.requests], card: quiet.card.open, mode: quiet.mode })}`);
+      const f2 = await flip('text');
+      if (!(f2.before.mode === 'off' && !f2.before.armed && f2.after.mode === 'text' && f2.after.can && (f2.after.armed || f2.after.inflight) && !f2.after.card)) bad.push(`Text in the same task (the poll timer must be armed): ${JSON.stringify(f2)}`);
+      const again = await until(x => x.mode === 'text' && x.poll.requests > f2.after.requests, f2.after.pollMs + 2000);
+      if (!again) bad.push(`no request started within one poll cadence of Text: ${JSON.stringify(await lsnap().then(x => ({ requests: x.poll.requests, from: f2.after.requests, poll: x.poll })))}`);
+      notes.push(`subscription: Off closed the open card and cleared the poll timer in the same task (armed ${f1.before.armed} -> ${f1.after.armed}, card ${f1.before.card} -> ${f1.after.card}), no request in ${f1.after.pollMs + 1200} ms; Text armed the timer in the same task (${f2.before.armed} -> ${f2.after.armed}) and a request started ${again ? 'within one cadence (' + (again.poll.requests - f2.after.requests) + ' since)' : 'never'}`);
+    }
     // 4. without the demo: ?lounge=demo alone names no mode (a note, the tag stays Default, nothing stored); ?lounge=names is the address's word; a control changes the address and keeps the choice
     await page.evaluate(`localStorage.clear()`);
     await S.load('?scene=3d', '#settings');
@@ -639,6 +673,8 @@ const MUTATIONS = [
   { name: 'a click on the lounge row of the tab changes nothing', file: 'public/js/settings-tab.js', from: "q('#st-lounge').addEventListener('click', e => { const b = e.target.closest('button[data-v]'); if (b) hub.set('lounge', b.dataset.v); });", to: "q('#st-lounge').addEventListener('click', () => refresh());", fails: ['lounge'] },
   { name: 'the popover\'s lounge select changes nothing', file: 'public/js/settings-panel.js', from: "lounge.addEventListener('change', () => { hub.set('lounge', lounge.value); refresh(); });", to: "lounge.addEventListener('change', () => refresh());", fails: ['lounge'] },
   { name: 'the lounge ignores its setting', file: 'public/js/ofis-lounge.js', from: "const m = settings && typeof settings.get === 'function' ? settings.get('lounge') : null;", to: "const m = 'text';", fails: ['lounge'] },
+  { name: 'the lounge leaves its card open when the setting goes Off', file: 'public/js/ofis-lounge.js', from: "if (mode() === 'off') card.close(); });", to: '});', fails: ['lounge'] },
+  { name: 'the lounge does not kick its poll when the setting changes', file: 'public/js/ofis-lounge.js', from: "dirty = true; poller.kick(); if (mode() === 'off')", to: "dirty = true; if (mode() === 'off')", fails: ['lounge'] },
   { name: 'the tab does not say that the address plays the demo', file: 'public/js/settings-tab.js', from: "q('[data-note=\"lounge-demo\"]').hidden = !(rows.includes('lounge') && loungeDemo(addr));", to: "q('[data-note=\"lounge-demo\"]').hidden = true;", fails: ['lounge'] },
   { name: 'the pixel scene shows the lounge row', file: 'public/js/pixel/index.js', from: '    settingRows: PIXEL_ROWS,', to: '', fails: ['scene'] },
   { name: 'the tab does not follow a change made in the popover', file: 'public/js/settings-tab.js', from: 'hub.on(refresh);', to: '', fails: ['store'] },
