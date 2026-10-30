@@ -308,8 +308,10 @@ async function runLeave(ctx) {
     await ev(page, 's.rec.take().length');
     const seatsBefore = await seated(page);
     if (seatsBefore.length) problems.push(`before the close: ${seatsBefore.length} figures not seated (${seatsBefore[0]})`);
-    fx.closeSession(pick.id);
     const mine = [pick.id, ...pick.subs.map(s => s.id)];
+    const paces0 = await ev(page, 's.pace');                                                      // (the page load hurried this crowd: they walked in at more than the normal pace)
+    if (!mine.some(id => paces0[id] > 1)) problems.push('nobody of the chat was hurried at the page load, so the pace of the walk out proves nothing');
+    fx.closeSession(pick.id);
     let doorSamples = 0, doorOpen = 0;
     const t0 = Date.now();
     while (Date.now() - t0 < 120000) {
@@ -335,6 +337,8 @@ async function runLeave(ctx) {
       const out = l.filter(e => e.k === 'frame' && e.after === 'gone');
       if (!out.length) { problems.push(`${short(id)}: never walked out`); continue; }
       if (out[0].mode !== 'walk' || !out[0].stand) problems.push(`${short(id)}: it started walking out without standing up first`);
+      const fast = out.filter(e => e.pace !== 1);
+      if (fast.length) problems.push(`${short(id)}: it walked out at ${fast[0].pace} times the normal pace (it was hurried when it came in on the page load, a walk out is at the normal pace)`);
       // it stands still while it stands up: for at least 0.25 s of the scene's time the position does not change
       const still = []; for (const e of out) { if (!e.stand) break; still.push(e); }
       const stillT = still.reduce((s, e) => s + e.dt, 0);
@@ -699,6 +703,7 @@ const MUTATIONS = [
   { name: 'a sub-agent taken out of the data while it walks in is removed on the spot', file: 'public/js/ofis.js', from: "      else if (c.mode === 'walk' && c.path) turnAround(c);", to: "      else if (c.mode === 'walk' && c.path) removeChar(c);", fails: 'hidden' },
   { name: 'the name label stays where the figure was made', file: 'public/js/ofis.js', from: '    c.tag.pos.set(pos.x, 0, pos.z);\n    if (c.pk) applyPack(c);', to: "    if (c.mode !== 'walk') c.tag.pos.set(pos.x, 0, pos.z);\n    if (c.pk) applyPack(c);", fails: 'follow' },
   { name: 'the card is not placed again after each frame', file: 'public/js/ofis.js', from: "        placeLabels();\n        ui.card.place();", to: "        placeLabels();", fails: 'follow' },
+  { name: 'a walk out keeps the pace of the page load', file: 'public/js/ofis.js', from: "if (after === 'gone') c.pace = 1;", to: "", fails: 'leave' },
   { name: 'settle does nothing', file: 'public/js/ofis.js', from: '        n++;\n        finishWalk(c);', to: '        n++;', fails: 'settle' },
   { name: 'the app calls settle', file: 'public/js/ofis.js', from: "    if (born.length) {\n      for (const b of born)", to: "    if (born.length) {\n      setTimeout(() => root.__ofis.settle(), 60000);\n      for (const b of born)", fails: 'settle' },
   { name: 'reduced motion keeps the bounce of the step', file: 'public/js/ofis.js', from: "pose === 'walk' && !atmosphere.state.reducedMotion ?", to: "pose === 'walk' ?", fails: 'reduced' },

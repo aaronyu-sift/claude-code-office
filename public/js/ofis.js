@@ -2148,6 +2148,7 @@ export function createOfis(root, ctx, opts = {}) {
   // `path` begins where the figure stands; `after` is what it does at the end of it: 'sit' (at its seat) or 'gone' (it is removed: the entrance)
   function startWalk(c, path, after) {
     c.path = path; c.pi = 1; c.mode = 'walk'; c.after = after;
+    if (after === 'gone') c.pace = 1;                    // only a queue that comes in on a page load is hurried: every walk out is at the normal pace
     c.travelled = 0; c.plen = pathLength(path); c.standT = c.turnT = 0;
     if (path.length < 2) finishWalk(c);
   }
