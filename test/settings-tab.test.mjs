@@ -51,6 +51,7 @@ test('the message board: connected, not enabled or unsupported; a server that sa
   assert.equal(boardState({ chat: { state: 'off' } }), 'off');
   assert.equal(boardState({ chat: { state: 'on' } }), 'on');
   assert.equal(boardState({ chat: { state: 'connected' } }), 'on');
+  assert.equal(boardState({ chat: { state: 'ok', schema: 3 } }), 'on');       // what chat-source.js says, as /api/config gives it
   assert.equal(boardState({ chat: { state: ' Unsupported ' } }), 'unsupported');
   for (const bad of [null, undefined, {}, { chat: null }, { chat: {} }, { chat: { state: 3 } }, { chat: { state: 'maybe' } }, { chat: 'off' }, 'off', [], { chat: { state: '' } }]) assert.equal(boardState(bad), null, JSON.stringify(bad));
 });

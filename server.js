@@ -8,6 +8,7 @@
 const http = require('http');
 const { createChatBridge } = require('./chatbridge');
 const { createDevReload } = require('./dev-reload');
+const { createChatSource } = require('./chat-source');
 const { createRecent } = require('./recent');
 const { createSessionCheck } = require('./procident');
 const { createProgress } = require('./progress-file');
@@ -33,8 +34,8 @@ let INLINE_COLORS = {};
 let CSWAP_URL = null;
 let DEVRELOAD = null;   // --dev: tells an open page that its files changed (dev-reload.js)
 let CHAT = null;   // optional read-only bridge from the agentchat database
-// chat.state of /api/config, shown read-only in the Settings tab: 'off' (no bridge, or its database cannot be read), 'on' (reading it) or 'unsupported' (no node:sqlite in this Node)
-const chatState = () => (CHAT ? (typeof CHAT.status === 'function' ? CHAT.status() : 'on') : 'off');
+let CHAT_SOURCE = null;   // the reader behind it (chat-source.js, docs/chat-source.md): always there, state "off" when no database is given
+let loungeCache = { at: 0, body: null };   // GET /api/lounge is built at most every 2 seconds, however many pages ask
 let PROGRESS_FILE = null;   // the task tracker's snapshot of each chat's progress (progress-file.js, docs/progress.md)
 let COST_OPTS = {};   // pricesFile, discount, extraLogs for the cost worker
 let RECENT_OPTS = { days: 14, max: 50, budgetMs: 150 };   // recently closed sessions (recent.js); days 0 turns them off
@@ -58,8 +59,12 @@ function configure(o) {
   COLORS_FILE = o.projectColorsFile ? path.resolve(expandHome(o.projectColorsFile)) : null;
   INLINE_COLORS = o.projectColors || {};
   CSWAP_URL = o.cswapUrl || null;
-  const chatDb = o.chatDb || process.env.CCO_CHAT_DB;
-  CHAT = chatDb ? createChatBridge(path.resolve(expandHome(chatDb))) : null;
+  // --demo shows fictional data and promises not to read ~/.claude: it reads no chat board either, whatever --chat-db, CCO_CHAT_DB or a config file say
+  const chatDb = o.demo ? null : (o.chatDb || process.env.CCO_CHAT_DB);
+  if (CHAT_SOURCE) CHAT_SOURCE.close();
+  CHAT_SOURCE = createChatSource(chatDb ? path.resolve(expandHome(chatDb)) : null);
+  CHAT = chatDb ? createChatBridge(CHAT_SOURCE) : null;
+  loungeCache = { at: 0, body: null };
   PROGRESS_FILE = path.resolve(expandHome(o.progressFile || process.env.OFFICE_PROGRESS_FILE || path.join(CLAUDE_DIR, 'office-progress.json')));
   COST_OPTS = {
     pricesFile: o.costPrices ? path.resolve(expandHome(o.costPrices)) : null,
@@ -770,6 +775,27 @@ function cswap(cb) {
   req.on('error', () => cb(cswapCache.body || '{"accounts":[]}'));
 }
 
+// ---------------------------------------------------------------- chat board (the lounge's data)
+
+const LOUNGE_WINDOW_MS = 6 * 3600e3;   // the lounge shows the board of the last 6 hours ...
+const LOUNGE_ROWS = 60;                // ... at most 60 posts
+const LOUNGE_CACHE_MS = 2000;
+
+// What the lounge wall needs, as one JSON text: { state, now, sinceMs, messages, channels, agents, truncated, countsCapped } (chat-source.js).
+function loungeBody() {
+  const t = now();
+  if (loungeCache.body && t >= loungeCache.at && t - loungeCache.at < LOUNGE_CACHE_MS) return loungeCache.body;
+  if (!CHAT_SOURCE) return JSON.stringify({ state: { state: 'off', schema: null, reason: 'no chat database configured' }, now: t, sinceMs: 0, messages: [], channels: [], agents: [], truncated: false, countsCapped: false });
+  const snap = CHAT_SOURCE.snapshot({ sinceMs: t - LOUNGE_WINDOW_MS, limit: LOUNGE_ROWS, office: agents, now: t });
+  loungeCache = { at: t, body: JSON.stringify(snap) };
+  return loungeCache.body;
+}
+// the two fields of /api/config: the Settings tab shows whether the chat board can be read
+function chatInfo() {
+  const s = CHAT_SOURCE ? CHAT_SOURCE.state() : { state: 'off', schema: null };
+  return { state: s.state, schema: s.schema };
+}
+
 // ---------------------------------------------------------------- http
 
 const TYPES = {
@@ -801,7 +827,8 @@ function handler(req, res, next) {
     return;
   }
   if (DEVRELOAD && DEVRELOAD.handle(url.pathname, res)) return;
-  if (url.pathname === '/api/config') return json(res, { version: VERSION, demo: DEMO, site: SITE, cswap: !!CSWAP_URL && !DEMO, chat: { state: chatState() } });
+  if (url.pathname === '/api/config') return json(res, { version: VERSION, demo: DEMO, site: SITE, cswap: !!CSWAP_URL && !DEMO, chat: chatInfo() });
+  if (url.pathname === '/api/lounge') return json(res, loungeBody());
   if (url.pathname === '/api/state') return json(res, snapshot());
   if (url.pathname === '/api/closed') return json(res, { closed: closedList, days: RECENT_OPTS.days, max: RECENT_OPTS.max, scan: recent ? recent.stats : null });
   if (url.pathname === '/api/cost') {
@@ -901,7 +928,7 @@ function cli(argv) {
 
   --port <n>          Port to listen on (default 7321)
   --open              Open the browser after start
-  --demo              Fictional demo data; does not read ~/.claude
+  --demo              Fictional demo data; does not read ~/.claude or a chat board
   --claude-dir <dir>  Claude config dir (default ~/.claude or $CLAUDE_CONFIG_DIR)
   --data-dir <dir>    Where the cost cache is kept (default ~/.claude-code-office)
   --chat-db <file>    agentchat SQLite database to show (read-only; or set CCO_CHAT_DB)

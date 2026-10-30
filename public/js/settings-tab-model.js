@@ -4,7 +4,7 @@
 //   OPTIONS                      the choices of the rows that offer a list: [value, language key]; the same values the popover offers (a test compares them with index.html)
 //   sourceParam(key, search)     the address's own spelling of a setting that it names ('?season=winter', '?hour=21' for the time), else ''
 //   cameraSource(search, store)  where the pixel scene's camera comes from: 'url' (?proj=), 'stored' (its own older key) or 'default'
-//   boardState(config)           the agent message board from /api/config: 'on' (connected), 'off' (not enabled), 'unsupported', or null (the field is absent or not understood)
+//   boardState(config)           the agent message board from /api/config: 'on' (connected; the server says 'ok'), 'off' (not enabled), 'unsupported', or null (the field is absent or not understood)
 import { officeQuery } from './office-settings.js';
 import { fromQuery } from './pixel/settings.js';
 
@@ -32,7 +32,7 @@ export function cameraSource(search = '', storage = null) {
   return 'default';
 }
 
-const BOARD = { on: 'on', connected: 'on', off: 'off', unsupported: 'unsupported' };
+const BOARD = { ok: 'on', on: 'on', connected: 'on', off: 'off', unsupported: 'unsupported' };   // 'ok' is what the chat source (chat-source.js) says when it reads the board
 export function boardState(config) {
   const s = config && config.chat && typeof config.chat.state === 'string' ? config.chat.state.trim().toLowerCase() : '';
   return Object.prototype.hasOwnProperty.call(BOARD, s) ? BOARD[s] : null;
