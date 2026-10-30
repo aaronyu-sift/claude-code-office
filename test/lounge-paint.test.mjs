@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { paintWall, CANVAS } from '../public/js/lounge-paint.js';
+import { paintWall, CANVAS, cubicBezier } from '../public/js/lounge-paint.js';
+import { EASE } from '../public/js/motion.js';
 import { buildView, normalizePayload, LIMITS } from '../public/js/lounge-model.js';
 import { createDemoSource } from '../public/js/lounge-source.js';
 
@@ -103,4 +104,16 @@ test('paint: a hostile post cannot put more on the wall than the model allowed',
   const widest = Math.max(...log.texts.map(s => Array.from(s).length));
   assert.ok(widest <= 2 * LIMITS.lineChars, 'no drawn string is longer than a line: ' + widest);
   assert.ok(log.texts.join('').length < 600);
+});
+
+test('paint: the arrival of a post follows the easing of motion.js (a decelerating cubic bezier), not a line', () => {
+  const e = cubicBezier(EASE.out);
+  assert.equal(e(0), 0); assert.equal(e(1), 1);
+  let last = 0;
+  for (let i = 1; i <= 20; i++) { const v = e(i / 20); assert.ok(v >= last - 1e-9 && v <= 1 + 1e-9, 'monotone and inside 0..1 at ' + i / 20); last = v; }
+  assert.ok(e(0.1) > 0.4, 'it leaves fast: ' + e(0.1));
+  assert.ok(e(0.5) > 0.9 && e(0.5) < 1, 'and settles slowly: ' + e(0.5));
+  assert.equal(cubicBezier('linear')(0.3), 0.3);
+  assert.equal(cubicBezier('cubic-bezier(1,2)')(0.3), 0.3);
+  assert.equal(cubicBezier(undefined)(2), 1);
 });

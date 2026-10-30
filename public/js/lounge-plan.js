@@ -12,7 +12,7 @@
 import { footprint, heightOf, rectOf, hit, lightsOf } from './ofis-styles.js';
 
 export const DECK = Object.freeze({ u0: 1.5, u1: 11.1, v0: 0.9, v1: 5.7, h: 0.016 });
-export const BOARD = Object.freeze({ cu: 6.3, cv: 1.62, w: 6.4, h: 2.35, y0: 0.55, t: 0.14 });
+export const BOARD = Object.freeze({ cu: 6.3, cv: 1.62, w: 6.4, h: 2.15, y0: 0.5, t: 0.14 });
 export const LOUNGE_STYLE = Object.freeze({
   id: 'lounge', name: 'Agent lounge',
   pack: Object.freeze({ wood: '#b98a5c', fabric: '#3f7fa0', fabric2: '#e0a458', shade: '#fff0c4', metal: '#8b929f', accent: '#3f7fa0' }),

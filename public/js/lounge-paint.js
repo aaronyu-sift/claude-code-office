@@ -10,13 +10,31 @@
 //     opts.night (0..1)         how far the night is on: the panel is a little brighter against a dark sky
 import { clipChars } from './lounge-model.js';
 
-export const CANVAS = Object.freeze({ w: 2048, h: 752 });
+export const CANVAS = Object.freeze({ w: 2048, h: 688 });
+
+// a CSS cubic-bezier(...) easing as a function of the progress 0..1 (the one of motion.js EASE.out moves the arrival of a post); the string of a rule that is not a bezier gives the identity
+export function cubicBezier(str) {
+  const m = /cubic-bezier\(([^)]+)\)/.exec(String(str || ''));
+  const p = m ? m[1].split(',').map(Number) : [];
+  if (p.length !== 4 || p.some(v => !Number.isFinite(v))) return x => Math.min(1, Math.max(0, x));
+  const [x1, y1, x2, y2] = p, cx = 3 * x1, bx = 3 * (x2 - x1) - cx, ax = 1 - cx - bx, cy = 3 * y1, by = 3 * (y2 - y1) - cy, ay = 1 - cy - by;
+  const X = t => ((ax * t + bx) * t + cx) * t, Y = t => ((ay * t + by) * t + cy) * t, dX = t => (3 * ax * t + 2 * bx) * t + cx;
+  return x => {
+    if (x <= 0) return 0;
+    if (x >= 1) return 1;
+    let t = x;
+    for (let i = 0; i < 10; i++) { const e = X(t) - x; if (Math.abs(e) < 1e-6) break; const d = dX(t); if (Math.abs(d) < 1e-6) break; t -= e / d; }
+    let lo = 0, hi = 1;                                                                              // Newton can miss on a steep start: bisect when it did
+    if (Math.abs(X(t) - x) > 1e-4 || t < 0 || t > 1) { t = x; for (let i = 0; i < 40; i++) { if (X(t) < x) lo = t; else hi = t; t = (lo + hi) / 2; } }
+    return Y(t);
+  };
+}
 const SANS = '"Segoe UI Variable Text", "Segoe UI", system-ui, -apple-system, sans-serif';
 const MONO = 'ui-monospace, "SF Mono", Menlo, Consolas, monospace';
 const INK = { title: '#8fb0ff', main: '#eef1ff', text: '#cdd5f2', muted: '#8f9bc0', quiet: '#8fb0ff', off: '#a9b3d6', warn: '#fab219', ok: '#6ee7a0' };
 
-const BASE = { text: 38, line: 44, who: 31, chip: 23, age: 27, pad: 14 };
-const X = { chip: 44, who: 300, text: 846, ageRight: CANVAS.w - 44 };            // the columns
+const BASE = { text: 44, line: 50, who: 34, chip: 25, age: 28, pad: 14 };
+const X = { chip: 44, who: 292, text: 800, ageRight: CANVAS.w - 44 };            // the columns
 const TOP = 78, BOTTOM = 20;                                                        // the header and the bottom margin
 const MIN_SCALE = 0.55;
 
