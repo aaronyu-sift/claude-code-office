@@ -80,7 +80,7 @@ function freeSpot(T, avoid, labels, figures, vw, vh) {
 //   4. show and hide are debounced (SHOW_MS, HIDE_MS, MIN_SHOWN_MS, MIN_HIDDEN_MS), so nothing flashes or blinks; a sub-agent's reach rule has a slack (REACH_SLACK) to stay
 //   5. the order of placement is rank (priority), then first sight, never the y of the label (it changes as the agents walk)
 //   6. a tag with `walking` (a main agent on its way to or from its seat) is carried at its home spot, takes part in no declutter and holds no place: the labels of the seated
-//      agents never move for it (it hides only while it is under what floats over the scene)
+//      agents never move for it (it hides only while it is under what floats over the scene); a fixed label with `walking` (its balloon) is carried the same way
 //   7. a main agent's label that has no spot but under the card takes the nearest free spot of a grid (`freeSpot`) and holds it
 // Time is the clock passed in, so 30, 60 and 120 fps decide alike to within one 30 fps frame; one step is capped at DT_MAX ms (a hidden tab resumes without a jump).
 export const STABLE = Object.freeze({
@@ -159,10 +159,11 @@ export function createLabelLayout(opts = {}) {
     for (const L of [...fixed].sort((a, b) => prio(b) - prio(a) || (mem.get(a.id) || { seq: 1e9 }).seq - (mem.get(b.id) || { seq: 1e9 }).seq)) {
       const s = state(L.id); alive.add(L.id);
       const under = blocked.some(r => overlaps(L, r));
-      const raw = !under && (L.force || !taken.some(r => touches(L, r) && !blockedSet.has(r)));
-      verdict(s, raw, L.force);
+      // a carried label (`walking`: the balloon of somebody who walks) is shown wherever it is, whatever it touches, and holds no place
+      const raw = !under && (L.force || L.walking || !taken.some(r => touches(L, r) && !blockedSet.has(r)));
+      verdict(s, raw, L.force || L.walking);
       if (under) cut(s);
-      if (raw) taken.push({ x: L.x, y: L.y, w: L.w, h: L.h });      // a label that wants to be shown holds its place before the debounce lets it in
+      if (raw && !L.walking) taken.push({ x: L.x, y: L.y, w: L.w, h: L.h });      // a label that wants to be shown holds its place before the debounce lets it in
       out.set(L.id, { x: L.x, y: L.y, shown: s.shown, cut: s.cut && !s.shown, moving: false });
     }
 

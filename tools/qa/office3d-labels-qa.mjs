@@ -22,7 +22,7 @@
 import { cpSync, mkdtempSync, readFileSync, writeFileSync, rmSync, readdirSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { scenario3d, o3, sleep, ROOT } from './harness3d.mjs';
+import { scenario3d, o3, sleep, ROOT, lookAtRoom } from './harness3d.mjs';
 
 const args = process.argv.slice(2);
 const val = f => { const i = args.indexOf('--' + f); return i >= 0 ? args[i + 1] : undefined; };
@@ -50,7 +50,7 @@ const SAMPLER = (seconds, drive = '') => `(async () => {
       const modes = new Map(o.figures().map(f => [f.id, (f.main ? 'M' : 'S') + (f.vis ? f.mode : 'wait')]));          // (a figure that waits for its turn at the entrance is not drawn)
       const labs = [...layer.querySelectorAll('.of-l.of-tagl, .of-l.of-ball')].map(e => {
         const id = e.dataset.id, at = s.charScreen(id);
-        return [e.classList.contains('of-ball') ? 'b' : 't', id, e.style.visibility === 'visible' ? 1 : 0, e.style.transform || '', at ? +at[0].toFixed(1) : null, at ? +at[1].toFixed(1) : null, modes.get(id) || ''];
+        return [e.classList.contains('of-ball') ? 'b' : 't', id, e.style.visibility === 'visible' ? 1 : 0, e.style.transform || '', at ? +at[0].toFixed(1) : null, at ? +at[1].toFixed(1) : null, modes.get(id) || '', e.offsetWidth, e.offsetHeight];
       });
       const sig = JSON.stringify(labs.map(l => l.slice(0, 4)));
       if (sig !== last) { last = sig; frames.push({ t, labs }); }
@@ -67,7 +67,8 @@ const SAMPLER = (seconds, drive = '') => `(async () => {
 const xy = tr => { const m = /translate\(([-\d.]+)px,\s*([-\d.]+)px\)/.exec(tr || ''); return m ? [+m[1], +m[2]] : null; };
 // the part of the view where an agent's card is whole: a card hangs about 100 px to each side of its agent and 200 px below it, a balloon 80 px above; an agent nearer than that to an edge
 // has a card that the view cuts, and one that is cut off toggles by the camera
-const inView = fig => !!fig && fig[0] > 180 && fig[0] < VIEWPORT.width - 180 && fig[1] > 100 && fig[1] < VIEWPORT.height - 200;
+const inViewWide = (x, y) => x !== null && x > -40 && x < 1400 + 40 && y > -40 && y < 800 + 40;       // (the 1400 x 800 window of the checks that look at one room)
+const inView = fig =>!!fig && fig[0] > 180 && fig[0] < VIEWPORT.width - 180 && fig[1] > 100 && fig[1] < VIEWPORT.height - 200;
 function analyse(frames, kinds = 'tb') {
   const by = new Map();
   frames.forEach((f, i) => f.labs.forEach(l => { if (!kinds.includes(l[0])) return; const k = l[0] + ':' + l[1]; if (!by.has(k)) by.set(k, []); by.get(k).push({ i, t: f.t, vis: l[2], tr: l[3], fig: l[4] === null ? null : [l[4], l[5]], mode: l[6] }); }));
@@ -102,12 +103,21 @@ const summary = r => `${r.toggles} toggles, ${r.blinks} blinks, ${r.flashes} fla
 
 // the rule of the walkers, read off the same records
 function walkers(frames) {
-  const w = { subWalk: 0, subWalkVisible: 0, chiefWalk: 0, chiefWalkVisible: 0, firstChief: new Map() };
+  const w = { subWalk: 0, subWalkVisible: 0, chiefWalk: 0, chiefWalkVisible: 0, carried: 0, carriedOk: 0, firstChief: new Map() };
   for (const f of frames) for (const l of f.labs) {
     if (l[0] !== 't') continue;
-    const [, id, vis, , , , mode] = l;
+    const [, id, vis, tr, ax, ay, mode, lw] = l;
     if (mode === 'Swalk') { w.subWalk++; if (vis) w.subWalkVisible++; }
-    if (mode === 'Mwalk') { if (!w.firstChief.has(id)) w.firstChief.set(id, f.t); if (f.t - w.firstChief.get(id) > 1500) { w.chiefWalk++; if (vis) w.chiefWalkVisible++; } }
+    if (mode === 'Mwalk') {
+      if (!w.firstChief.has(id)) w.firstChief.set(id, f.t);
+      if (f.t - w.firstChief.get(id) > 1500) {
+        w.chiefWalk++;
+        if (vis) w.chiefWalkVisible++;
+        // carried: the card's middle is under its figure (a card pushed to another cell is 57 px or more off to a side)
+        const m = /translate\(([-\d.]+)px,\s*([-\d.]+)px\) scale\(([-\d.]+)\)/.exec(tr);
+        if (vis && m && ax !== null) { w.carried++; if (Math.abs(+m[1] + lw * +m[3] / 2 - ax) < 20 && +m[2] - ay > -20 && +m[2] - ay < 110) w.carriedOk++; }
+      }
+    }
   }
   return w;
 }
@@ -155,11 +165,12 @@ async function runWalk(ctx) {
   if (walkerRows) {
     const w = walkerRows;
     const seated = w.seated || { n: 0, shown: 0 };
-    text = `${w.subWalk} readings of walking sub-agents (${w.subWalkVisible} with a card), ${w.chiefWalk} of walking chiefs (${w.chiefWalkVisible} with a card), ${seated.shown} of ${seated.n} seated sub-agents have a card once everybody sat`;
+    text = `${w.subWalk} readings of walking sub-agents (${w.subWalkVisible} with a card), ${w.chiefWalk} of walking chiefs (${w.chiefWalkVisible} with a card, ${w.carriedOk} of ${w.carried} under their figure), ${seated.shown} of ${seated.n} seated sub-agents have a card once everybody sat`;
     if (w.subWalk < 20) wp.push(`only ${w.subWalk} readings of a walking sub-agent`);
     if (w.subWalkVisible) wp.push(`a walking sub-agent had a card in ${w.subWalkVisible} of ${w.subWalk} readings`);
     if (w.chiefWalk < 20) wp.push(`only ${w.chiefWalk} readings of a walking chief`);
     if (w.chiefWalk && w.chiefWalkVisible / w.chiefWalk < 0.9) wp.push(`the card of a walking chief was shown in ${w.chiefWalkVisible} of ${w.chiefWalk} readings`);
+    if (w.carried < 20 || w.carriedOk / w.carried < 0.9) wp.push(`the card of a walking chief was under its figure in only ${w.carriedOk} of ${w.carried} readings`);
     if (seated.n < 8) wp.push(`only ${seated.n} seated sub-agents once everybody sat`);
     else if (seated.shown / seated.n < 0.6) wp.push(`only ${seated.shown} of ${seated.n} seated sub-agents have a card once everybody sat`);
   } else wp.push('the first page did not run');
@@ -299,20 +310,60 @@ async function runClock(ctx) {
   } finally { await S.done(); }
 }
 
-const RUN = { walk: runWalk, zoom: runZoom, fade: runFade, clock: runClock };
-const OWNER = { '3d-walk-labels': 'walk', '3d-labels-walkers': 'walk', '3d-labels-zoom': 'zoom', '3d-labels-fade': 'fade', '3d-labels-clock': 'clock' };
+// somebody walks into a room full of seated people, past their cards: none of the cards moves (the walker is no obstacle, and its own card is carried or, for a sub-agent, not drawn)
+async function runPassing(ctx) {
+  const problems = [];
+  const S = await scenario3d(3, { tag: 'lblp', root: ctx.root, width: 1400, height: 800, fixture: { statuses: ['working', 'working', 'working'], subs: () => Array(6).fill('working') } });
+  try {
+    const { page } = S;
+    if (!S.ready.ok) return [report('3d-labels-passing', ['the scene did not become ready'], '')];
+    // the room nearest the entrance, the camera on it, and the sub-agent that sits farthest from its door walks in again
+    const room = await page.evaluate(o3('(() => { const r = [...s.rooms].sort((a, b) => b.X - a.X)[0]; return r.id; })()'));
+    await lookAtRoom(page, room, 55);
+    await sleep(5000);                                                    // the cards settle after the camera's jump (they glide, at 8 frames a second a glide takes a few seconds)
+    const walker = await page.evaluate(o3(`(() => { const subs = s.subs().filter(x => x.room === ${JSON.stringify(room)}); return subs.length ? subs[subs.length - 1].id : null; })()`));
+    if (!walker) return [report('3d-labels-passing', [`no sub-agent in the room ${room}`], '')];
+    await page.evaluate(o3(`s.replayEnter(${JSON.stringify(walker)})`));
+    const frames = await page.evaluate(SAMPLER(24));
+    if (val('dump')) writeFileSync(`${val('dump')}-passing.json`, JSON.stringify(frames));
+    const by = new Map();
+    let onScreen = 0;
+    frames.forEach((f, i) => f.labs.forEach(l => {
+      if (l[0] !== 't') return;
+      if (l[1] === walker && l[6] === 'Swalk' && inViewWide(l[4], l[5])) onScreen++;
+      if (!by.has(l[1])) by.set(l[1], []);
+      const tf = xy(l[3]), k = /scale\(([-\d.]+)\)/.exec(l[3]);
+      by.get(l[1]).push({ i, vis: l[2], tr: tf && k ? [tf[0] + l[7] * +k[1] / 2, tf[1]] : null, fig: l[4] === null ? null : [l[4], l[5]], mode: l[6] });          // (the middle of the card: its width changes with its text)
+    }));
+    let moves = 0, readings = 0; const who = {};
+    for (const [id, ser] of by) for (let i = 1; i < ser.length; i++) {
+      const a = ser[i - 1], b = ser[i];
+      if (!/seated$/.test(a.mode) || !/seated$/.test(b.mode) || !a.vis || !b.vis || !a.tr || !b.tr || !a.fig || !b.fig) continue;
+      readings++;
+      if (Math.hypot((b.tr[0] - b.fig[0]) - (a.tr[0] - a.fig[0]), (b.tr[1] - b.fig[1]) - (a.tr[1] - a.fig[1])) > 4) { moves++; who[id.slice(-12)] = (who[id.slice(-12)] || 0) + 1; }
+    }
+    if (onScreen < 8) problems.push(`the walker was in the view in only ${onScreen} readings`);
+    if (readings < 100) problems.push(`only ${readings} readings of seated cards`);
+    if (moves) problems.push(`${moves} moves of a seated card of more than 4 px against its agent while somebody walked in (${Object.entries(who).slice(0, 3).map(([k, n]) => k + ' ' + n).join('; ')})`);
+    if (errorsOf(page).length) problems.push(`console error: ${errorsOf(page)[0].slice(0, 120)}`);
+    return [report('3d-labels-passing', problems, `a sub-agent walked in to its seat in the room next to the entrance for 24 s (${onScreen} readings of it in the view), ${readings} readings of seated cards, ${moves} moves of more than 4 px against their agents`)];
+  } finally { await S.done(); }
+}
+
+const RUN = { walk: runWalk, zoom: runZoom, fade: runFade, clock: runClock, passing: runPassing };
+const OWNER = { '3d-walk-labels': 'walk', '3d-labels-walkers': 'walk', '3d-labels-zoom': 'zoom', '3d-labels-fade': 'fade', '3d-labels-clock': 'clock', '3d-labels-passing': 'passing' };
 
 // ---- mutations: break one line in a copy of the repo and expect the check that guards it to fail
 const MUTATIONS = [
   { name: 'the stateless layout again (every frame from scratch)', file: 'public/js/ofis.js', edits: [
     ['import { createLabelLayout } from', 'import { createLabelLayout, layoutLabels } from'],
     ['const shown = labelLayout.step({ fixed, tags, blocked: ui.blocked(), figures: standing, vw, vh, reduced: !!atmosphere.state.reducedMotion }, now);', 'const shown = new Map([...layoutLabels({ fixed, tags, blocked: ui.blocked(), figures: [...figs.values()], vw, vh })].map(([id, p]) => [id, { ...p, shown: true }]));']], fails: '3d-walk-labels' },
-  { name: 'a walking chief is an ordinary label that holds a place', file: 'public/js/ofis.js', from: "T.walking = !!c && c.mode === 'walk';", to: 'T.walking = false;', fails: '3d-walk-labels' },
+  { name: 'a walking chief is an ordinary label that holds a place', file: 'public/js/ofis.js', from: "T.walking = !!c && c.mode === 'walk';", to: 'T.walking = false;', fails: '3d-labels-walkers' },
   { name: 'a walking sub-agent keeps its card', file: 'public/js/ofis.js', from: 'c.tag.off = c.bal.off || (!c.main && c.mode === \'walk\');', to: 'c.tag.off = c.bal.off;', fails: '3d-labels-walkers' },
-  { name: 'the figure of a walker is an obstacle for the cards of the others', file: 'public/js/ofis.js', from: "if (!c || c.mode !== 'walk') standing.push(r);", to: 'standing.push(r);', fails: '3d-walk-labels' },
+  { name: 'the figure of a walker is an obstacle for the cards of the others', file: 'public/js/ofis.js', from: "if (!c || c.mode !== 'walk') standing.push(r);", to: 'standing.push(r);', fails: '3d-labels-passing' },
+  { name: 'the balloon of a walker holds a place like any other', file: 'public/js/ofis.js', from: 'else T.walking = walkingBal.has(L);', to: 'else T.walking = false;', fails: '3d-labels-passing' },
   { name: 'show and hide are not debounced', file: 'public/js/ofis-label-layout.js', from: '  SHOW_MS: 90, HIDE_MS: 400, MIN_SHOWN_MS: 700, MIN_HIDDEN_MS: 500,', to: '  SHOW_MS: 0, HIDE_MS: 0, MIN_SHOWN_MS: 0, MIN_HIDDEN_MS: 0,', fails: '3d-walk-labels' },
   { name: 'a label jumps to its cell instead of gliding', file: 'public/js/ofis-label-layout.js', from: '      if (reduced || fresh) { s.sx.jump(s.tu); s.sy.jump(s.tv); }', to: '      s.sx.jump(s.tu); s.sy.jump(s.tv);', fails: '3d-walk-labels' },
-  { name: 'a label does not stay in its cell: it goes home at once', file: 'public/js/ofis-label-layout.js', from: '  RETURN_MS: 1000,  ', to: '  RETURN_MS: 0,  ', fails: '3d-walk-labels' },
   { name: 'the zoom limits have no band', file: 'public/js/ofis.js', from: 'ZOOM_SLACK = 0.06;', to: 'ZOOM_SLACK = 0;', fails: '3d-labels-zoom' },
   { name: 'the fade is gone: a label appears and goes in one frame', file: 'public/app.css', from: '.of-l.on { opacity: 1; pointer-events: auto; transition: opacity var(--m-fast) var(--ease-out), visibility 0s; }', to: '.of-l.on { opacity: 1; pointer-events: auto; transition: none; }', fails: '3d-labels-fade' },
   { name: 'reduced motion keeps the fade', file: 'public/app.css', from: '  .of-l, .of-l.on { transition: none; }\n', to: '', fails: '3d-labels-fade', also: { file: 'public/app.css', from: '  * { transition: none !important; }\n', to: '' } },

@@ -309,6 +309,42 @@ test('fixed labels: the higher priority one wins a touch, a forced one stays, on
   assert.equal(out.get('a').shown, false); assert.equal(out.get('a').cut, true);
 });
 
+test('a carried balloon (walking) is shown whatever it touches and holds no place: the card beside it does not move for it', () => {
+  const T = tag('t', fig(300, 300), { w: 100, rank: 100, force: true });
+  const walker = t => ({ id: 'b', x: T.near.x + 20 + t * 30, y: T.near.y + T.near.h - 10, w: 30, h: 26, pri: 30, force: false, walking: true });
+  const L = createLabelLayout(); let hid = 0, moved = 0, last = null;
+  for (let i = 0; i < 150; i++) {
+    const t = i / 30, out = L.step({ tags: [T], fixed: [walker(t)], figures: [T.near], blocked: [], vw: VW, vh: VH }, t * 1000);
+    if (i > 4 && !out.get('b').shown) hid++;
+    const p = out.get('t'); if (last && Math.hypot(p.x - last.x, p.y - last.y) > 1e-9) moved++; last = p;
+  }
+  assert.equal(hid, 0, 'a carried balloon is never hidden for touching a card');
+  assert.equal(moved, 0, 'the card did not move for the balloon that passed over its place');
+  // the same balloon, not carried: it holds its place, so the card has to give way to it
+  const M = createLabelLayout(); let moved2 = 0, last2 = null;
+  for (let i = 0; i < 150; i++) {
+    const t = i / 30, out = M.step({ tags: [T], fixed: [{ ...walker(t), walking: false }], figures: [T.near], blocked: [], vw: VW, vh: VH }, t * 1000);
+    const p = out.get('t'); if (last2 && Math.hypot(p.x - last2.x, p.y - last2.y) > 1e-9) moved2++; last2 = p;
+  }
+  assert.ok(moved2 > 0, 'an ordinary balloon does push the card');
+});
+
+test('a label that gave way goes home only after the home spot has been free for RETURN_MS, and not before', () => {
+  const A = tag('a', fig(300, 300), { w: 100, rank: 100, force: true }), block = { x: A.near.x - 10, y: A.near.y + A.near.h, w: 120, h: 40 };
+  const L = createLabelLayout(); let t = 0, away = null, back = null;
+  for (let k = 0; k < 40; k++) { t += 33; L.step({ tags: [A], figures: [A.near], blocked: [], fixed: [], vw: VW, vh: VH }, t); }
+  const t1 = t;                                                           // somebody else's label sits on A's home spot for 700 ms
+  for (let k = 0; k < 90; k++) {
+    t += 33; const on = t - t1 < 700;
+    L.step({ tags: [A], figures: [A.near, ...(on ? [block] : [])], blocked: [], fixed: [], vw: VW, vh: VH }, t);
+    const p = L.peek('a'), home = p.u === 0 && p.v === 0;
+    if (away === null && !home) away = t - t1;
+    if (back === null && away !== null && !on && home) back = t - t1 - 700;
+  }
+  assert.ok(away !== null && away <= 70, `it left at once (${away} ms)`);
+  assert.ok(back !== null && back >= STABLE.RETURN_MS - 40 && back <= STABLE.RETURN_MS + 150, `it went home ${back} ms after the spot was free (RETURN_MS ${STABLE.RETURN_MS})`);
+});
+
 test('a step is capped at DT_MAX: a tab that was hidden for ten seconds does not make every debounce run out at once', () => {
   const T = tag('a', fig(300, 300), { w: 100 }), L = createLabelLayout();
   let t = 0; for (let k = 0; k < 30; k++) { t += 33; frame(L, { tags: [T] }, t); }

@@ -539,7 +539,8 @@ export function createOfis(root, ctx, opts = {}) {
   function placeLabels(now = lastT) {
     if (Math.abs(zoom / 38 - labelScale) >= LABEL_STEP * 0.75) labelScale = clamp(Math.round(zoom / 38 / LABEL_STEP) * LABEL_STEP, LABEL_MIN, 1);
     const s = labelScale, dpr = window.devicePixelRatio || 1, snap = v => Math.round(v * dpr) / dpr;
-    const fixed = [], tags = [], byId = new Map();
+    const fixed = [], tags = [], byId = new Map(), walkingBal = new Set();
+    for (const c of chars.values()) if (c.bal && c.mode === 'walk') walkingBal.add(c.bal);
     for (const L of labels) {
       if (!L.want || L.off || !inZoom(L)) { showLabel(L, false); continue; }
       // the label under a main agent says the project and the chip at every zoom (office-labels.js): the HTML sign for the far zoom would say it twice
@@ -556,7 +557,7 @@ export function createOfis(root, ctx, opts = {}) {
       L.k = k;
       byId.set(L.uid, L);
       const T = { id: L.uid, x, y, w, h, pri: L.pri, rank: L.rank, force: L.force, maxGap: L.force ? Infinity : SUB_LABEL_REACH };
-      if (L.agent) { const c = chars.get(L.charId); T.walking = !!c && c.mode === 'walk'; }
+      if (L.agent) { const c = chars.get(L.charId); T.walking = !!c && c.mode === 'walk'; } else T.walking = walkingBal.has(L);      // the balloon of a walker is carried like its card
       (L.agent ? tags : fixed).push(T);
     }
     const figs = ui.figureRects(chars.keys()), standing = [];
