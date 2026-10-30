@@ -19,7 +19,7 @@
 //                same fixture: 21.41 and 26.2), the building covers at least FOOT_SHARE of the window and half of its own box, and the box is between 16:10 and 16:9;
 //                a building grown past the hexagon (?rooms=21, 11 bays) is framed as the layout module calculates
 //   3d-walk      a sub-agent of a chat in the bar, in the north arm and in the south arm comes in from the street side along its hall's lane, over the paved
-//                path (an arm's hall is shorter than the building) and the plinth only, and sits at its desk; in the X and in a building grown to 11 bays
+//                path (an arm's hall is shorter than the building) and the plinth only, and sits on its seat; in the X and in a building grown to 11 bays
 //                (the bar has a fifth bay, so the entrance has moved)
 //
 // --mutations breaks the code in a copy of the repo, one line at a time, and runs the check that guards that line: every one must FAIL there
@@ -28,7 +28,7 @@
 import { cpSync, mkdtempSync, readFileSync, writeFileSync, mkdirSync, rmSync, renameSync, utimesSync, readdirSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { scenario3d, lookAt, o3, sleep, ROOT } from './harness3d.mjs';
+import { scenario3d, lookAt, o3, sleep, ROOT, recordFromStart } from './harness3d.mjs';
 import { MANIFEST } from '../../public/js/ofis-rig.js';
 import { MIN_ROOMS, baysFor, officesIn, buildingPlan, projectedBox, fitZoom } from '../../public/js/ofis-layout.js';
 import { MEASURE } from './map-measure.mjs';
@@ -242,13 +242,14 @@ const MUTATIONS = [
   // the vacant office is the slot's own room with the lights off: the same furniture, nobody in it, and still no meshes of its own
   { name: 'a vacant office is planned from another seed than the same slot with a chat', file: 'public/js/ofis.js', from: 'const plan = planRoom(lookOf(look), { door: it.door });', to: 'const plan = planRoom(lookOf(vac ? { ...look, seed: look.seed + 1 } : look), { door: it.door });', group: 'stable', fails: '3d-vacant' },
   { name: 'a vacant office keeps its lights on', file: 'public/js/ofis.js', from: 'for (const it of items) decor.setLit(it.slot, !it.vacant, instant);', to: 'for (const it of items) decor.setLit(it.slot, true, instant);', group: 'stable', fails: '3d-vacant' },
-  { name: 'a vacant office has its own door leaf, floor and sign meshes again', file: 'public/js/ofis.js', from: 'buildShell(B, g, X, Z, W, D, th, it.door, vac)', to: 'buildShell(B, g, X, Z, W, D, th, it.door, false)', group: 'stable', fails: '3d-vacant' },
+  { name: 'a vacant office has its own door leaf, floor and sign meshes again', file: 'public/js/ofis.js', from: 'buildShell(B, g, X, Z, W, D, th, it.door, vac && !open)', to: 'buildShell(B, g, X, Z, W, D, th, it.door, false)', group: 'stable', fails: '3d-vacant' },
   { name: 'a vacant office has a different look from the slot with a chat (the style follows the chat)', file: 'public/js/ofis.js', from: 'const look = world.looks.get(it.slot);', to: 'const look = it.vacant ? { ...world.looks.get(it.slot), style: (world.looks.get(it.slot).style + 1) % 6 } : world.looks.get(it.slot);', group: 'stable', fails: '3d-vacant' },
-  { name: 'a rebuild seats the sub-agents that are still walking', file: 'public/js/ofis.js', from: "if (c.mode === 'walk' && c.path && (c.slot < 0", to: "if (false && c.mode === 'walk' && c.path && (c.slot < 0", group: 'stable', fails: '3d-expand' },
+  { name: 'a rebuild seats the sub-agents that are still walking', file: 'public/js/ofis.js', from: "      if (walking) {\n        if (moved) startWalk(c, out ? leadOut(way, pos, c.path, c.pi) : rejoin(was, route, pos, c.path, c.pi), c.after);\n        continue;\n      }", to: "      if (walking) {\n        if (!out) { const e = route[route.length - 1]; pos.x = e.x; pos.z = e.z; c.path = null; c.mode = 'seated'; c.after = null; }\n        continue;\n      }", group: 'stable', fails: '3d-expand' },
   // the compact map: the fit, and the way in
   { name: 'the fit frames the box around the whole plan, not the footprint', file: 'public/js/ofis.js', from: 'for (const r of [...(world.footprint || [b]), ...(world.lots || [])])', to: 'for (const r of [b, ...(world.lots || [])])', group: 'fit', fails: '3d-fit' },
   { name: 'one plinth around the whole plan: the corners between the arms are paved and framed', file: 'public/js/ofis-layout.js', from: '  const bounds = { x0: Infinity, x1: -Infinity, z0: Infinity, z1: -Infinity };', to: '  { const rs = plinth.splice(0); plinth.push({ x0: Math.min(...rs.map(r => r.x0)), x1: Math.max(...rs.map(r => r.x1)), z0: Math.min(...rs.map(r => r.z0)), z1: Math.max(...rs.map(r => r.z1)), hall: 0 }); }\n  const bounds = { x0: Infinity, x1: -Infinity, z0: Infinity, z1: -Infinity };', group: 'fit', fails: '3d-fit' },
   { name: 'the walk starts beside the lane instead of on it', file: 'public/js/ofis.js', from: 'const p = [V(world.entryX, lane), V(room.doorX, lane)];', to: 'const p = [V(world.entryX, lane + 2.2), V(room.doorX, lane)];', group: 'walk', fails: '3d-walk' },
+  { name: 'a person ends 0.8 units from its seat', file: 'public/js/ofis.js', from: '    p.push(s.pos.clone());\n    return p;', to: '    p.push(s.pos.clone().add(V(0.8, 0, 0)));\n    return p;', group: 'walk', fails: '3d-walk' },
   { name: 'the arms have no path to the street', file: 'public/js/ofis.js', from: 'if (px1 - px0 > 0.1) {', to: 'if (false && px1 - px0 > 0.1) {', group: 'walk', fails: '3d-walk' },
 ];
 
@@ -312,13 +313,13 @@ async function runStable(ctx) {
       const f = join(dirs.dir, 'sessions', fx.pids[i] + '.json');
       writeFileSync(f, JSON.stringify({ ...JSON.parse(readFileSync(f, 'utf8')), status: 'busy', statusUpdatedAt: Date.now() }));
     };
-    const read = () => page.evaluate(o3(`({ office: o.office(), figs: o.figures().map(f => ({ id: f.id, main: f.main, mode: f.mode, x: +f.x.toFixed(3), z: +f.z.toFixed(3) })),
+    const read = () => page.evaluate(o3(`({ office: o.office(), figs: o.figures().map(f => ({ id: f.id, main: f.main, mode: f.mode, after: f.after, x: +f.x.toFixed(3), z: +f.z.toFixed(3) })),
       rooms: s.rooms.map(r => ({ id: r.id, slot: r.slot, cls: r.cls })), looks: o.looks(), zoom: s.zoom, fits: o.fits, builds: o.builds, t: performance.now(), err: v.dataset.hata || null })`));
     // wait until the scene shows `n` chats with a room (and a chief each), then give a rebuild a moment to finish
     const settle = async (n, more = () => true) => {
       for (let t = 0; t < 100; t++) {
         const st = await read().catch(() => null);
-        if (st && st.rooms.length === n && st.figs.filter(f => f.main).length === n && more(st)) { await sleep(500); return read(); }
+        if (st && st.rooms.length === n && st.figs.filter(f => f.main && f.after !== 'gone').length === n && more(st)) { await sleep(500); return read(); }      // a chief walking out of an office that closed does not count
         await sleep(300);
       }
       return read();
@@ -477,7 +478,7 @@ async function runStable(ctx) {
     for (const [cid, sl] of elevenSlots) if (slotOf(s12).get(cid) !== sl) ex.push(`chat ${cid.slice(0, 6)} lost its slot ${sl}`);
     if (s12.fits !== growWait.fits + 1 || s12.zoom > growWait.zoom + 1e-9) ex.push(`the view did not refit once to the bigger building (it frames the box of the footprint: the same zoom is possible when only its height grew) (refits ${growWait.fits} -> ${s12.fits}, zoom ${growWait.zoom.toFixed(2)} -> ${s12.zoom.toFixed(2)})`);
     if (subsOf3(s12) !== 9) ex.push(`${subsOf3(s12)} figures of the nine sub-agents after the rebuild`);
-    // the sub-agents still walking in when the building grew must go on walking from where they were (a rebuild that seated them would jump them to their desks)
+    // the sub-agents still walking in when the building grew must go on walking from where they were (a rebuild that seated them would jump them to their seats)
     const walkers = growWait.figs.filter(f => f.mode === 'walk' && s12.figs.some(g => g.id === f.id));
     const maxStep = WALK_SPEED * (s12.t - growWait.t) / 1000 * 1.5 + 0.6;
     const jumped = walkers.filter(f => { const g = s12.figs.find(x => x.id === f.id); return Math.hypot(g.x - f.x, g.z - f.z) > maxStep; });
@@ -545,50 +546,43 @@ async function runFit(ctx) {
     + (problems.length ? '; PROBLEMS: ' + problems.slice(0, 4).join(' | ') + (problems.length > 4 ? ` (and ${problems.length - 4} more)` : '') : ''))];
 }
 
-// ---- 3d-walk: a sub-agent in the bar, the north arm and the south arm walks in from the street side. Its walk is replayed from the entrance (s.replayEnter);
-// every few frames the figure is read: the first reading is at the entrance on the hall's lane, until the door it stays on the lane, every reading is on paved
-// ground (the plinth under the building or the path from an arm's hall to the street, o.office().stubs), and it ends on the desk it started from.
-// It runs in the X and in a building that has grown past the hexagon (?rooms=21: the bar has a fifth bay, so the entrance has moved and the arms' paths are longer).
+// ---- 3d-walk: a sub-agent in the bar, the north arm and the south arm walks in from the street side. The page opens with 10 chats and everybody in the data walks in; the scene's
+// recorder (s.rec, started the moment the scene exists: recordFromStart) has every frame of every figure. The first position of the figure is at the entrance on the hall's lane,
+// until the door it stays on the lane, every position is on paved ground (the plinth under the building or the path from an arm's hall to the street, o.office().stubs), and it
+// ends seated on its seat as the room has it (o.seatOf, not the end of the figure's own route; inside its room). It runs in the X and in a building that has grown past the hexagon (?rooms=21: the bar has a fifth bay, so the
+// entrance has moved and the arms' paths are longer). (Until the walkers' work it replayed a seated sub-agent's walk; now it watches the real one, from the page load.)
 async function runWalk(ctx) {
   const problems = [], notes = [];
   for (const [which, query] of [['X', ''], ['11 bays', 'rooms=21']]) {
-  const S = await scenario3d(10, { tag: 'walk' + (query ? 'g' : ''), root: ctx.root, query });
+  const S = await scenario3d(10, { tag: 'walk' + (query ? 'g' : ''), root: ctx.root, query, settle: false, intercept: recordFromStart });
   try {
     const { page } = S;
     if (!S.ready.ok) problems.push(`${which}: the scene did not become ready`);
-    const info = await page.evaluate(o3('({ office: o.office(), foot: o.footprint(), subs: s.subs(), figs: o.figures() })'));
-    const hallOf = new Map(info.office.slots.filter(r => r.id).map(r => [r.id, r.hall]));
-    const seated = info.subs.filter(x => x.mode === 'seated' && hallOf.has(x.room));
-    const pick = [];
-    for (let h = 0; h < info.office.halls.length; h++) { const c = seated.find(x => hallOf.get(x.room) === h); if (c) pick.push({ id: c.id, hall: h, room: c.room }); else problems.push(`${which}: no sub-agent sits in hall ${h} (the bar and the two arms each have a chat with one)`); }
-    const at0 = new Map(info.figs.map(f => [f.id, [f.x, f.z]]));
-    const rect = new Map(info.office.slots.filter(r => r.id).map(r => [r.id, r]));
-    for (const w of pick) if (!(await page.evaluate(o3(`s.replayEnter(${JSON.stringify(w.id)})`)))) problems.push(`${which}, hall ${w.hall}: the walk could not be replayed`);
-    const trace = new Map(pick.map(w => [w.id, []]));
     const t0 = Date.now();
-    while (Date.now() - t0 < 60000) {
-      const figs = await page.evaluate(o3('o.figures().map(f => ({ id: f.id, mode: f.mode, x: f.x, z: f.z }))'));
-      for (const w of pick) { const f = figs.find(x => x.id === w.id); if (f) trace.get(w.id).push(f); }
-      if (pick.every(w => { const t = trace.get(w.id); return t.length > 3 && t[t.length - 1].mode === 'seated'; })) break;
-      await sleep(120);
-    }
+    while (Date.now() - t0 < 90000 && (await page.evaluate(o3('s.walking.length'))) > 0) await sleep(250);
+    const info = await page.evaluate(o3('({ office: o.office(), foot: o.footprint(), subs: s.subs(), seats: Object.fromEntries(o.figures().map(f => [f.id, o.seatOf(f.id)])), rec: s.rec.take() })'));
+    const hallOf = new Map(info.office.slots.filter(r => r.id).map(r => [r.id, r.hall]));
+    const pick = [];
+    for (let h = 0; h < info.office.halls.length; h++) { const c = info.subs.find(x => hallOf.get(x.room) === h); if (c) pick.push({ id: c.id, hall: h, room: c.room }); else problems.push(`${which}: no sub-agent in hall ${h} (the bar and the two arms each have a chat with one)`); }
+    const rect = new Map(info.office.slots.filter(r => r.id).map(r => [r.id, r]));
     const E = info.office.entryX, onPlinth = (x, z, hall) => info.foot.some(r => x >= r.x0 - 0.05 && x <= r.x1 + 0.05 && z >= r.z0 && z <= r.z1)
       || info.office.stubs.some(r => r.hall === hall && x >= r.x0 - 0.05 && x <= r.x1 + 0.05 && z >= r.z0 && z <= r.z1);
     for (const w of pick) {
-      const t = trace.get(w.id), hall = info.office.halls[w.hall], r = rect.get(w.room), doorX = r.X + r.W - 1.0, seat = at0.get(w.id);
+      const t = info.rec.filter(e => e.id === w.id && (e.k === 'create' || e.k === 'frame')), hall = info.office.halls[w.hall], r = rect.get(w.room), doorX = r.X + r.W - 1.0, seat = info.seats[w.id];
       const tag = `${which}, hall ${w.hall} (${w.hall === 0 ? 'bar' : hall.row < 0 ? 'north arm' : 'south arm'})`;
-      if (t.length < 4) { problems.push(`${tag}: the walk was not seen`); continue; }
+      if (t.length < 4 || t[0].k !== 'create') { problems.push(`${tag}: the walk was not seen from its first frame`); continue; }
       const first = t[0], last = t[t.length - 1];
       if (first.x < E - 1.2 || Math.abs(first.z - hall.lane) > 0.7) problems.push(`${tag}: the walk starts at (${first.x.toFixed(1)}, ${first.z.toFixed(1)}), not at the entrance (${E.toFixed(1)}, lane ${hall.lane.toFixed(1)})`);
       const lawn = t.filter(f => !onPlinth(f.x, f.z, w.hall));
       if (lawn.length) problems.push(`${tag}: ${lawn.length} of ${t.length} readings are off the pavement, first at (${lawn[0].x.toFixed(1)}, ${lawn[0].z.toFixed(1)})`);
       const wander = t.filter(f => f.x > doorX + 0.9 && Math.abs(f.z - hall.lane) > 0.7);
       if (wander.length) problems.push(`${tag}: ${wander.length} readings before the door are off the lane (first at z ${wander[0].z.toFixed(1)}, lane ${hall.lane.toFixed(1)})`);
-      if (last.mode !== 'seated' || Math.hypot(last.x - seat[0], last.z - seat[1]) > 0.1) problems.push(`${tag}: it ends ${last.mode} at (${last.x.toFixed(1)}, ${last.z.toFixed(1)}), its desk is (${seat[0].toFixed(1)}, ${seat[1].toFixed(1)})`);
+      if (!seat || seat.x < r.X || seat.x > r.X + r.W || seat.z < r.Z || seat.z > r.Z + r.D) problems.push(`${tag}: its seat ${seat ? `(${seat.x.toFixed(1)}, ${seat.z.toFixed(1)})` : 'is unknown'} is not inside its room`);
+      else if (last.mode !== 'seated' || Math.hypot(last.x - seat.x, last.z - seat.z) > 0.1) problems.push(`${tag}: it ends ${last.mode} at (${last.x.toFixed(1)}, ${last.z.toFixed(1)}), its desk is (${seat.x.toFixed(1)}, ${seat.z.toFixed(1)})`);
       const stub = info.office.stubs.find(x => x.hall === w.hall);
-      notes.push(`${tag}: ${t.length} readings from x ${first.x.toFixed(1)} to the door ${doorX.toFixed(1)}${stub ? `, ${(stub.x1 - stub.x0).toFixed(1)} m of it on the paved path` : ''}`);
+      notes.push(`${tag}: ${t.length} frames from x ${first.x.toFixed(1)} to the door ${doorX.toFixed(1)}${stub ? `, ${(stub.x1 - stub.x0).toFixed(1)} m of it on the paved path` : ''}`);
     }
-    if (pick.length < 3) problems.push(`${which}: only ${pick.length} halls had a sub-agent to replay`);
+    if (pick.length < 3) problems.push(`${which}: only ${pick.length} halls had a sub-agent to follow`);
   } finally { await S.done(); }
   }
   return [make('3d-walk', problems.length === 0, `${notes.join('; ')}${problems.length ? '; PROBLEMS: ' + problems.slice(0, 4).join(' | ') + (problems.length > 4 ? ` (and ${problems.length - 4} more)` : '') : ''}`)];

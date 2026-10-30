@@ -45,7 +45,8 @@ export async function waitReady3d(page, minFigures, ms = 30000) {
 }
 
 // opts: { tag, query ('assets=procedural&polish=off'), fixture, width, height, dpr, reducedMotion (prefers-reduced-motion: reduce), root (serve another copy of the repo), intercept (async (page, srv) => void,
-//         runs before the page opens), beforeServer (async (fixture, dir) => void, runs before the server starts: files put away there can come back later) }; page.warnings collects the console warnings
+//         runs before the page opens), beforeServer (async (fixture, dir) => void, runs before the server starts: files put away there can come back later),
+//         settle (default true: once the scene is ready every walk is ended at once, s.settle(), so that the people are seated; false keeps the walk-in) }; page.warnings collects the console warnings
 export async function scenario3d(n, opts = {}) {
   const dir = join(tmpdir(), `cco-qa3d-${process.pid}-${n}${opts.tag || ''}`);
   const fx = await makeFixture({ dir, n, ...(opts.fixture || {}) });
@@ -63,9 +64,24 @@ export async function scenario3d(n, opts = {}) {
     await page.goto(`http://127.0.0.1:${srv.port}/?${q}#ofis`, 800);
     const expect = expectedFigures(agents);
     const ready = await waitReady3d(page, opts.minFigures ?? expect);
+    // Everybody in the data walks in from the entrance when the page opens (public/js/ofis.js, ofis-arrive.js), which takes up to about 10 s. The checks that look at seated
+    // people, desks, colours and rooms ask the scene to end every walk at once (the QA hook s.settle(); the app never calls it). Only the walkers' own QA (office3d-walk-qa.mjs)
+    // and the checks that watch a walk pass `settle: false`.
+    if (opts.settle !== false && ready.ok) { await page.evaluate(o3('s.settle()')); await sleep(800); }
     return { fx, srv, page, agents, expect, ready, done, dir };
   } catch (e) { await done(); throw e; }
 }
+
+// `intercept: recordFromStart` starts the scene's recorder (s.rec, public/js/ofis.js) the moment the scene exists, before the first sync, so that the first frame of every
+// figure, the one it is made in, is in the record. The scene is made when the page assigns `root.__ofis`, so the assignment is caught with a setter on Element.prototype.
+export const recordFromStart = async page => {
+  await page.send('Page.addScriptToEvaluateOnNewDocument', { source: `(() => {
+    Object.defineProperty(Element.prototype, '__ofis', { configurable: true, set(v) {
+      Object.defineProperty(this, '__ofis', { value: v, writable: true, configurable: true });
+      try { v.rec.start(); } catch (e) { /* a scene without a recorder */ }
+    } });
+  })()` });
+};
 
 // a camera on a room's chief desk (zoom: pixels per metre; the whole building at fit zoom is about 10 to 20), or on a world point
 export async function lookAtRoom(page, id, zoom = 70, at = { x: 2.2, y: 0.6, z: 3.4 }) {

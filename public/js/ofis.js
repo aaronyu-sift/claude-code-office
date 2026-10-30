@@ -1,5 +1,5 @@
 // Office: a 3D isometric office in the spirit of Game Dev Tycoon.
-// Every live session is a room; the main agent is the room's chief, subagents are the staff at the desks.
+// Every live session is a room; the main agent is the room's chief, subagents are the staff on the seats of the room.
 // The scene is drawn with three.js. Signs, name tags and balloons live in an HTML layer so they stay crisp.
 import * as THREE from 'three';
 import { RoundedBoxGeometry } from 'three/addons/geometries/RoundedBoxGeometry.js';
@@ -20,6 +20,7 @@ import * as AS from './ofis-assets.js';
 import * as PL from './ofis-polish.js';
 import { makePalette, PALETTES, chooseOutfit, poseBones, seatPose } from './ofis-rig.js';
 import { isShelved } from './pixel/shelf.js';
+import { WALK, STAGGER_S, STAND_S, TURN_S, arrivalPlan, pathLength, stepWalk, turnBack, rejoin, leadOut, routeSig } from './ofis-arrive.js';
 import {
   WALL_T, ROOM_D, FRONT_M, GAP, HALL_D, HALL_GAP, PLINTH_M, CAP, roomW,
   VACANT_CLS, minRoomsFrom, buildingPlan, classFor, nextClass, createSlots,
@@ -44,7 +45,6 @@ const SIGN_PX = 288;                      // sign texture height in pixels (for 
 const SIGN_FONT = '"Segoe UI Variable Text", "Segoe UI", system-ui, sans-serif';
 const SIGN_FONT_D = '"Segoe UI Variable Display", "Segoe UI", system-ui, sans-serif';
 const DOOR_W = 0.9, DOOR_H = 1.72;
-const WALK = 2.2;                         // units / s
 const FRAME_MS = 1000 / 30;
 const VIEW = new THREE.Vector3(1, 0.9, 1).normalize();
 const LIGHT = new THREE.Vector3(0.55, 1, 0.8).normalize();
@@ -453,6 +453,10 @@ export function createOfis(root, ctx, opts = {}) {
   const extraPointer = [];       // pointer hooks of the local module (api.onPointer), per build like extraFrame
   const extraFigs = [];          // people created by the local module (api.figures), per build
   const doorWalkers = [];        // x, z pairs from api.openDoorsNear for this frame; cleared after stepRooms
+  // ?arrive=calm: a page load, a scene switch or a rebuilt building sends everybody who is already in the data in at the normal pace (ofis-arrive.js hurries a big queue so that
+  // all are in their seat within about 10 seconds)
+  const CALM_LOAD = /[?&]arrive=calm(?:&|$)/.test(typeof location !== 'undefined' ? location.search : '');
+  const REC = { on: false, ev: [], dt: 0 };   // verification only (root.__ofis.rec): every figure's creation, removal and place on every frame (dt: the frame's step, 0 outside a frame)
   let shakeAmp = 0;              // camera shake strength in screen pixels (api.shake); decays every frame
   let activeTool = null;         // exclusive interaction mode of a local add-on (api.setTool); kept across builds
   const toolFns = [];            // api.onToolChange listeners, per build like extraFrame
@@ -565,7 +569,7 @@ export function createOfis(root, ctx, opts = {}) {
     scene.add(g);
     world.pick = [];
     world.screens = [];
-    const oldRooms = world.rooms, oldHalls = world.halls || [], oldEntry = world.entryX;
+    const oldRooms = world.rooms, oldHalls = world.halls || [], oldEntry = world.entryX, oldVacant = world.vacant || [];
     world.rooms = new Map();
     world.vacant = [];
     world.vacantSigns = [];
@@ -583,7 +587,7 @@ export function createOfis(root, ctx, opts = {}) {
     const aFirst = ex.find(x => x.row === 'first'), aLast = ex.find(x => x.row === 'last');
     const P = buildingPlan(plan.bays, { first: aFirst ? aFirst.w : 0, last: aLast ? aLast.w : 0 });
     const bySlot = new Map(list.map(it => [it.slot, it]));
-    // every office is a fixed cell: a room is as wide as its cell, the desks of its class fill the left of it and the rest is a lounge
+    // every office is a fixed cell: a room is as wide as its cell and has the seats of the largest class, the class only says how many are in use
     const items = P.cells.map(c => {
       const it = bySlot.get(c.slot);
       return it ? { ...c, id: it.id, cls: it.cls } : { ...c, id: 'vacant-' + c.slot, cls: VACANT_CLS, vacant: true };
@@ -619,12 +623,22 @@ export function createOfis(root, ctx, opts = {}) {
       B.box(cx, -0.012, cz, w + 0.06, 0.02, d + 0.06, '#b9b1a1');
     }
 
+    // an office whose chat has just left is vacant now, but its person may still be walking out of it: its door is a real one (it opens for the person) until the next rebuild
+    const roomIds = new Set(list.map(it => it.id));
+    const leavingSlots = new Set();
+    for (const c of chars.values()) if (!roomIds.has(c.roomId) && c.cell >= 0) leavingSlots.add(c.cell);
+    const oldBySlot = new Map([...oldRooms.values(), ...oldVacant].map(r => [r.slot, r]));
     items.forEach(it => {
       const n0 = B.i.length / 3, f0 = floorJobs.length;
-      const room = buildRoom(B, g, it);
+      const room = buildRoom(B, g, it, leavingSlots.has(it.slot));
       room.tris = B.i.length / 3 - n0;                        // verification only: the triangles of the office (its floor is added below)
       for (let k = f0; k < floorJobs.length; k++) floorJobs[k].room = room;
-      if (it.vacant) { world.vacant.push(room); return; }
+      if (it.vacant) {
+        const pv = oldBySlot.get(it.slot);
+        if (room.doorPivot && pv) room.doorOpen = pv.doorOpen;
+        world.vacant.push(room);
+        return;
+      }
       const prev = oldRooms.get(it.id);
       if (prev) room.doorOpen = prev.doorOpen;
       world.rooms.set(it.id, room);
@@ -683,22 +697,8 @@ export function createOfis(root, ctx, opts = {}) {
     g.add(sm);
 
 
-    // seat the characters in their new places; one on its way keeps walking when its room, its hall and the entrance did not move (the building grew elsewhere)
-    const spot = (r, halls, entry) => (r ? [r.X, r.Z, r.W, r.door, r.hall, halls[r.hall] && halls[r.hall].lane, entry].join() : '');
-    for (const c of [...chars.values()]) {
-      const room = world.rooms.get(c.roomId);
-      if (!room) { removeChar(c); continue; }
-      if (c.main) { seatChef(c, room); continue; }
-      if (c.mode === 'walk' && c.path && (c.slot < 0 || (c.slot < room.cap && !room.slotChar[c.slot])) && spot(oldRooms.get(c.roomId), oldHalls, oldEntry) === spot(room, world.halls, world.entryX)) {
-        if (c.slot >= 0) room.slotChar[c.slot] = c;
-        continue;
-      }
-      if (c.after === 'gone') { removeChar(c); continue; }
-      if (c.slot < 0 || c.slot >= room.cap || room.slotChar[c.slot]) c.slot = room.slotChar.indexOf(null);
-      if (c.slot < 0) { removeChar(c); continue; }
-      room.slotChar[c.slot] = c;
-      seatSub(c, room);
-    }
+    // the figures go on from where they stand (reconcileChars): none is seated on the spot or dropped
+    reconcileChars(oldRooms, oldHalls, oldEntry);
     for (const [id, L] of signs) if (!world.rooms.has(id)) { dropLabel(L); signs.delete(id); }
 
     applyBounds();
@@ -745,10 +745,28 @@ export function createOfis(root, ctx, opts = {}) {
     get builds() { return builds; },
     get models() { return { loaded: Object.keys(PK), failed: [...AS.packs.failed.keys()] }; },
     get look() { return { assets: AS.look.assets, polish: POLISH }; },
-    figures() { return [...chars.values()].map(c => ({ id: c.id, main: c.main, pack: !!c.pk, shirt: c.shirt, tinted: c.tinted, mode: c.mode, x: c.root.position.x, z: c.root.position.z })); },
+    figures() { return [...chars.values()].map(c => ({ id: c.id, main: c.main, pack: !!c.pk, shirt: c.shirt, tinted: c.tinted, mode: c.mode, after: c.after, vis: c.root.visible, x: c.root.position.x, z: c.root.position.z })); },
+    seatOf(id) { const c = chars.get(id); return c ? seatOfChar(c) : null; },              // the seat the room has for it (not the end of the figure's route): where a seated figure must be; the seat's own x, z, stand, facing, kind
+    routeOf(id) { const c = chars.get(id); return c && c.route ? c.route.map(p => [+p.x.toFixed(3), +p.z.toFixed(3)]) : null; },      // the route the figure came in by, entrance first and seat last (the way out is this reversed)
     draw() { renderer.render(scene, camera); return this.info; },
     figureVisible(id, on) { const c = chars.get(id); if (c) c.root.visible = !!on; },
     rebuildNow() { world.sig = ''; sync(); return this.rebuildMs; },
+    // the walkers' state (tools/qa/office3d-walk-qa.mjs): the figures that are in the scene graph (a figure removed from `chars` must not stay in it), the seats of every office and
+    // who sits on them, and how far every hinged door is open
+    roots() {
+      const ids = [], where = [];
+      for (const o of scene.children) {
+        if (o.userData && o.userData.figureOf) { const c = chars.get(o.userData.figureOf); ids.push(o.userData.figureOf); where.push({ id: o.userData.figureOf, x: +o.position.x.toFixed(2), z: +o.position.z.toFixed(2), vis: o.visible, own: !!c && c.root === o }); }
+      }
+      return { ids, where, tags: [...document.querySelectorAll('.of-l.of-tagl[data-id]')].filter(e => root.contains(e)).map(e => e.dataset.id), balloons: [...document.querySelectorAll('.of-l.of-ball[data-id]')].filter(e => root.contains(e)).map(e => e.dataset.id) };
+    },
+    seats() {
+      return {
+        rooms: [...world.rooms.values()].map(r => ({ id: r.id, slot: r.slot, cap: r.cap, seats: r.slotChar.map(c => (c ? c.id : null)) })),
+        figures: [...chars.values()].filter(c => !c.main).map(c => ({ id: c.id, room: c.roomId, slot: c.slot, after: c.after })),
+      };
+    },
+    doors() { return [...world.rooms.values(), ...(world.vacant || [])].filter(r => r.doorPivot).map(r => ({ id: r.id, slot: r.slot, vacant: !!r.vacant, door: r.door, open: +r.doorOpen.toFixed(3), x: r.doorPt.x, z: r.doorPt.z })); },
     // the rooms' life (ofis-decor.js): panes, lamps, candles and the light they give right now; the style of every room; the living meshes can be hidden to compare pictures
     get life() { return decor.stats(); },
     get lounge() { return lounge.snapshot(); },                   // the lounge: mode, state, the wall's posts and picture, the people, the poll, the card, what it cost (ofis-lounge.js)
@@ -909,7 +927,9 @@ export function createOfis(root, ctx, opts = {}) {
   // gets, with the lights off (decor.setLit through lightsFor) and nobody in it. What only an occupied office has: the sign with the chat's name, the door leaf, the dark overlay of a
   // sleeping chat, the beam and the rings of a chat that waits, and the boxes the pointer hits. A vacant office has a blank sign (addVacantSigns), a shut door of boxes (buildShell quiet)
   // and only its two outer walls block the pointer. Every office has the seats of the largest class (12 besides the chat's own): the class only says how many are in use.
-  function buildRoom(B, g, it) {
+  // `open`: a person is still walking out of this vacant office (its chat has just left), so for this build its door is a real, hinged one that opens for the person (the shut door of
+  // boxes comes back at the next build, once nobody is in the doorway).
+  function buildRoom(B, g, it, open = false) {
     const vac = !!it.vacant;
     const X = it.X, Z = it.Z, W = it.W, D = ROOM_D, T = WALL_T, H = WALL_H;
     const a = vac ? null : store.agents.get(it.id);
@@ -919,7 +939,7 @@ export function createOfis(root, ctx, opts = {}) {
     const r = rng(hash('room:' + it.slot));
     const b = (x, y, z, w, hh, d, col, ry) => B.box(X + x, y, Z + z, w, hh, d, col, ry);
 
-    const shell = buildShell(B, g, X, Z, W, D, th, it.door, vac);
+    const shell = buildShell(B, g, X, Z, W, D, th, it.door, vac && !open);
     const plan = planRoom(lookOf(look), { door: it.door });
     const V = (x, z) => new THREE.Vector3(X + x, 0, Z + z);
     // a seat of the plan in the building's coordinates: pos (the hip on the floor), facing (a heading), kind ('desk' | 'lounge' | 'stool'), hip (its height), stand (where a person stops
@@ -1362,8 +1382,8 @@ export function createOfis(root, ctx, opts = {}) {
    * api.agentScreen(id) → { cx, cy, w, h } | null: where the agent with that id is on the screen, in CSS px from the top left of
    *     the office view (the box api.pickFigure tests, projected; cx, cy is its centre), or null when it is not in the scene.
    *     The card that opens beside a clicked agent (ofis-ui.js) is anchored to it and follows it through pan, zoom and walking.
-   * api.seatOf(figure) → { x, z, aisleX, stand, facing, kind, room } for a seated agent: its seat, where it stood before it sat down (aisleX is that point's x), the heading it faces and the
-   * kind of seat ('desk' | 'lounge' | 'stool'): the room's arrangement decides all of it (ofis-arrange.js)
+   * api.seatOf(figure) → { x, z, aisleX, stand, facing, kind, hip, room } for a seated agent: its seat, where it stood before it sat down (aisleX is that point's x), the heading it faces,
+   * the kind of seat ('desk' | 'lounge' | 'stool') and the height of its cushion: the room's arrangement decides all of it (ofis-arrange.js)
    *     (world coordinates), or null (not an agent, or walking in or out).
    * api.layout() → { width, depth, entryX, halls: [{ z0, z1, lane, x0, x1 }], rooms: [{ id, x0, x1, z0, z1, door, doorX, hall }] }:
    *     the building is an X of rows (ofis-layout.js): its interior lies in x ≤ width, z ≤ depth, and its rows are not all as long as the
@@ -1561,11 +1581,7 @@ export function createOfis(root, ctx, opts = {}) {
       seatOf(fig) {
         for (const c of chars.values()) {
           if (!fig || c.root !== fig.root) continue;
-          const room = world.rooms.get(c.roomId);
-          if (!room || c.mode !== 'seated' || c.after === 'gone') return null;
-          const s = c.main ? room.chefSeat : c.slot >= 0 ? room.seats[c.slot] : null;
-          if (!s) return null;
-          return { x: s.pos.x, z: s.pos.z, aisleX: s.stand.x, stand: { x: s.stand.x, z: s.stand.z }, facing: s.facing, kind: s.kind, room: room.id };
+          return c.mode === 'seated' && c.after !== 'gone' ? seatOfChar(c) : null;
         }
         return null;
       },
@@ -1905,7 +1921,7 @@ export function createOfis(root, ctx, opts = {}) {
       // no chair of its own any more: the chief sits on the seat of the room (a lounge chair, a sofa, a stool: ofis-arrange.js), which stays where it is when the chief gets up
     }
     if (POLISH) {
-      // soft contact shadow under the person and the chair
+      // soft contact shadow under the person
       const bl = new THREE.Mesh(GEO.blobPlane, MAT.blob);
       bl.position.y = 0.03; bl.scale.set(0.95, 0.95, 1); bl.renderOrder = 1;
       root.add(bl);
@@ -1914,12 +1930,18 @@ export function createOfis(root, ctx, opts = {}) {
     hit.visible = false;
     hit.userData.pick = { t: 'agent', id };
     root.add(hit);
+    if (!plain) root.userData.figureOf = id;                // an agent's figure (api.roots tells these from the lounge's people)
     scene.add(root);
     const c = {
       id, main, root, hip, upper, head, armL, armR, legL, legR, hit, pk: f.bones || null, shirt, tinted: f.tinted ?? null,
       roomId: null, slot: -1, mode: 'seated', path: null, pi: 0, after: null,
       heading: -Math.PI / 2, th: -Math.PI / 2, sit: 1, walkPh: 0, ph: (h % 1000) / 159, doneAt: 0,
       tag: null, bal: null,
+      // the seat it sits on or walks to or from (the room's own seat object: kind, hip, facing; null before it has one)
+      seat: null,
+      // the walk (ofis-arrive.js): the route from the entrance to the seat, the distance walked on this path and its length, the pace, and the waits before moving:
+      // `delay` at the entrance (not drawn yet), `standT` to stand up, `turnT` to turn around; slotWas is the seat it left, cell the slot of the office it walks in or out of
+      route: null, travelled: 0, plen: 0, pace: 1, delay: 0, standT: 0, turnT: 0, slotWas: -1, cell: -1,
     };
     if (plain) return c;
     c.tag = mkLabel('of-tagl', main ? 70 : 40, 'down', 3, main ? 0 : 12);
@@ -1931,7 +1953,14 @@ export function createOfis(root, ctx, opts = {}) {
     return c;
   }
 
+  // verification only: a figure's life, as root.__ofis.rec reads it
+  function note(kind, c) {
+    if (REC.on) REC.ev.push({ k: kind, id: c.id, main: c.main, t: performance.now(), dt: REC.dt, x: c.root.position.x, z: c.root.position.z, mode: c.mode, after: c.after, vis: c.root.visible, sit: +c.sit.toFixed(2), pace: c.pace, delay: +c.delay.toFixed(3), hy: +c.hip.position.y.toFixed(4), stand: c.standT > 0, turn: c.turnT > 0, doneAt: c.doneAt });
+  }
+
+  // A figure leaves the scene only here, and only at the end of a walk out of the building (animChar), or when it never came in (it was still waiting at the entrance).
   function removeChar(c) {
+    note('remove', c);
     scene.remove(c.root);
     // a skinned figure has a bone texture of its own (made on its first draw): without skeleton.dispose() every person who leaves keeps one to two textures on the GPU for good
     c.root.traverse(o => { if (o.userData.own && o.geometry) o.geometry.dispose(); if (o.isSkinnedMesh && o.skeleton) o.skeleton.dispose(); });
@@ -1944,16 +1973,13 @@ export function createOfis(root, ctx, opts = {}) {
 
   // the seat of a person: the chat's own (room.chefSeat) or the sub-agent's slot (room.seats[slot]); both come from the room's arrangement (ofis-arrange.js)
   const seatFor = (room, slot) => (slot === 'chef' ? room.chefSeat : room.seats[slot]);
-  function seatChef(c, room) {
-    c.seat = room.chefSeat;
-    c.root.position.copy(room.chefSeat);
-    c.mode = 'seated'; c.path = null; c.sit = 1;
-  }
-  function seatSub(c, room) {
-    const s = c.seat = seatFor(room, c.slot);
-    c.root.position.copy(s.pos);
-    c.mode = 'seated'; c.path = null; c.after = null; c.sit = 1;
-    c.heading = c.th = s.facing;
+  // The seat a figure has in its room now, as api.seatOf and the QA read it: { x, z (the hip on the floor), aisleX (the x of the stand point), stand, facing, kind, hip (the height of the cushion), room }, or null for a
+  // figure with no seat now (its office is vacant, or it is on its way out and has given its slot up). It reads the room, not the figure's route, so a check of where a seated figure is
+  // can tell a route that ends away from the seat.
+  function seatOfChar(c) {
+    const room = world.rooms.get(c.roomId);
+    const s = room && (c.main ? room.chefSeat : c.slot >= 0 ? room.seats[c.slot] : null);
+    return s ? { x: s.pos.x, z: s.pos.z, aisleX: s.stand.x, stand: { x: s.stand.x, z: s.stand.z }, facing: s.facing, kind: s.kind, hip: s.hip, room: room.id } : null;
   }
   // The walk of a newcomer, from the building entrance (right end of the hall) along the hall lane to the room's door, through the door and across the room to the stand point of its
   // seat, then onto the seat. slot is a sub-agent's slot or 'chef' (the chat's own seat). The points inside the room are the seat's `approach` (ofis-arrange.js), which keeps clear of
@@ -1969,18 +1995,157 @@ export function createOfis(root, ctx, opts = {}) {
     p.push(s.pos.clone());
     return p;
   }
-  function enter(c, room) {
-    const p = pathFor(room, c.slot);
-    c.seat = seatFor(room, c.slot);
-    c.root.position.copy(p[0]);
-    c.path = p; c.pi = 1; c.mode = 'walk'; c.after = 'sit'; c.sit = 0;
-    c.heading = -Math.PI / 2;
+  // the way in for a figure (entrance first, seat last): the chief's own seat, or the sub-agent's at `slot`. The seat the route ends at is the room's: seatFor(room, seatKey(c, slot))
+  const seatKey = (c, slot) => (c.main ? 'chef' : slot);
+  const routeFor = (c, room, slot = c.slot) => pathFor(room, seatKey(c, slot));
+
+  // ---- The walk. A figure is made at the building entrance and nowhere else, walks in (the chief and the sub-agents alike) and sits on the seat its room has for it (a desk, a lounge
+  // seat or a stool: ofis-arrange.js). When its job ends it stands up if it was seated and walks the way it came, and is removed at the entrance. One that is still on its way in when
+  // the job ends turns around where it stands and walks back out the way it came. The pure parts (the pace, the stagger, the turn, the re-path) are in ofis-arrive.js.
+  const headingTo = (a, b) => Math.atan2(b.x - a.x, b.z - a.z);
+  const faceNext = c => {
+    const p = c.path && c.path[c.pi], pos = c.root.position;
+    if (p && Math.hypot(p.x - pos.x, p.z - pos.z) > 1e-4) c.th = headingTo(pos, p);
+  };
+  // `path` begins where the figure stands; `after` is what it does at the end of it: 'sit' (on its seat) or 'gone' (it is removed: the entrance)
+  function startWalk(c, path, after) {
+    c.path = path; c.pi = 1; c.mode = 'walk'; c.after = after;
+    if (after === 'gone') c.pace = 1;                    // only a queue that comes in on a page load is hurried: every walk out is at the normal pace
+    c.travelled = 0; c.plen = pathLength(path); c.standT = c.turnT = 0;
+    if (path.length < 2) finishWalk(c);
   }
-  function leave(c, room) {
-    const p = pathFor(room, c.slot).reverse();
-    if (room.slotChar[c.slot] === c) room.slotChar[c.slot] = null;
+  function finishWalk(c) {
+    const end = c.path && c.path[c.path.length - 1];
+    if (end) { c.root.position.x = end.x; c.root.position.z = end.z; }
+    c.path = null; c.delay = c.standT = c.turnT = 0;
+    c.root.visible = true;
+    if (c.after === 'gone') { removeChar(c); return; }
+    c.mode = 'seated'; c.after = null; c.th = c.seat ? c.seat.facing : -Math.PI / 2;      // the sit-down: animChar eases `sit` up and the figure turns to face where its seat faces
+  }
+  // A newcomer comes in at the building entrance (right end of the hall), walks along the hall to its room's door, across the room to the stand point of its seat and onto the seat (the
+  // chief to the chat's own seat). `plan` is { delay, pace } from arrivalPlan: a figure that has to wait its turn is at the entrance and not drawn until it is released.
+  function enter(c, room, plan, route = routeFor(c, room)) {
+    c.route = route;
+    c.cell = room.slot;
+    c.seat = seatFor(room, seatKey(c, c.slot));
+    c.root.position.set(route[0].x, 0, route[0].z);
+    c.sit = 0;
+    c.heading = c.th = headingTo(route[0], route[1]);
+    c.pace = plan ? plan.pace : 1;
+    c.delay = plan ? plan.delay : 0;
+    c.root.visible = c.delay <= 0;
+    startWalk(c, route.slice(), 'sit');
+    if (chars.get(c.id) === c) note('create', c);
+  }
+  // The job is over, or the chat is: a seated figure stands up (it is on its seat: the end of its route) and walks the way it came, to the entrance
+  function leaveRoom(c) {
+    const room = world.rooms.get(c.roomId);
+    if (room && c.slot >= 0 && room.slotChar[c.slot] === c) room.slotChar[c.slot] = null;
+    if (c.slot >= 0) c.slotWas = c.slot;
     c.slot = -1;
-    c.path = p; c.pi = 1; c.mode = 'walk'; c.after = 'gone';
+    const stand = c.sit > 0.5;
+    startWalk(c, turnBack(c.route, c.route.length, c.root.position), 'gone');
+    if (c.path) c.standT = stand ? STAND_S : 0;
+  }
+  // The job ends before the figure has reached its seat: it turns around where it stands and walks back the way it came (a figure still waiting at the entrance never
+  // showed: it is just not made)
+  function turnAround(c) {
+    if (c.delay > 0) { removeChar(c); return; }
+    const room = world.rooms.get(c.roomId), pos = c.root.position;
+    if (room && c.slot >= 0 && room.slotChar[c.slot] === c) room.slotChar[c.slot] = null;
+    if (c.slot >= 0) c.slotWas = c.slot;
+    c.slot = -1;
+    // a walk still on its original path turns back along the points it has passed; one that was re-routed goes out along its route (leadOut: the rest of its link first when it is not on it yet)
+    startWalk(c, c.path[0] === c.route[0] ? turnBack(c.path, c.pi, pos) : leadOut(c.route, pos, c.path, c.pi), 'gone');
+    if (c.path) c.turnT = TURN_S;
+  }
+  // The other way round: the figure is on its way out and the chat (or the job) is back. It turns around and walks to its seat again, to the seat it left if that is still free (then back along
+  // the way out), else to another seat of the room (back along the way out to where the two routes part, then in along the other).
+  function comeBack(c, room) {
+    let slot = -1;
+    if (!c.main) {
+      slot = c.slotWas >= 0 && c.slotWas < room.cap && !room.slotChar[c.slotWas] ? c.slotWas : room.slotChar.indexOf(null);
+      if (slot < 0) return false;
+    }
+    const route = routeFor(c, room, slot), way = rejoin(c.route, route, c.root.position, c.path, c.pi);
+    c.slot = slot;
+    if (slot >= 0) room.slotChar[slot] = c;
+    c.route = route;
+    c.seat = seatFor(room, seatKey(c, slot));
+    startWalk(c, way, 'sit');
+    if (c.path) c.turnT = TURN_S;
+    return true;
+  }
+  // A route made for an earlier building: the entrance (its first point) and the lane of its hall (the first two points) are those of the building now. The building grows to the
+  // right, so the entrance moves: the walk out of an office that has been vacant since an earlier build (nothing of it left but this route) ends at the entrance of today. The rest of
+  // the route, inside the office, is the office's own (the slot's arrangement) and does not change: it is as clear of furniture as it was.
+  function rebaseRoute(route, cell) {
+    const room = [...world.rooms.values(), ...(world.vacant || [])].find(r => r.slot === cell), hall = room && world.halls[room.hall];
+    const lane = hall ? hall.lane : route[0].z;
+    return route.map((p, i) => (i < 2 ? new THREE.Vector3(i ? p.x : world.entryX, 0, lane) : p));
+  }
+  // The office of a figure is vacant now (its chat ended or went to the shelf) and the figure is still in it: it walks out, over the route of the office it left as the hall and
+  // the entrance are now. Never a vanish; a figure that never left the entrance is just not made.
+  function exitVacated(c, old, entryMoved) {
+    if (c.delay > 0) { removeChar(c); return; }
+    if (c.slot >= 0) c.slotWas = c.slot;
+    c.slot = -1;
+    const walking = c.mode === 'walk' && c.path, out = walking && c.after === 'gone';
+    if (out && !entryMoved) return;
+    const pos = c.root.position;
+    let path;
+    if (old) path = leadOut(routeFor(c, old, Math.max(0, Math.min(c.slotWas, old.cap - 1))), pos, c.path, c.pi);
+    else if (c.route) path = leadOut(c.route = rebaseRoute(c.route, c.cell), pos, c.path, c.pi);
+    else {                                                // no route known: to the nearest hall lane, then to the entrance
+      let lane = pos.z;
+      for (const h of world.halls || []) if (lane === pos.z || Math.abs(h.lane - pos.z) < Math.abs(lane - pos.z)) lane = h.lane;
+      path = [{ x: pos.x, z: pos.z }, { x: pos.x, z: lane }, { x: world.entryX, z: lane }];
+    }
+    startWalk(c, path, 'gone');
+    if (c.path) { if (!walking) c.standT = STAND_S; else if (!out) c.turnT = TURN_S; }
+  }
+  // The building was rebuilt (a chat came, left or slept, a room grew, a bay was added): every figure goes on from where it stands, and nobody is dropped or put in a seat at
+  // once. A figure on its way keeps its walk when its room, its hall and the entrance did not move; one whose walk changed is re-pathed from where it stands (along the routes: rejoin,
+  // leadOut); a seated one whose seat moved (the room's class shrank under it) gets up and walks to the new seat; one that no longer has a seat walks out; one whose office is vacant
+  // now walks out of it (exitVacated).
+  function reconcileChars(oldRooms, oldHalls, oldEntry) {
+    const spot = (r, halls, entry) => (r ? [r.X, r.Z, r.W, r.door, r.hall, halls[r.hall] && halls[r.hall].lane, entry].join() : '');
+    for (const c of [...chars.values()]) {
+      const room = world.rooms.get(c.roomId), old = oldRooms.get(c.roomId);
+      if (!room) { exitVacated(c, old, oldEntry !== world.entryX || (!!old && spot(old, oldHalls, oldEntry) !== spot(old, world.halls, world.entryX))); continue; }
+      const same = !!old && spot(old, oldHalls, oldEntry) === spot(room, world.halls, world.entryX);
+      const out = c.after === 'gone', walking = c.mode === 'walk' && c.path;
+      if (!c.main && !out && (c.slot < 0 || c.slot >= room.cap || room.slotChar[c.slot])) c.slot = room.slotChar.indexOf(null);
+      const noSeat = !c.main && !out && c.slot < 0;
+      if (!c.main && !out && c.slot >= 0) room.slotChar[c.slot] = c;
+      const slot = c.slot >= 0 ? c.slot : Math.max(0, Math.min(c.slotWas, room.cap - 1));
+      const route = routeFor(c, room, slot), pos = c.root.position;
+      if (walking && c.delay > 0) {                          // still at the entrance, not drawn: it waits at the (new) entrance
+        if (noSeat) removeChar(c); else enter(c, room, { delay: c.delay, pace: c.pace }, route);
+        continue;
+      }
+      const was = c.route, moved = !same || !was || routeSig(was) !== routeSig(route);
+      // the way out, when it has to be one, is the way the figure came in: its own route as the entrance is now, not the route of a seat it never had
+      const way = was ? rebaseRoute(was, c.cell) : route;
+      c.cell = room.slot;
+      c.seat = seatFor(room, seatKey(c, slot));
+      if (noSeat) {                                          // its seat is gone and no other is free: out again
+        c.route = way;
+        startWalk(c, leadOut(way, pos, c.path, c.pi), 'gone');
+        if (c.path) { if (walking) c.turnT = TURN_S; else c.standT = STAND_S; }
+        continue;
+      }
+      c.route = out ? way : route;
+      if (walking) {
+        if (moved) startWalk(c, out ? leadOut(way, pos, c.path, c.pi) : rejoin(was, route, pos, c.path, c.pi), c.after);
+        continue;
+      }
+      const seat = route[route.length - 1];
+      if (Math.hypot(pos.x - seat.x, pos.z - seat.z) > 0.05) {      // its seat moved: it gets up and walks to the new one
+        startWalk(c, rejoin(was, route, pos), 'sit');
+        if (c.path) c.standT = STAND_S;
+      }
+    }
   }
 
   // ---------------------------------------------------------- sync with the data
@@ -2014,17 +2179,17 @@ export function createOfis(root, ctx, opts = {}) {
   function syncChars(instant) {
     const nowMs = performance.now();
     const seen = new Set();
+    const born = [];                                    // the figures made in this pass: they all begin at the entrance, one after the other (arrivalPlan)
     for (const room of world.rooms.values()) {
       const m = store.agents.get(room.id);
       if (!m) continue;
-      let chef = chars.get(room.id);
+      const chef = chars.get(room.id);
       if (!chef) {
-        chef = makeChar(room.id, true, m.color);
-        chef.roomId = room.id;
-        chars.set(room.id, chef);
-        seatChef(chef, room);
-        chef.heading = chef.th = (m.status === 'waiting' || m.status === 'ask') ? Math.PI / 4 : room.chefSeat.facing;
-      }
+        const c = makeChar(room.id, true, m.color);
+        c.roomId = room.id;
+        chars.set(room.id, c);
+        born.push({ c, room });
+      } else if (chef.after === 'gone') comeBack(chef, room);            // it was on its way out (the chat ended or slept) and the chat is back
       seen.add(room.id);
       let overflow = 0;
       for (const s of store.subsOf(room.id)) {
@@ -2037,30 +2202,34 @@ export function createOfis(root, ctx, opts = {}) {
           c.roomId = room.id; c.slot = slot;
           room.slotChar[slot] = c;
           chars.set(s.id, c);
-          if (instant) seatSub(c, room); else enter(c, room);
+          born.push({ c, room });
         }
         seen.add(s.id);
-        if (s.status === 'working') c.doneAt = 0;
-        else if (!c.doneAt) c.doneAt = nowMs;
-        if (c.mode === 'seated' && c.after !== 'gone' && c.doneAt && nowMs - c.doneAt > 4500) {
-          if (instant) removeChar(c); else leave(c, room);
+        if (s.status === 'working') {
+          c.doneAt = 0;
+          if (c.after === 'gone') comeBack(c, room);                      // the job started again while it was walking out
+        } else {
+          if (!c.doneAt) c.doneAt = nowMs;
+          if (c.mode === 'walk' && c.after === 'sit') { turnAround(c); continue; }       // the job ended before the seat: back out the way it came
         }
+        if (c.mode === 'seated' && c.after !== 'gone' && c.doneAt && nowMs - c.doneAt > DONE_SIT_MS) leaveRoom(c);
       }
       room.overflow = overflow;
     }
+    // everything made in this pass comes in now: the longest walks leave first, each 0.35 s after the one before; a page load (instant) hurries a queue of more than four so that
+    // all are seated within about 10 s (?arrive=calm keeps the normal pace)
+    if (born.length) {
+      for (const b of born) b.route = routeFor(b.c, b.room);
+      const plan = arrivalPlan(born.map(b => pathLength(b.route)), { rush: instant && !CALM_LOAD, start: entranceFreeIn() });
+      born.forEach((b, i) => enter(b.c, b.room, plan[i], b.route));
+    }
+    // a figure whose agent is gone from the data (the chat ended, the job is over) is never taken out of the scene on the spot: it walks out, or turns around if it is still coming in
     for (const c of [...chars.values()]) {
-      if (seen.has(c.id)) continue;
-      const room = world.rooms.get(c.roomId);
-      if (!room || instant || c.main) removeChar(c);
-      else if (c.after !== 'gone') {
-        if (c.mode === 'seated' && c.slot >= 0) leave(c, room);
-        else if (c.mode === 'walk' && c.path) {
-          c.path = [c.root.position.clone(), ...c.path.slice(0, c.pi).reverse()];
-          c.pi = 1; c.after = 'gone';
-          if (c.slot >= 0 && room.slotChar[c.slot] === c) room.slotChar[c.slot] = null;
-          c.slot = -1;
-        }
-      }
+      if (seen.has(c.id) || c.after === 'gone') continue;
+      if (c.delay > 0) removeChar(c);                                      // still waiting at the entrance: it never showed
+      else if (!world.rooms.has(c.roomId)) exitVacated(c, null, true);
+      else if (c.mode === 'walk' && c.path) turnAround(c);
+      else leaveRoom(c);
     }
   }
 
@@ -2105,7 +2274,7 @@ export function createOfis(root, ctx, opts = {}) {
     }
     for (const c of chars.values()) {
       const a = store.agents.get(c.id);
-      if (!a) continue;
+      if (!a) { c.bal.want = false; continue; }         // on its way out after the job: no balloon about work that is over (the name stays until it is out)
       const wait = c.main && (a.status === 'waiting' || a.status === 'ask');
       // the same text as the pixel scene's label (office-labels.js), with the "what it does" line for sub-agents too
       const room = c.main ? world.rooms.get(c.id) : null;
@@ -2135,32 +2304,45 @@ export function createOfis(root, ctx, opts = {}) {
   // ---------------------------------------------------------- frame-by-frame animation
 
   const tgt = { lx: 0, lz: 0, rx: 0, rz: 0, up: 0, hx: 0, hz: 0 };
+  const WK = { x: 0, z: 0, path: null, pi: 0, travelled: 0, plen: 0 };      // a figure's walk, as stepWalk (ofis-arrive.js) takes it
+  const DONE_SIT_MS = 4500;                          // a sub-agent that is done stays on its seat this long (the check mark), then it leaves
+  let lastDoneSweep = 0;
+  // the entrance clock: the scene's own time (the sum of the frame steps, what the waits at the entrance count down on) and the time the last figure of any pass left the entrance.
+  // A figure made in the next poll leaves STAGGER_S after the last one that left or is still to leave (entranceFreeIn), and not with it. The clock is read from the figures that
+  // wait, so that one that was never drawn (its job ended first) does not hold the entrance.
+  let sceneT = 0, lastRelease = -1e9;
+  function entranceFreeIn() {
+    let t = lastRelease + STAGGER_S - sceneT;
+    for (const c of chars.values()) if (c.mode === 'walk' && c.delay > 0) t = Math.max(t, c.delay + STAGGER_S);
+    return Math.max(0, t);
+  }
   function animChar(c, dt, T) {
     const a = store.agents.get(c.id);
     const pos = c.root.position;
+    let moving = false;
     if (c.force && c.force.still) T = 0;                  // a person of the lounge under prefers-reduced-motion keeps still (ofis-lounge.js)
 
     if (c.mode === 'walk' && c.path) {
-      const p = c.path[c.pi];
-      const dx = p.x - pos.x, dz = p.z - pos.z, d = Math.hypot(dx, dz), stp = WALK * dt;
-      if (d <= stp) {
-        pos.x = p.x; pos.z = p.z; c.pi++;
-        if (c.pi >= c.path.length) {
-          c.path = null;
-          if (c.after === 'gone') { removeChar(c); return; }
-          c.mode = 'seated'; c.after = null; c.th = c.seat ? c.seat.facing : -Math.PI / 2;
-        }
-      } else {
-        pos.x += dx / d * stp; pos.z += dz / d * stp;
-        c.th = Math.atan2(dx, dz);
+      if (c.delay > 0) {                                // waiting at the entrance, not drawn: its turn has not come
+        c.delay -= dt;
+        if (c.delay <= 0) { c.delay = 0; c.root.visible = true; lastRelease = sceneT; }
+      } else if (c.standT > 0) { c.standT -= dt; faceNext(c); }           // stands up first
+      else if (c.turnT > 0) { c.turnT -= dt; faceNext(c); }               // turns around first
+      else {
+        WK.x = pos.x; WK.z = pos.z; WK.path = c.path; WK.pi = c.pi; WK.travelled = c.travelled; WK.plen = c.plen;
+        const r = stepWalk(WK, dt, { pace: c.pace });
+        pos.x = WK.x; pos.z = WK.z; c.pi = WK.pi; c.travelled = WK.travelled;
+        moving = r.moved > 1e-6;
+        c.walkPh += r.moved * (10 / WALK);              // the legs are paced by the distance, so the feet do not slide
+        if (r.done) { finishWalk(c); if (!chars.has(c.id)) return; }
+        else if (Math.hypot(r.hx, r.hz) > 1e-6) c.th = Math.atan2(r.hx, r.hz);
       }
-      c.walkPh += dt * 10;
     }
 
     let pose = 'idle';
     const st = a ? a.status : 'done';
     const cat = a && a.act ? a.act.c : 'think';
-    if (c.mode === 'walk') pose = 'walk';
+    if (c.mode === 'walk') pose = moving ? 'walk' : 'idle';
     else if (st === 'working') pose = cat === 'think' ? 'think' : 'type';
     else if (c.main && (st === 'waiting' || st === 'ask')) pose = 'wave';
     else if (st === 'dormant') pose = 'sleep';
@@ -2202,11 +2384,12 @@ export function createOfis(root, ctx, opts = {}) {
     const legSwing = pose === 'walk' ? sw * 0.6 : 0;
     c.legL.rotation.x = sp.legs * c.sit + legSwing * (1 - c.sit);
     c.legR.rotation.x = sp.legs * c.sit - legSwing * (1 - c.sit);
-    c.hip.position.y = lerp(0.42, seatHip(c) + 0.03, c.sit) + (pose === 'walk' ? Math.abs(Math.cos(c.walkPh)) * 0.03 : 0);
+    // a walk is information, not decoration: with reduced motion the figure still walks, at the same pace, only without the bounce of its step
+    c.hip.position.y = lerp(0.42, seatHip(c) + 0.03, c.sit) + (pose === 'walk' && !atmosphere.state.reducedMotion ? Math.abs(Math.cos(c.walkPh)) * 0.03 : 0);
 
     const sc = c.force ? c.force.scale : c.mode === 'walk' ? clamp((world.entryX + 0.15 - pos.x) / 0.9, 0.02, 1) : 1;
     c.root.scale.setScalar(sc);
-    if (c.tag) { c.tag.off = c.bal.off = sc < 0.7; c.tag.pos.set(pos.x, 0, pos.z); }
+    if (c.tag) { c.tag.off = c.bal.off = sc < 0.7 || c.delay > 0; c.tag.pos.set(pos.x, 0, pos.z); }
     if (c.pk) applyPack(c);
     if (c.bal) c.bal.pos.set(pos.x, c.pk ? c.pivotW + PK_TOP * PK_K + 0.25 : c.hip.position.y + 1.08, pos.z);
   }
@@ -2220,7 +2403,9 @@ export function createOfis(root, ctx, opts = {}) {
       const m = store.agents.get(s.room);
       let col = SCR_OFF, pulse = 1;
       if (s.kind === 'chef') {
-        if (m && m.status === 'working') { col = catColor(m.act ? m.act.c : 'think'); pulse = s.slot ? 0.78 : 0.95 + Math.sin(T * 2.4 + i) * 0.08; }
+        const ch = chars.get(s.room);                                     // the chief's screen is dark until the chief has sat down, as a sub-agent's is
+        if (!ch || ch.mode !== 'seated' || ch.sit < 0.85) { col = SCR_OFF; }
+        else if (m && m.status === 'working') { col = catColor(m.act ? m.act.c : 'think'); pulse = s.slot ? 0.78 : 0.95 + Math.sin(T * 2.4 + i) * 0.08; }
         else if (m && m.status !== 'dormant') { col = SCR_IDLE; pulse = s.slot ? 0.8 : 1; }
       } else if (room) {
         const c = room.slotChar[s.slot];
@@ -2261,22 +2446,39 @@ export function createOfis(root, ctx, opts = {}) {
           room.lamp.material.color.set(YELLOW).multiplyScalar(0.75 + 0.35 * blink);
         }
       }
-      let near = false;
-      for (const c of chars.values()) {
-        if (c.roomId !== room.id || c.mode !== 'walk') continue;
-        const p = c.root.position;
-        if (room.doorPivot && Math.abs(p.x - room.doorPt.x) < 0.9 && Math.abs(p.z - room.doorPt.z) < 1.15) { near = true; break; }
-      }
-      for (let i = 0; !near && room.doorPivot && i < doorWalkers.length; i += 2) {
-        if (Math.abs(doorWalkers[i] - room.doorPt.x) < 0.9 && Math.abs(doorWalkers[i + 1] - room.doorPt.z) < 1.15) near = true;
-      }
-      room.doorOpen = lerp(room.doorOpen, near ? 1 : 0, Math.min(1, dt * 6));
-      if (room.doorPivot) room.doorPivot.rotation.y = -1.35 * room.doorOpen;
+      stepDoor(room, dt);
     }
+    for (const room of world.vacant || []) stepDoor(room, dt);       // an office whose person is still walking out has a real door
+  }
+
+  // The door opens for anybody who walks through it (an agent coming in or going out, the chief included, or a person of a local add-on: api.openDoorsNear)
+  function stepDoor(room, dt) {
+    if (!room.doorPivot) return;
+    let near = false;
+    for (const c of chars.values()) {
+      if (c.mode !== 'walk' || c.delay > 0) continue;
+      const p = c.root.position;
+      if (Math.abs(p.x - room.doorPt.x) < 0.9 && Math.abs(p.z - room.doorPt.z) < 1.15) { near = true; break; }
+    }
+    for (let i = 0; !near && i < doorWalkers.length; i += 2) {
+      if (Math.abs(doorWalkers[i] - room.doorPt.x) < 0.9 && Math.abs(doorWalkers[i + 1] - room.doorPt.z) < 1.15) near = true;
+    }
+    room.doorOpen = lerp(room.doorOpen, near ? 1 : 0, Math.min(1, dt * 6));
+    room.doorPivot.rotation.y = -1.35 * room.doorOpen;
   }
 
   function step(dt, T) {
+    sceneT += dt;
+    // a sub-agent that is done sits out its 4.5 s (the check mark), then gets up: the time runs on the frame clock, not on the next update from the data
+    if (T - lastDoneSweep > 0.5) {
+      lastDoneSweep = T;
+      const nowMs = performance.now();
+      for (const c of [...chars.values()]) if (!c.main && c.mode === 'seated' && c.after !== 'gone' && c.doneAt && nowMs - c.doneAt > DONE_SIT_MS) leaveRoom(c);
+    }
+    REC.dt = dt;
     for (const c of [...chars.values()]) animChar(c, dt, T);
+    if (REC.on) for (const c of chars.values()) note('frame', c);
+    REC.dt = 0;
     for (const fn of extraFrame) { try { fn(T, dt); } catch { /* decoration frame callback */ } }
     stepScreens(T);
     stepRooms(dt, T);
@@ -2389,7 +2591,7 @@ export function createOfis(root, ctx, opts = {}) {
     NDC.set(x / vw * 2 - 1, -(y / vh) * 2 + 1);
     ray.setFromCamera(NDC, camera);
     const objs = world.pick.slice();
-    for (const c of chars.values()) objs.push(c.hit);
+    for (const c of chars.values()) if (c.delay <= 0) objs.push(c.hit);       // a figure that still waits at the entrance is not drawn and cannot be clicked
     for (const c of lounge.people()) objs.push(c.hit);
     const hits = ray.intersectObjects(objs, false);
     for (const h of hits) {
@@ -2641,8 +2843,26 @@ export function createOfis(root, ctx, opts = {}) {
     get env() { return env.stats; },
     get walking() { return [...chars.values()].filter(c => c.mode === 'walk').map(c => c.id); },
     subs() { return [...chars.values()].filter(c => !c.main).map(c => ({ id: c.id, mode: c.mode, room: c.roomId })); },
-    // verification only: replay a seated subagent's walk in from the entrance
+    // Verification only, the app never calls these (tools/qa/office3d-walk-qa.mjs, the QA that expects seated figures). settle() ends every walk at once: a figure on its way in is
+    // seated on its seat, one on its way out is removed at the entrance, one still waiting at the entrance is released and seated; it returns how many walks it ended.
+    // rec.start() begins to record every figure's creation, removal and place on every frame (events { k: 'create' | 'frame' | 'remove', id, t, dt, x, z, mode, after, vis, ... });
+    // rec.take() returns what was recorded since and clears it, rec.stop() stops.
+    sync() { if (visible) sync(); },         // an update from the data now, for a check that changes the store itself
+    settle() {
+      let n = 0;
+      lastRelease = -1e9;                                 // nobody waits at the entrance any more
+      for (const c of [...chars.values()]) {
+        if (c.mode !== 'walk' || !c.path) continue;
+        n++;
+        finishWalk(c);
+        if (chars.get(c.id) === c) { c.sit = 1; c.heading = c.th; }
+      }
+      return n;
+    },
+    // replay a seated sub-agent's walk in from the entrance, as a newcomer walks (tools/qa/office3d-cowork-qa.mjs follows people through a room with it)
     replayEnter(id) { const c = chars.get(id), room = c && world.rooms.get(c.roomId); if (!c || c.main || !room || c.slot < 0) return false; enter(c, room); return true; },
+    rec: { start() { REC.ev.length = 0; REC.on = true; }, take() { return REC.ev.splice(0); }, stop() { REC.on = false; REC.ev.length = 0; } },
+    get pace() { return Object.fromEntries([...chars.values()].map(c => [c.id, c.pace])); },
   };
 
   return {
