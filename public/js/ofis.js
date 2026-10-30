@@ -449,7 +449,7 @@ export function createOfis(root, ctx, opts = {}) {
   let labelSeq = 0;
   const signs = new Map();       // session id → sign label
   const themeOf = new Map();     // project → theme index; open projects get distinct colors when possible
-  const styleOf = new Map();     // project → room style index (ofis-styles.js): the style a room has, kept while the page is open
+  const styleOf = new Map();     // chat id → room style index (ofis-styles.js): the style a room has, kept while the page is open
   let extras = null;             // optional local decoration module { mod, w }
   const extraLabels = [];
   const extraFrame = [];
@@ -484,9 +484,9 @@ export function createOfis(root, ctx, opts = {}) {
       themeOf.set(p, t);
       used.add(t);
     }
-    // the same for the room style: the project's own pick (a hash), a free one when it is taken, and never the style of the office next to it (ofis-styles.js assignStyles)
-    const named = list.map(it => { const a = store.agents.get(it.id); return { project: (a && a.project) || it.id, slot: it.slot }; });
-    for (const [p, i] of assignStyles(live, styleOf, neighbourMap(named, cells))) styleOf.set(p, i);
+    // the same for the room style, but per chat, not per project: chats started from the same folder (all of them, for someone who works from home) must not
+    // all get the same style. The chat's own pick (a hash of its id), a free one when it is taken, and never the style of the office next to it (ofis-styles.js assignStyles)
+    for (const [k, i] of assignStyles(list.map(it => it.id), styleOf, neighbourMap(list.map(it => ({ project: it.id, slot: it.slot })), cells))) styleOf.set(k, i);
   }
 
   // ---------------------------------------------------------- label layer
@@ -752,7 +752,7 @@ export function createOfis(root, ctx, opts = {}) {
     // the rooms' life (ofis-decor.js): panes, lamps, candles and the light they give right now; the style of every room; the living meshes can be hidden to compare pictures
     get life() { return decor.stats(); },
     lifeVisible(on, part) { decor.setVisible(on, part); },
-    styles() { return Object.fromEntries([...world.rooms.keys()].map(id => { const a = store.agents.get(id), key = (a && a.project) || id; return [id, styleAt(styleOf.get(key) ?? hash(key)).id]; })); },
+    styles() { return Object.fromEntries([...world.rooms.keys()].map(id => [id, styleAt(styleOf.get(id) ?? hash(id)).id])); },
     view(x, y, z, zm) { autoFit = false; camA = PV.set(x, y, z).dot(R); camB = PV.dot(U); lim = { a0: -1e9, a1: 1e9, b0: -1e9, b1: 1e9 }; zoom = clamp(zm, 1, 400); applyCam(); return [camA, camB, zoom]; },
     room(id) { const r = world.rooms.get(id) || (world.vacant || []).find(v => v.id === id); return r ? { X: r.X, Z: r.Z, W: r.W, D: r.D } : null; },
     // every office of the building, vacant ones included, in slot order: the stable layout's state (tools/qa/office3d-qa.mjs)
@@ -925,7 +925,7 @@ export function createOfis(root, ctx, opts = {}) {
     const a = store.agents.get(it.id);
     const key = (a && a.project) || it.id;
     const base = THEMES[themeOf.get(key) ?? (hash(key) % THEMES.length)];
-    const style = styleAt(styleOf.get(key) ?? hash(key));
+    const style = styleAt(styleOf.get(it.id) ?? hash(it.id));
     const th = { wall: wallColour(base, style), floor: floorColour(base, style), pattern: style.floor.pattern, wain: style.wain };      // the project's colours, tinted by the room's style
     const r = rng(hash(it.id));
     const b = (x, y, z, w, hh, d, col, ry) => B.box(X + x, y, Z + z, w, hh, d, col, ry);

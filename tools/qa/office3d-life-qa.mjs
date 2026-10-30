@@ -1,11 +1,12 @@
 // QA of the life in the 3D rooms (public/js/ofis-styles.js: the room styles and where things go, ofis-light.js: the light rules, ofis-decor.js: what is drawn):
 // headless Chrome with software WebGL in a throw-away profile, the server against a fake ~/.claude, one `CHECK 3d-room-life PASS|FAIL <detail>` line and a
 // final `QA PASS` or `QA FAIL`.
-//   node tools/qa/office3d-life-qa.mjs [--scenes night,day,reduced] [--mutations [--mutation <words>[,<words>]]] [--shots <dir>]
+//   node tools/qa/office3d-life-qa.mjs [--scenes night,day,reduced,folder] [--mutations [--mutation <words>[,<words>]]] [--shots <dir>]
 //
-//   3d-room-life  three scenes: 22:00 with 6 chats (5 offices with a chat, one asleep), 13:00 with 3 chats, and 22:00 with 3 chats and prefers-reduced-motion
+//   3d-room-life  four scenes: 22:00 with 6 chats (5 offices with a chat, one asleep), 13:00 with 3 chats, 22:00 with 3 chats and prefers-reduced-motion, and
+//     22:00 with 4 chats that all work in one folder (their rooms must still differ: the style is the chat's, not the project's)
 //     - every office with a chat has a window and a lamp (and no vacant office has a lamp); the plan the scene was given is the style the office was drawn in
-//     - two offices of different projects differ in style, and the pictures differ (the mean colour of the middle of the office)
+//     - two offices differ in style, and the pictures differ (the mean colour of the middle of the office), also when their chats share one folder (scene 4)
 //     - the lamps glow at 22:00 and not at 13:00: the colour that went to the GPU, and the pixels around the lamp with and without the living part
 //     - the windows show the sky by day and a warm light at night
 //     - the living part is 3 draw calls, the building is inside the typical budget of 3d-vacant (office3d-qa.mjs), nothing leaves 127.0.0.1
@@ -163,7 +164,6 @@ async function observe({ tag, n, query, reducedMotion = false, root, pictures = 
       out.means = means.map(m => m.map(Math.round));
       let pairs = 0, same = [], styleSame = [], gap = Infinity;
       for (let i = 0; i < rooms.length; i++) for (let j = i + 1; j < rooms.length; j++) {
-        if (rooms[i].project === rooms[j].project) continue;
         pairs++;
         if (styles[rooms[i].id] === styles[rooms[j].id]) styleSame.push(`${rooms[i].project}/${rooms[j].project}`);
         const d = dist(means[i], means[j]);
@@ -171,7 +171,7 @@ async function observe({ tag, n, query, reducedMotion = false, root, pictures = 
         if (d < LIFE.styleGap) same.push(`${rooms[i].project}/${rooms[j].project} ${d.toFixed(1)}`);
       }
       out.styleGap = { pairs, gap: +gap.toFixed(1), styles: [...new Set(rooms.map(r => styles[r.id]))].length };
-      if (styleSame.length) bad(`offices of different projects share a style: ${styleSame.join(', ')}`);
+      if (styleSame.length) bad(`offices share a style: ${styleSame.join(', ')}`);
       if (same.length) bad(`offices of different style look alike (mean colour gap under ${LIFE.styleGap}): ${same.join(', ')}`);
     }
     if (shotsDir && pictures) {
@@ -184,7 +184,7 @@ async function observe({ tag, n, query, reducedMotion = false, root, pictures = 
   } finally { await S.done(); }
 }
 
-const want = new Set((val('scenes') || 'night,day,reduced').split(','));
+const want = new Set((val('scenes') || 'night,day,reduced,folder').split(','));
 
 // the three scenes
 export async function runLife({ root, scenes = want } = {}) {
@@ -192,9 +192,10 @@ export async function runLife({ root, scenes = want } = {}) {
   if (scenes.has('night')) runs.push(await observe({ tag: 'night', n: 6, query: NIGHT, root, pictures: true }));
   if (scenes.has('day')) runs.push(await observe({ tag: 'day', n: 3, query: DAY, root, fixture: { subs: () => [] } }));
   if (scenes.has('reduced')) runs.push(await observe({ tag: 'reduced', n: 3, query: NIGHT, reducedMotion: true, root, fixture: { subs: () => [] } }));
+  if (scenes.has('folder')) runs.push(await observe({ tag: 'folder', n: 4, query: NIGHT, root, pictures: true, fixture: { sameProject: 'home', subs: () => [] } }));
   const problems = runs.flatMap(r => r.problems);
   const by = tag => runs.find(r => r.tag === tag);
-  const nt = by('night'), dy = by('day'), rd = by('reduced');
+  const nt = by('night'), dy = by('day'), rd = by('reduced'), fd = by('folder');
   const parts = [];
   if (nt && nt.life) {
     parts.push(`22:00, 6 chats: ${nt.rooms} offices with a chat, each with a window (${Object.values(nt.life.windowsByRoom).join(',')}) and a lamp (${Object.values(nt.life.byRoom).map(k => k.length + ' sources').join(', ')}), ${nt.life.lights} sources in all, `
@@ -203,6 +204,7 @@ export async function runLife({ root, scenes = want } = {}) {
   }
   if (dy && dy.life) parts.push(`13:00, 3 chats: lamp glow ${dy.glows.join(' ')} (at most ${LIFE.glowDay}), light gained ${dy.gain.map(g => g.gain.toFixed(4)).join(' ')} (at most ${LIFE.gainDay}), window ${dy.panes.map(p => p && p.join('/')).join(' ')}, ${dy.calls.with} draw calls (${TYPICAL.calls}) and ${dy.calls.tris} triangles (${TYPICAL.tris})`);
   if (rd && rd.life) parts.push(`22:00 with prefers-reduced-motion, 3 chats: ${rd.flicker ? `${rd.flicker.sources} lit sources, widest change ${(rd.flicker.widest * 100).toFixed(2)} percent` : 'not sampled'}, the scene knows it: ${rd.reduced}`);
+  if (fd && fd.styleGap) parts.push(`22:00, 4 chats in one folder: ${fd.styleGap.styles} different styles (${Object.values(fd.styles).slice(0, fd.rooms).join(', ')}), offices of different style at least ${fd.styleGap.gap} apart in mean colour`);
   const foreign = runs.reduce((s, r) => s + (r.foreign ? r.foreign.length : 0), 0);
   parts.push(`requests that leave 127.0.0.1: ${foreign}`);
   return [make('3d-room-life', problems.length === 0 && runs.length > 0, parts.join('; ') + (problems.length ? '; PROBLEMS: ' + problems.slice(0, 5).join(' | ') + (problems.length > 5 ? ` (and ${problems.length - 5} more)` : '') : ''))];
@@ -213,6 +215,7 @@ const D = 'public/js/ofis-decor.js', L = 'public/js/ofis-light.js', ST = 'public
 const MUTATIONS = [
   { name: 'no window is drawn: the pane of a window is never made', file: D, from: "      const pane = (wall, a, y, w, h, extra = {}) => build.panes.push(", to: "      const pane = (wall, a, y, w, h, extra = {}) => extra.kind === 'window' ? 0 : build.panes.push(", scenes: ['night'] },
   { name: 'no lamp: the light sources of a plan are not collected', file: D, from: "      for (const l of plan.lights) build.lights.push(", to: "      for (const l of plan.lights.filter(l => l.kind !== 'lamp')) build.lights.push(", scenes: ['night'] },
+  { name: 'the style is the project\'s again: chats in one folder share a style', file: O, from: 'const style = styleAt(styleOf.get(it.id) ?? hash(it.id));', to: 'const style = styleAt(hash((a && a.project) || it.id));', scenes: ['folder'] },
   { name: 'every office gets the same style', file: ST, from: 'export const styleAt = i => STYLES[STYLE_IDS[((i % N) + N) % N]];', to: 'export const styleAt = i => STYLES[STYLE_IDS[0]];', scenes: ['night'] },
   { name: 'the lamps glow in the daytime', file: L, from: '  const L = LEVEL[kind] || LEVEL.lamp;\n', to: "  if (kind === 'lamp') return { bulb: 1, glow: 1, pool: 1 };\n  const L = LEVEL[kind] || LEVEL.lamp;\n", scenes: ['day'] },
   { name: 'the lamps never light: the light follows a night that never comes', file: D, from: "const v = follower.v, k = v[0], reduced = follower.reduced;", to: "const v = follower.v, k = 0, reduced = follower.reduced;", scenes: ['night'] },

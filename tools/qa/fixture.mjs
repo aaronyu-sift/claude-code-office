@@ -53,7 +53,8 @@ function closedRecords({ id, name, cwd, at, pad }) {
 
 // opts: { dir, n, statuses (array cycled over the sessions, default mixed), subs (function index -> list of 'working'|'done'),
 //         closed (a number of closed sessions, or a list of { name, project, ageMin, bytes }) }
-export async function makeFixture({ dir, n, statuses = STATUS_CYCLE, subs, closed = 0 } = {}) {
+// sameProject: every chat in one folder (what someone who works from home has), instead of the rotating list of projects
+export async function makeFixture({ dir, n, statuses = STATUS_CYCLE, subs, closed = 0, sameProject = null } = {}) {
   rmSync(dir, { recursive: true, force: true });
   mkdirSync(join(dir, 'sessions'), { recursive: true });
   const T = Date.now();
@@ -62,7 +63,7 @@ export async function makeFixture({ dir, n, statuses = STATUS_CYCLE, subs, close
   const subFiles = new Map();                              // `${sessionId}:${subId}` -> path
   const subPlan = subs || (i => (i % 3 === 0 ? ['working', 'done', 'working'].slice(0, 1 + (i % 4 === 0 ? 2 : 0)) : i % 5 === 1 ? ['working'] : []));
   for (let i = 0; i < n; i++) {
-    const project = PROJECTS[i % PROJECTS.length] + (i >= PROJECTS.length ? '-' + Math.floor(i / PROJECTS.length) : '');
+    const project = sameProject || PROJECTS[i % PROJECTS.length] + (i >= PROJECTS.length ? '-' + Math.floor(i / PROJECTS.length) : '');
     const cwd = `/qa/ws/${project}`;
     const sid = `qa-${String(i).padStart(3, '0')}-${(1000 + i * 7919).toString(16)}`;
     const name = (NAMES[i % NAMES.length] + (i >= NAMES.length ? ` #${i}` : '')).slice(0, 120);
