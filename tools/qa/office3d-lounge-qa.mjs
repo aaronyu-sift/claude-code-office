@@ -1,18 +1,26 @@
 // QA of the lounge on the plaza of the 3D office (public/js/ofis-lounge.js and the modules it uses: lounge-model.js, lounge-plan.js, lounge-paint.js, lounge-source.js, lounge-card.js):
 // headless Chrome with software WebGL in a throw-away profile, the server against a fake ~/.claude, one `CHECK lounge PASS|FAIL <detail>` line and a final `QA PASS` or `QA FAIL`.
-//   node tools/qa/office3d-lounge-qa.mjs [--scenes demo,reduced,live,stub] [--mutations [--mutation <words>[,<words>]]] [--shots <dir>]
+//   node tools/qa/office3d-lounge-qa.mjs [--scenes demo,reduced,live,churn,stub] [--mutations [--mutation <words>[,<words>]]] [--shots <dir>]
 //
-//   lounge  four scenes
+//   lounge  five scenes
 //     demo     ?lounge=demo at 22:00 with 4 chats: the wall shows the posts the demo script produced (read from the canvas by the page's own fillText calls and by its pixels), the
 //              people are in the lounge (named, on the deck, the first two tied to the chats of the Office, the figures of the Office are unchanged), a click on the wall opens the card
 //              with its posts newest first and a line that says where the data comes from, Escape closes it, the sign is reachable and openable from the keyboard, the pointer changes over the
-//              wall, the poll never runs faster than every 3 seconds and stops when the tab is hidden, the setting names shows no text, off shows nothing and stops the poll, the pavilion
-//              costs at most 4 draw calls and 8,000 triangles, the ambient pulse moves, nothing leaves 127.0.0.1
+//              wall, the poll never runs faster than every 3 seconds and stops when the tab is hidden or the lounge is panned off the screen (and comes back), the setting names shows no text
+//              (the sign neither), off shows nothing and stops the poll, the pavilion costs at most 4 draw calls and 8,000 triangles (counted by the building around the lounge's build, not by
+//              the lounge) and a person at most 3 and 900, a new post fades in over 450 ms (the frames sampled in the page), the sign carries the newest post, the ambient pulse moves,
+//              nothing leaves 127.0.0.1
 //     reduced  the same with prefers-reduced-motion: the pulse is still, no post animates, the people do not pop
-//     live     no ?lounge= and a server without the endpoint (a 404): the board says it is off, with its hint, one request only, no people, no error
+//     live     no ?lounge= and a server without the endpoint (a 404): the board says it is off, with its hint, no request after the 404 (a first request that failed under load is retried
+//              by design), no people, no error
+//     churn    the same server, reduced motion (a person pops in and out at once): 100 people come and go through the lounge by hand-fed answers and the GPU textures stay at their
+//              baseline (a person who leaves must not keep the bone texture of its skeleton)
 //     stub     the endpoint answered by the QA (Chrome's Fetch domain): 30 posts of which some are hostile (bidi marks, control characters, 5000 characters, a long channel), 9 posters, two of
 //              them tied to chats of the Office: eight rows on the wall, twenty in the card, newest first, every text cleaned and clipped, six people at most, a click on a person tied to a
-//              chat opens that chat's card; then `unsupported`, a quiet board, a server error (the last answer stays), garbage, and the wall is not painted again while nothing changes
+//              chat opens that chat's card; two posters and two posts have markup in them (an img with a handler, a script, a name that breaks out of an attribute): it stays text in the card,
+//              the sign and the labels (a scan of the page for elements and on* attributes, and window.__xss unset); the server answers 500 from the first request (the board says it does
+//              not answer, not that it is off); then `unsupported`, a quiet board, a server error (a blip: the last answer stays; after 10 s a quiet board does not answer), garbage, and the
+//              wall is not painted again while nothing changes; a board full of posts whose server stops answering keeps its posts, marked old and dimmed, and recovers
 //
 // --mutations breaks the code in a copy of the repo, one line at a time, and runs the scenes that line matters to: every one must FAIL (a check that cannot fail guards nothing). Timing is
 // checked with margins; a failing run on a busy machine is worth a second look alone before concluding anything.
@@ -23,12 +31,17 @@ import { scenario3d, lookAt, o3, sleep, ROOT, VIEW } from './harness3d.mjs';
 import { DEMO_SCRIPT, DEMO_AGENTS } from '../../public/js/lounge-source.js';
 import { BOARD, DECK } from '../../public/js/lounge-plan.js';
 import { clipChars, splitLines, LIMITS } from '../../public/js/lounge-model.js';
+import { DUR } from '../../public/js/motion.js';
 
 const args = process.argv.slice(2);
 const val = f => { const i = args.indexOf('--' + f); return i >= 0 ? args[i + 1] : undefined; };
 const shotsDir = val('shots');
 
 const BUDGET = { calls: 4, tris: 8000 };           // what the lounge adds to the building (the people are counted on their own)
+const PERSON = { calls: 3, tris: 900 };            // one person of the lounge: 3 draw calls and about 730 triangles (the figures of the scene), at most 6 of them (LIMITS.people)
+// What a live board costs on top of the whole-building limits of office3d-qa.mjs (3d-budget, 3d-vacant: they run with no endpoint, so the board is off and nobody is in the lounge): the
+// pavilion's own 4 draw calls and 8,000 triangles, and 6 people at 3 draw calls and 900 triangles each: 22 draw calls and 13,400 triangles at the most. Measured: 198 draw calls and
+// about 200,700 triangles with 10 chats, 15 figures and 6 people at the fit zoom (3d-budget: 178 and 196,000 with the board off).
 const POLL = { min: 2900, max: 7000 };             // ms between two polls: never faster than 3 s (with a margin for a timer that fires a little early), and not stalled
 const make = (name, ok, detail) => ({ name, ok, detail });
 const NIGHT = 'time=22:00';
@@ -77,15 +90,32 @@ function pulseSpread(samples) {
   return Math.max(0, ...[...by.values()].map(r => r[1] - r[0]));
 }
 
+// the frames of a fade, sampled in the page on every frame the scene draws ([ms, animating], only while a post is fading in and the frame after; software GL draws 8 frames a second, so one
+// frame is 125 ms or more): a run starts when a new post arrives and ends at the first frame at rest. gap is the longest time between two frames inside the run, which is how far a
+// measurement can be off.
+const FADE_REC = o3(`(() => { const rec = window.__fade = []; let prev = false, f = -1; const tick = () => { if (o.frameNo !== f) { f = o.frameNo; const a = o.loungeAnim.animating; if (a || prev) rec.push([performance.now(), a]); prev = a; } requestAnimationFrame(tick); }; requestAnimationFrame(tick); })()`);
+function fadeRuns(samples) {
+  const runs = [];
+  let cur = null;
+  for (const [t, a] of samples) {
+    if (a && !cur) cur = { t0: t, last: t, gap: 0 };
+    else if (a) { cur.gap = Math.max(cur.gap, t - cur.last); cur.last = t; }
+    else if (cur) { cur.gap = Math.max(cur.gap, t - cur.last); cur.t1 = t; runs.push(cur); cur = null; }
+  }
+  return runs;
+}
+
 // ---- the draw calls and triangles of the lounge: the scene drawn with all of it, without the people, and without anything of it that is a mesh of its own (the wall's face, the strip of
-// light, anything else the lounge adds to the building). The furniture is in the building's batch, so its triangles are the ones the lounge counted as it put them there.
+// light, anything else the lounge adds to the building). The furniture is in the building's batch, which the check cannot toggle, so its triangles are the growth of the batch around the
+// call of the lounge's build (ofis.js: `o.loungeBatchTris`), counted by the building and not by the lounge. The lounge's own count (`built.staticTris`) must agree with it.
 async function cost(page) {
   const draw = async (on, part) => { await page.evaluate(o3(`o.loungeVisible(${on}, ${part ? JSON.stringify(part) : 'undefined'})`)); await sleep(150); return page.evaluate(o3('o.draw()')); };
   const all = await draw(true), noPeople = await draw(false, 'people'), none = await draw(false);
   await draw(true);
   const s = await snap(page), lights = s.built.tris - s.built.staticTris - 4;           // the lamps and candles are in ofis-decor's shared meshes: counted from their shape
+  const batch = await page.evaluate(o3('o.loungeBatchTris'));
   return {
-    pavilion: { calls: noPeople.calls - none.calls, tris: noPeople.tris - none.tris + s.built.staticTris + lights }, people: { calls: all.calls - noPeople.calls, tris: all.tris - noPeople.tris, n: s.people.length },
+    pavilion: { calls: noPeople.calls - none.calls, tris: noPeople.tris - none.tris + batch + lights, batch, counted: s.built.staticTris }, people: { calls: all.calls - noPeople.calls, tris: all.tris - noPeople.tris, n: s.people.length },
     all, none, lightTris: lights,
   };
 }
@@ -100,6 +130,7 @@ async function sceneDemo({ root, shots }) {
     const { page, fx } = S;
     if (!S.ready.ok) { bad(`the scene did not become ready (${JSON.stringify(S.ready.last)})`); return out; }
     const mains = fx.agents.map(a => a.id);
+    await page.evaluate(FADE_REC);
     const c = await toHub(page, 60);
     let s = await until(page, x => x.state === 'ok' && x.wall.length >= 4 && x.people.length >= 4 && x.people.every(p => p.scale > 0.99), 25000);
     if (!s) { bad(`no posts and people after 25 s: ${JSON.stringify((await snap(page)) && { state: (await snap(page)).state, wall: (await snap(page)).wall.length, people: (await snap(page)).people.length })}`); return out; }
@@ -143,7 +174,9 @@ async function sceneDemo({ root, shots }) {
     if (k.pavilion.calls > BUDGET.calls) bad(`the pavilion is ${k.pavilion.calls} draw calls (at most ${BUDGET.calls})`);
     if (k.pavilion.tris > BUDGET.tris) bad(`the pavilion is ${k.pavilion.tris} triangles (at most ${BUDGET.tris})`);
     if (!(k.pavilion.calls >= 1 && k.pavilion.tris > 500)) bad(`the pavilion does not draw anything (${JSON.stringify(k.pavilion)})`);
+    if (k.pavilion.batch !== k.pavilion.counted) bad(`the lounge counted ${k.pavilion.counted} triangles in the building's batch, but the batch grew by ${k.pavilion.batch} around its build: part of the pavilion is not counted`);
     if (!(k.people.calls >= s.people.length && k.people.tris > 100 * s.people.length)) bad(`the people do not draw (${s.people.length} people: ${JSON.stringify(k.people)})`);
+    if (k.people.calls > PERSON.calls * s.people.length || k.people.tris > PERSON.tris * s.people.length) bad(`${s.people.length} people cost ${k.people.calls} draw calls and ${k.people.tris} triangles (at most ${PERSON.calls} and ${PERSON.tris} each)`);
 
     // the pulse moves with the clock
     const pulses = [];
@@ -177,8 +210,9 @@ async function sceneDemo({ root, shots }) {
       if ((await snap(page)).card.open) bad('Escape does not close the card');
     }
     // the sign: reachable and openable from the keyboard, focus comes back to it
-    const sg = (await snap(page)).signLabel;
+    const sgS = await snap(page), sg = sgS.signLabel;
     if (!sg || !sg.shown || sg.tabIndex !== 0 || sg.role !== 'button' || !/lounge/i.test(sg.label || '')) bad(`the sign is not a keyboard button (${JSON.stringify(sg)})`);
+    else if (!sgS.wall.length || !sg.text.includes(sgS.wall.at(-1).who)) bad(`the sign, readable at every zoom, does not carry the newest post (sign "${sg.text}", newest ${sgS.wall.length && sgS.wall.at(-1).who})`);
     await page.evaluate(o3("(() => { const l = document.querySelector('.of-loungel'); if (l) l.focus(); })()"));
     await key(page, 'Enter', 'Enter', 13, '\r');
     const sc2 = await until(page, x => x.card.open, 3000, 150);
@@ -212,6 +246,36 @@ async function sceneDemo({ root, shots }) {
     const back = await until(page, x => x.poll.requests > r0, 7000, 200);
     if (!back) bad('the poll does not come back when the tab is visible again');
 
+    // the poll runs only while the wall is on the screen: pan to empty ground and it stops, pan back and it resumes
+    await lookAt(page, c.X + 90, 0.5, c.Z - 40, 60);
+    await sleep(700);
+    const [wx, wy] = await boardAt(page, cell);
+    if (wx > 0 && wx < VIEW.w && wy > 0 && wy < VIEW.h) bad(`the pan did not take the wall off the screen (it is at ${Math.round(wx)}, ${Math.round(wy)})`);
+    else {
+      const away = await until(page, x => !x.onScreen && !x.poll.canPoll, 4000, 150);
+      if (!away) bad(`the wall is off the screen and the poll may still run (${JSON.stringify((await snap(page)).poll.why)})`);
+      else {
+        await sleep(900);                                    // a request that was on its way may finish
+        const q0 = (await snap(page)).poll.requests;
+        await sleep(7500);
+        const q1 = await snap(page);
+        if (q1.poll.requests !== q0) bad(`the poll goes on while the lounge is off the screen: ${q1.poll.requests - q0} more requests in 7.5 s`);
+        if (q1.poll.armed) bad('a poll is waiting while the lounge is off the screen');
+        await toHub(page, 60);
+        if (!(await until(page, x => x.onScreen && x.poll.requests > q0, 7000, 200))) bad('the poll does not come back when the lounge is on the screen again');
+      }
+    }
+
+    // a new post fades in over 450 ms (DUR.slow): the frames sampled in the page while the wall animates, a run per post that arrived. Never faster, never slower, and at least one seen.
+    let runs = fadeRuns(await page.evaluate('window.__fade || []'));
+    for (let i = 0; i < 40 && !runs.length; i++) { await sleep(500); runs = fadeRuns(await page.evaluate('window.__fade || []')); }
+    out.fade = runs.map(r => Math.round(r.t1 - r.t0));
+    if (!runs.length) bad('no new post faded in while the demo talked (the wall never animated)');
+    for (const r of runs) {
+      const d = r.t1 - r.t0;
+      if (d < DUR.slow - r.gap - 30 || d > DUR.slow + 2 * r.gap + 30) bad(`a new post faded in over ${Math.round(d)} ms (frames up to ${Math.round(r.gap)} ms apart), not ${DUR.slow} ms`);
+    }
+
     // the setting names: no text of a post anywhere; off: nothing, and no poll; text again: it all comes back
     const set = v => page.evaluate(o3(`v.__office.settings.set('lounge', ${JSON.stringify(v)})`));
     const lines = DEMO_SCRIPT.flatMap(e => splitLines(clipChars(e[4], LIMITS.wallText)));          // every line of text the script can put on the wall
@@ -219,6 +283,7 @@ async function sceneDemo({ root, shots }) {
     const nm = await until(page, x => x.mode === 'names' && x.paint.texts.length && !x.paint.texts.some(t => lines.includes(t)), 6000, 200);
     if (!nm) bad(`the setting names still draws the text of the posts (${JSON.stringify((await snap(page)).paint.texts.slice(0, 8))})`);
     else if (!nm.paint.texts.some(t => /^(lead|builder|scout|reviewer|tester|docs)/.test(t))) bad('the setting names draws no names');
+    else if (nm.signLabel && lines.some(l => l.length > 12 && nm.signLabel.text.includes(l.slice(0, 12)))) bad(`the sign shows the text of a post in the mode names: "${nm.signLabel.text}"`);
     await page.mouse.click(bx, by);
     const nc = await until(page, x => x.card.open, 3000, 150);
     if (!nc) bad('in the mode names a click on the wall opens no card');
@@ -308,11 +373,15 @@ async function sceneLive({ root, shots }) {
     out.cost = k;
     if (k.pavilion.calls !== 0) bad(`a board that is off adds ${k.pavilion.calls} draw calls to the building (none: the pavilion is in the building's batch and the face of the wall is not drawn)`);
     if (k.pavilion.tris > BUDGET.tris || k.pavilion.tris < 500) bad(`the pavilion is ${k.pavilion.tris} triangles (500 to ${BUDGET.tris})`);
+    if (k.pavilion.batch !== k.pavilion.counted) bad(`the lounge counted ${k.pavilion.counted} triangles in the building's batch, but the batch grew by ${k.pavilion.batch} around its build: part of the pavilion is not counted`);
     if (!t.signLabel || !/Agent message board is off/.test(t.signLabel.text)) bad(`the sign does not say the board is off (${t.signLabel && t.signLabel.text})`);
     if (t.people.length) bad(`${t.people.length} people in a lounge whose board is off`);
     if (t.wall.length) bad('posts on a board that is off');
     if (t.stripVisible || t.pulse > 0.001) bad(`the strip of light is on for a board that is off (${t.pulse})`);
-    if (loungeHits(page) !== 1) bad(`${loungeHits(page)} requests to /api/lounge in ${Math.round(((t.poll.starts.at(-1) || 0) - (t.poll.starts[0] || 0)) / 1000) + 9} s: a server without the endpoint is asked once (then every 5 minutes)`);
+    // what the design promises: no request starts after the 404 (the next one is five minutes away). A request that failed before it (under load the first can be aborted: Failed to fetch) is
+    // retried after 3 seconds by design and is not counted here.
+    if (t.poll.requests !== s.poll.requests) bad(`${t.poll.requests - s.poll.requests} requests started after the 404 in the following 9 s: a server without the endpoint is asked again only after 5 minutes`);
+    if (loungeHits(page) > t.poll.requests) bad(`${loungeHits(page)} requests to /api/lounge, but the poll started ${t.poll.requests}: something else asks the server`);
     const e404 = { log: page.expected.filter(e => e.startsWith('log:')).length, response: page.expected.filter(e => /^404 /.test(e)).length };          // Chrome's console line and the response itself
     if (e404.log !== 1 || e404.response !== 1) bad(`the endpoint's 404 was seen ${e404.response} times and logged ${e404.log} times (once each expected)`);
     const err = page.errors.filter(e => !/\/local\/ofis-extras\.js/.test(e));
@@ -327,14 +396,59 @@ async function sceneLive({ root, shots }) {
     if (!cd) bad('a click on the wall of a board that is off opens no card');
     else if (!/\/api\/lounge/.test(cd.card.source) || !/(--chat-db|off)/i.test(cd.card.note.join(' '))) bad(`the card does not say why the board is off: "${cd.card.source}" / ${cd.card.note.join(' | ')}`);
     if (shots) { await page.mouse.move(2, 2); await sleep(500); await page.screenshot(join(shots, 'lounge-off-card.png')); }
-    out.notes.push('1 request, its 404 answer and console line expected, the face of the wall not drawn');
+    out.notes.push('no request after its 404 answer, the 404 and its console line expected once, the face of the wall not drawn');
+    return out;
+  } finally { await S.done(); }
+}
+
+// =====================================================================================================================================================================
+// scene churn: people come and go. Every poster is a new person (a skinned figure with a bone texture of its own, made on its first draw) and each one leaves when the next arrives:
+// the GPU textures must stay where they were (a person who leaves must not keep its skeleton's texture). The answers are fed by hand (`o.loungeFeed`), the server has no endpoint.
+const CHURN = (from, to) => o3(`(async () => {
+  const frames = n => new Promise(r => { const f0 = o.frameNo, k = () => (o.frameNo - f0 >= n ? r() : requestAnimationFrame(k)); k(); });          // n frames of the scene, not of the browser
+  for (let i = ${from}; i < ${to}; i++) {
+    o.loungeFeed({ state: { state: 'ok' }, messages: [{ seq: i, ts: Date.now(), channel: 'churn', from: 'poster-' + i, to: [], text: 'hello ' + i }], channels: {}, agents: [] });
+    await frames(2);                       // the person arrives and is drawn (and the one before it has left)
+  }
+  return o.info.tex;
+})()`);
+const CHURN_N = 100, CHURN_WARM = 12, CHURN_SLACK = 12;           // a leak is about 1.6 textures a person: 160 over the run, against 12 of slack
+async function sceneChurn({ root }) {
+  const out = { tag: 'churn', problems: [], notes: [] };
+  const bad = m => out.problems.push('churn: ' + m);
+  const S = await scenario3d(4, { tag: 'lchurn', query: NIGHT, root, reducedMotion: true, fixture: { subs: () => [] }, intercept: hook });
+  try {
+    const { page } = S;
+    if (!S.ready.ok) { bad('the scene did not become ready'); return out; }
+    await toHub(page, 60);
+    if (!(await until(page, x => x.status === 'nofile', 30000))) { bad('the board did not turn off on a 404 (the answers after it are fed by hand)'); return out; }
+    const t0 = await page.evaluate(CHURN(0, CHURN_WARM));
+    const t1 = await page.evaluate(CHURN(CHURN_WARM, CHURN_WARM + CHURN_N));
+    const s = await snap(page);
+    out.tex = [t0, t1];
+    if (t1 - t0 > CHURN_SLACK) bad(`${CHURN_N} people came and went and the GPU textures grew from ${t0} to ${t1} (${((t1 - t0) / CHURN_N).toFixed(2)} a person): a person who leaves keeps the bone texture of its skeleton`);
+    if (s.people.length !== 1 || s.people[0].name !== 'poster-' + (CHURN_WARM + CHURN_N - 1)) bad(`the lounge does not end with the last poster alone (${JSON.stringify(s.people.map(p => p.name))})`);
+    const err = page.errors.filter(e => !/\/local\/ofis-extras\.js/.test(e));
+    if (err.length) bad(`console error: ${err[0].slice(0, 160)}`);
+    out.notes.push(`${CHURN_N} people came and went, textures ${t0} -> ${t1}`);
     return out;
   } finally { await S.done(); }
 }
 
 // =====================================================================================================================================================================
 // scene stub: the endpoint answered by the QA
-const NAMES = ['builder', 'reviewer', 'scout', 'lead', 'tester', 'docs', 'ops-bot', 'planner', 'qa-bot'];
+// two of the nine posters have markup for a name (one makes an element, one breaks out of an attribute: the card puts a name into a title="..."); both are among the six people
+const EVIL = { tag: '<img src=x onerror=_x=3>', attr: 'x" onfocus=a y="&<' };
+const NAMES = ['builder', 'reviewer', 'scout', 'lead', EVIL.tag, EVIL.attr, 'ops-bot', 'planner', 'qa-bot'];
+// what no text may do on the page: make an element that loads or runs something, or carry an event handler. window.__xss and window._x are set when a handler ran.
+const XSS_SCAN = `(() => {
+  const bad = [], scope = [...document.querySelectorAll('.of-lounge-card, .of-lp, .of-loungel')];
+  for (const root of scope) for (const e of [root, ...root.querySelectorAll('*')]) {
+    if (/^(IMG|SCRIPT|IFRAME|OBJECT|EMBED|LINK|STYLE|FORM|INPUT|VIDEO|AUDIO)$/i.test(e.tagName)) bad.push('<' + e.tagName.toLowerCase() + '> in ' + String(root.className).split(' ')[0]);
+    for (const a of e.attributes) if (/^on/i.test(a.name)) bad.push(a.name + ' on <' + e.tagName.toLowerCase() + '> in ' + String(root.className).split(' ')[0]);
+  }
+  return { bad, ran: [window.__xss, window._x].filter(v => v !== undefined), scoped: scope.length };
+})()`;
 function bodyOf(kind, mains) {
   const now = Date.now();
   if (kind === 'unsupported') return { state: { state: 'unsupported', schema: 'v9', reason: 'unknown table layout' }, messages: [], channels: {}, agents: [] };
@@ -343,7 +457,8 @@ function bodyOf(kind, mains) {
   const msgs = [];
   for (let i = 0; i < 30; i++) msgs.push({ seq: i + 1, ts: now - (190 + 20 * (29 - i)) * 1000, channel: ['ops', 'tasks', 'review'][i % 3], from: NAMES[i % 9], to: i % 4 ? [NAMES[(i + 1) % 9]] : [], text: `Post number ${i + 1} from ${NAMES[i % 9]}: ` + 'words '.repeat(3 + (i % 9)).trim(), extra: { ignored: true } });
   msgs[28].to = Array.from({ length: 20 }, (_, i) => 'agent-' + i);
-  msgs[29] = { seq: 30, ts: now - 190e3, channel: 'ops\u202Dx' + 'y'.repeat(100), from: 'builder', to: ['reviewer'], text: 'A\u202EB\u0007C\u200Bd ' + 'X'.repeat(5000) };
+  msgs[25].text = `Post number 26 from ${NAMES[25 % 9]}: <img src=x onerror="window.__xss=1"> <script>window.__xss=2</script> & "q" 'q'`;          // markup in a post: text on the wall, the card and nowhere else
+  msgs[29] = { seq: 30, ts: now - 190e3, channel: 'ops\u202Dx' + 'y'.repeat(100), from: 'builder', to: ['reviewer'], text: 'A\u202EB\u0007C\u200Bd <img src=x onerror=window.__xss=4> & ' + 'X'.repeat(5000) };
   const seen = now - 5000;
   return { state: { state: 'ok', schema: 'chat-v1', reason: '' }, messages: msgs, channels: { ops: 10, tasks: 10, review: 10 }, agents: [
     { name: 'builder', lastSeenMs: seen, session: mains[0] }, { name: 'reviewer', lastSeenMs: seen - 1000, session: mains[1] }, { name: 'scout', lastSeenMs: seen - 2000, session: 'no-such-chat' }, ...NAMES.slice(3).map((n, i) => ({ name: n, lastSeenMs: seen - (3 + i) * 1000, session: '' })),
@@ -352,7 +467,7 @@ function bodyOf(kind, mains) {
 async function sceneStub({ root, shots }) {
   const out = { tag: 'stub', problems: [], notes: [] };
   const bad = m => out.problems.push('stub: ' + m);
-  const stub = { mode: 'ok', hits: [], mains: [] };
+  const stub = { mode: 'fail500', hits: [], mains: [] };           // the first answers are server errors
   const intercept = async page => {
     await hook(page);
     await page.send('Fetch.enable', { patterns: [{ urlPattern: '*/api/lounge*' }] });
@@ -372,6 +487,25 @@ async function sceneStub({ root, shots }) {
     if (!S.ready.ok) { bad('the scene did not become ready'); return out; }
     stub.mains = fx.agents.map(a => a.id);
     const c = await toHub(page, 60);
+
+    // the server answers with errors from the first request: the board does not answer, which is not the same as being off (no --chat-db), and a working server is not sent to --chat-db
+    const dn = await until(page, x => x.status === 'failed' && x.state === 'failed', 25000);
+    if (!dn) { const x = await snap(page); bad(`a server that answers 500 does not turn the board to failed (status ${x.status}, state ${x.state}, sign ${JSON.stringify(x.sign && x.sign.text)})`); return out; }
+    if (dn.sign.text !== 'Message board not answering' || dn.sign.tone !== 'warn' || /chat-db|is off/.test(dn.sign.text + dn.sign.hint) || !/GET \/api\/lounge/.test(dn.sign.hint)) bad(`the sign of a board that does not answer is wrong (${JSON.stringify(dn.sign)})`);
+    if (!dn.signLabel || /is off/.test(dn.signLabel.text) || !/not answering/.test(dn.signLabel.text)) bad(`the sign over the wall does not say the board does not answer (${dn.signLabel && dn.signLabel.text})`);
+    const d0 = await painted(page);
+    if (!d0.includes('Message board not answering') || d0.some(t => /chat-db|is off/.test(t))) bad(`the wall of a board that does not answer says ${JSON.stringify(d0)}`);
+    if (dn.people.length || dn.wall.length) bad(`${dn.people.length} people and ${dn.wall.length} posts for a board that never answered`);
+    if (!dn.boardVisible) bad('the wall draws no face for a board that does not answer: it has something to say');
+    {
+      const [bx0, by0] = await boardAt(page, dn.cell);
+      await page.mouse.click(bx0, by0);
+      const cd0 = await until(page, x => x.card.open, 3000, 150);
+      if (!cd0) bad('a click on the wall of a board that does not answer opens no card');
+      else if (!/not answering/.test(cd0.card.source) || /no \/api\/lounge endpoint/.test(cd0.card.source)) bad(`the card does not say the board does not answer: "${cd0.card.source}"`);
+      await key(page, 'Escape', 'Escape', 27); await sleep(700);
+    }
+    stub.mode = 'ok';
     let s = await until(page, x => x.state === 'ok' && x.wall.length === LIMITS.wallRows && x.people.length >= 6 && x.people.every(p => p.scale > 0.99) && x.people.filter(p => p.session).length >= 2, 25000);          // the first answer came before the QA knew the chats: the second one ties two people
     if (!s) { const x = await snap(page); bad(`the answer of the stub did not reach the wall (${x.wall.length} rows, state ${x.state}, ${x.people.length} people: ${JSON.stringify(x.people.map(p => [p.name, p.session && 'tied', p.scale]))}, chats ${JSON.stringify(stub.mains)})`); return out; }
 
@@ -391,6 +525,10 @@ async function sceneStub({ root, shots }) {
     const tied = s.people.filter(p => p.session);
     if (tied.length !== 2 || !tied.every(p => stub.mains.includes(p.session))) bad(`the tied people are ${JSON.stringify(tied.map(p => [p.name, p.session]))} (builder and reviewer, each with a chat of the Office)`);
     if (s.people.some(p => p.name === 'scout' && p.session)) bad('scout, whose session is not in the Office, is tied to a chat');
+    for (const nm of [EVIL.tag, EVIL.attr]) { const p = s.people.find(x => x.name === nm); if (!p || p.labelText !== nm) bad(`the poster named ${JSON.stringify(nm)} is not on screen as plain text (${p && JSON.stringify(p.labelText)})`); }
+    if (!s.signLabel || !/builder to reviewer: ABCd/.test(s.signLabel.text)) bad(`the sign over the wall does not carry the newest post, cleaned (${s.signLabel && s.signLabel.text})`);
+    const scan0 = await page.evaluate(XSS_SCAN);
+    if (scan0.bad.length || scan0.ran.length || scan0.scoped < 7) bad(`markup in a name or a post became part of the page: ${JSON.stringify(scan0)}`);
 
     // the card: twenty posts, newest first, cleaned and clipped
     const [bx, by] = await boardAt(page, s.cell);
@@ -405,6 +543,10 @@ async function sceneStub({ root, shots }) {
       if (cd.posts.some(p => hostile.test(p.text + p.who + p.chip))) bad('a bidi mark or a control character reached the card');
       if (!cd.posts.every((p, i) => i === 0 || /^Post number (\d+)/.test(p.text) && (i === 1 || +/^Post number (\d+)/.exec(p.text)[1] < +/^Post number (\d+)/.exec(cd.posts[i - 1].text)[1]))) bad('the posts in the card are not newest first');
       if (!/\/api\/lounge/.test(cd.source)) bad(`the card does not say where the data comes from (${cd.source})`);
+      if (!cd.posts.some(p => p.text.includes('<img src=x onerror="window.__xss=1">') && p.text.includes('<script>window.__xss=2</script>') && p.text.includes('& "q" \'q\''))) bad('the markup in a post is not shown as the text it is');
+      if (!cd.people.includes(EVIL.tag) || !cd.people.includes(EVIL.attr)) bad(`the names with markup are not shown as text in the card (${JSON.stringify(cd.people)})`);
+      const scan1 = await page.evaluate(XSS_SCAN);
+      if (scan1.bad.length || scan1.ran.length || scan1.scoped < 7) bad(`markup in a name or a post became part of the card: ${JSON.stringify(scan1)}`);
       if (cd.posts.length >= LIMITS.cardRows && cd.scroll && !(cd.scroll.height > cd.scroll.client)) bad(`twenty posts do not scroll (${JSON.stringify(cd.scroll)})`);
       if (shots) { await page.mouse.move(2, 2); await sleep(500); await page.screenshot(join(shots, 'lounge-card-posts.png')); }
       await key(page, 'Escape', 'Escape', 27); await sleep(700);
@@ -455,9 +597,33 @@ async function sceneStub({ root, shots }) {
     if (qu) { const d = await painted(page); if (!d.includes('No posts in the last hour')) bad(`a quiet board's wall says ${JSON.stringify(d)}`); if (qu.wall.length) bad('posts on a quiet board'); }
     const f5 = await phase('fail500', x => x.status === 'failed', 'a server error is not noticed');
     if (f5 && (f5.state !== 'ok' || !f5.quiet)) bad(`after a server error the last answer is gone (${f5.state}, quiet ${f5.quiet})`);
+    // the errors go on: a few polls later the quiet board is a board that does not answer, not a quiet one
+    const fq = await until(page, x => x.state === 'failed', 30000, 300);
+    if (!fq) bad(`a quiet board that keeps answering with errors still says "${(await snap(page)).sign.text}"`);
+    else if (fq.sign.text !== 'Message board not answering' || !/^Last answer: .+ ago\./.test(fq.sign.hint) || /chat-db/.test(fq.sign.hint)) bad(`the sign of a quiet board that stopped answering is wrong (${JSON.stringify(fq.sign)})`);
     const gb = await phase('garbage', x => x.status === 'failed' && x.poll.requests > (f5 ? f5.poll.requests : 0), 'garbage is not noticed');
     const ml = await phase('malformed', x => x.status === 'ok' && x.state === 'off', 'a malformed answer does not end as an off board');
     const ok2 = await phase('ok', x => x.state === 'ok' && x.wall.length === LIMITS.wallRows && x.people.length >= 4, 'the board does not come back after the bad answers');
+
+    // the server stops answering with a board full of posts: after more than a few polls the posts stay but are marked old, dimmed, under a warning; the people are not sent home at once
+    await sleep(1500);                                        // the posts have faded in
+    const inkOk = (await snap(page)).ink;
+    stub.mode = 'fail500';
+    const st = await until(page, x => x.stale === true, 40000, 300);
+    if (!st) bad(`a board with posts that stops answering is not marked old (state ${(await snap(page)).state})`);
+    else {
+      await sleep(600);
+      const st2 = await snap(page);
+      if (st2.state !== 'ok' || st2.wall.length !== LIMITS.wallRows) bad(`old posts are not kept on the wall (state ${st2.state}, ${st2.wall.length} rows)`);
+      if (!/^Old posts: last answer .+ ago$/.test(st2.sign.text) || st2.sign.tone !== 'warn' || st2.sign.latest) bad(`the sign of old posts is wrong (${JSON.stringify(st2.sign)})`);
+      if (!st2.signLabel || !/Old posts/.test(st2.signLabel.text)) bad(`the sign over the wall does not say the posts are old (${st2.signLabel && st2.signLabel.text})`);
+      const dd = await painted(page);
+      if (!dd.some(t => /^Old posts: last answer/.test(t))) bad(`the wall does not say the posts are old: ${JSON.stringify(dd.slice(0, 4))}`);
+      if (!(st2.ink < 0.8 * inkOk)) bad(`the old posts are not dimmed (bright pixels on the wall ${inkOk} -> ${st2.ink})`);
+      out.stale = `old posts marked after the errors, dimmed (bright pixels ${inkOk} -> ${st2.ink})`;
+    }
+    stub.mode = 'ok';
+    await phase('ok', x => x.stale === false && x.state === 'ok' && x.status === 'ok' && x.wall.length === LIMITS.wallRows, 'the board does not come back to normal after its errors');
     const err = page.errors.filter(e => !/\/local\/ofis-extras\.js/.test(e));
     if (err.some(e => /exception|console\.error/.test(e))) bad(`the page threw: ${err.filter(e => /exception|console\.error/.test(e))[0].slice(0, 160)}`);
     out.foreign = foreignOf(page);
@@ -468,11 +634,12 @@ async function sceneStub({ root, shots }) {
 }
 
 // =====================================================================================================================================================================
-const want = new Set((val('scenes') || 'demo,reduced,live,stub').split(','));
+const want = new Set((val('scenes') || 'demo,reduced,live,churn,stub').split(','));
 export async function runLounge({ root, scenes = want, shots = shotsDir } = {}) {
   if (shots) mkdirSync(shots, { recursive: true });
   const runs = [];
   if (scenes.has('live')) runs.push(await sceneLive({ root, shots }));
+  if (scenes.has('churn')) runs.push(await sceneChurn({ root, shots }));
   if (scenes.has('stub')) runs.push(await sceneStub({ root, shots }));
   if (scenes.has('reduced')) runs.push(await sceneReduced({ root, shots }));
   if (scenes.has('demo')) runs.push(await sceneDemo({ root, shots }));
@@ -481,9 +648,11 @@ export async function runLounge({ root, scenes = want, shots = shotsDir } = {}) 
     const bits = [...r.notes];
     if (r.cost) bits.push(`pavilion ${r.cost.pavilion.calls} calls and ${r.cost.pavilion.tris} triangles (at most ${BUDGET.calls} and ${BUDGET.tris}), ${r.cost.people.n} people ${r.cost.people.calls} calls and ${r.cost.people.tris} triangles`);
     if (r.poll) bits.push(`poll: ${r.poll.requests} requests, gaps ${r.poll.minGap}..${r.poll.maxGap} ms`);
+    if (r.fade) bits.push(`${r.fade.length} fades of ${r.fade.join(', ')} ms (${DUR.slow})`);
     if (r.pulse) bits.push(`pulse ${r.pulse.join('..')}`);
     if (r.ink != null) bits.push(`${r.ink} bright pixels on the wall, ${r.drawn} strings drawn`);
     if (r.hits) bits.push(`${r.hits.n} requests, closest ${r.hits.minGap} ms`);
+    if (r.stale) bits.push(r.stale);
     if (r.foreign) bits.push(`requests that leave 127.0.0.1: ${r.foreign.length}`);
     return `${r.tag}: ${bits.join(', ')}`;
   });
@@ -508,8 +677,24 @@ const MUTATIONS = [
   { name: 'Escape does not close the card', file: C, from: "if (e.key !== 'Escape' || !open) return;", to: "if (e.key !== 'Escape1' || !open) return;", scenes: ['demo'] },
   { name: 'the sign cannot be reached with the Tab key', file: L, from: 'sign.el.tabIndex = 0;', to: 'sign.el.tabIndex = -1;', scenes: ['demo'] },
   { name: 'the pavilion is 8,400 triangles heavier', file: L, from: '    const tris = B.i.length / 3 - t0;', to: "    for (let i = 0; i < 700; i++) B.box(X + 1 + (i % 20) * 0.1, 0.5, Z + 1 + (i >> 5) * 0.1, 0.05, 0.05, 0.05, '#ff00ff');\n    const tris = B.i.length / 3 - t0;", scenes: ['live'] },
-  { name: 'the face of the wall is drawn although the board is off', file: L, from: "const boardShown = () => !!view && (view.state === 'ok' || view.state === 'unsupported');", to: 'const boardShown = () => !!view;', scenes: ['live'] },
+  { name: 'the face of the wall is drawn although the board is off', file: L, from: "const boardShown = () => !!view && (view.state === 'ok' || view.state === 'unsupported' || view.state === 'failed');", to: 'const boardShown = () => !!view;', scenes: ['live'] },
   { name: 'the wall is painted again every frame', file: L, from: 'if (view.key !== painted.key) {', to: 'if (true) {', scenes: ['stub'] },
+  // the findings of the review: each of these passed the QA before it had the check that catches it
+  { name: 'a person who leaves keeps the bone texture of its skeleton', file: O, from: ' if (o.isSkinnedMesh && o.skeleton) o.skeleton.dispose();', to: '', scenes: ['churn'] },
+  { name: 'the pavilion hides 8,400 triangles from its own counter', file: L, from: '    const tris = B.i.length / 3 - t0;', to: "    const tris = B.i.length / 3 - t0;\n    for (let i = 0; i < 700; i++) B.box(X + 1 + (i % 20) * 0.1, 0.5, Z + 1 + (i >> 5) * 0.1, 0.05, 0.05, 0.05, '#ff00ff');", scenes: ['live'] },
+  { name: 'a new post does not fade in', file: L, from: "const added = !first && !reducedNow() && view.state === 'ok' ?", to: 'const added = false ?', scenes: ['demo'] },
+  { name: 'the fade of a new post lasts twenty times as long', file: L, from: '* 1000) / DUR.slow);', to: '* 1000) / (DUR.slow * 20));', scenes: ['demo'] },
+  { name: 'the poll ignores that the lounge is off the screen', file: L, from: '    return x1 > 0 && x0 < vw && y1 > 0 && y0 < vh;', to: '    return true;', scenes: ['demo'] },
+  { name: 'the card puts the text of a post into the page as HTML', file: C, from: '<div class="lg-text">${esc(r.text)}</div>', to: '<div class="lg-text">${r.text}</div>', scenes: ['stub'] },
+  { name: 'the card puts the names of a post into the page as HTML', file: C, from: 'const who = esc(r.who), text', to: 'const who = r.who, text', scenes: ['stub'] },
+  { name: 'the people of the card are put into the page as HTML', file: C, from: '</i>${esc(p.name)}</span>', to: '</i>${p.name}</span>', scenes: ['stub'] },
+  { name: 'the label of a person puts its name into the page as HTML', file: L, from: '</i>${esc(P.name)}</div>', to: '</i>${P.name}</div>', scenes: ['stub'] },
+  { name: 'the sign puts the newest post into the page as HTML', file: L, from: '<span>${esc(line)}</span>', to: '<span>${line}</span>', scenes: ['stub'] },
+  { name: 'the sign does not carry the newest post', file: M, from: 'if (newest && !stale) sign.latest =', to: 'if (false) sign.latest =', scenes: ['demo'] },
+  { name: 'a board that answers with errors is called off', file: M, from: "const state = hidden ? 'hidden' : down && !oldPosts ? 'failed' : d.state.state;", to: "const state = hidden ? 'hidden' : d.state.state;", scenes: ['stub'] },
+  { name: 'old posts are not marked after a long run of errors', file: M, from: 'const stale = !hidden && down && oldPosts;', to: 'const stale = false;', scenes: ['stub'] },
+  { name: 'old posts are not dimmed', file: P, from: '(view.stale ? STALE_ALPHA : 1), dy', to: '1, dy', scenes: ['stub'] },
+  { name: 'a server without the endpoint is asked again after three seconds', file: SRC, from: 'export const RETRY_MS = 5 * 60e3;', to: 'export const RETRY_MS = 3000;', scenes: ['live'] },
   { name: 'an unsupported board says it is off', file: M, from: "sign.tone = 'warn'; sign.text = tt('lounge.unsupported', 'Message board format not recognised');", to: "sign.tone = 'warn'; sign.text = tt('lounge.off', 'x');", scenes: ['stub'] },
 ];
 
