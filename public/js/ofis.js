@@ -10,7 +10,7 @@ import { labelParts, labelHtml } from './office-labels.js';
 import { createEnv } from './ofis-env.js';
 import { createDecor } from './ofis-decor.js';
 import { styleAt, wallColour, floorColour } from './ofis-styles.js';
-import { looksAll, lookOf, planRoom, WORK_IDS, SOFT_IDS } from './ofis-arrange.js';
+import { looksAll, lookOf, planRoom } from './ofis-arrange.js';
 import { createAtmosphere } from './office-atmosphere.js';
 import { createOfficeSettings, officeQuery } from './office-settings.js';
 import { LOOP, wave } from './motion.js';
@@ -67,7 +67,7 @@ const HAIRS = ['#2b211c', '#4c3528', '#7d5130', '#c08f4f', '#1c1d24', '#8a8f9c',
 const PANTS = ['#35405a', '#3e5a86', '#4a4f5c', '#5c4a3e', '#2f3440'];
 const BOOKS = ['#d6604d', '#e8a33d', '#4f86c6', '#5aa469', '#8e6bbf', '#e07a9a', '#3f4a5a', '#e9d8b4'];
 const POSTERS = ['#f2c14e', '#5b9bd5', '#e8735a', '#6cc3a0', '#9d7fd8', '#f29fb5'];
-const WOOD = '#c8935c', WOOD_D = '#9c6d42', METAL = '#4a505d', BEZEL = '#2a2f3a', CHAIR = '#3d4350', CHAIR_S = '#505869';
+const WOOD = '#c8935c', WOOD_D = '#9c6d42', METAL = '#4a505d', BEZEL = '#2a2f3a';
 const SCR_OFF = '#141820', SCR_IDLE = '#5b6d8e', SCR_DONE = '#3f7a5e';
 
 const FIT_ICON = '<svg class="ic" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M2.5 6V2.5H6M10 2.5h3.5V6M13.5 10v3.5H10M6 13.5H2.5V10"/></svg>';
@@ -1385,7 +1385,7 @@ export function createOfis(root, ctx, opts = {}) {
       THREE, scene, group: root3, unit: 1, wallH: WALL_H, gap: GAP, roomD: ROOM_D,
       fonts: { text: SIGN_FONT, display: SIGN_FONT_D }, shade, rounded,
       palette: {
-        skins: SKINS, hairs: HAIRS, pants: PANTS, wood: WOOD, woodDark: WOOD_D, metal: METAL, chair: CHAIR, chairSeat: CHAIR_S,
+        skins: SKINS, hairs: HAIRS, pants: PANTS, wood: WOOD, woodDark: WOOD_D, metal: METAL,
         bezel: BEZEL, books: BOOKS, posters: POSTERS, walls: THEMES.map(t => t.wall), floors: THEMES.map(t => t.floor), yellow: YELLOW,
       },
       mat: hex => mat(hex),
