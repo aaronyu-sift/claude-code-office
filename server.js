@@ -7,6 +7,7 @@
 
 const http = require('http');
 const { createChatBridge } = require('./chatbridge');
+const { createDevReload } = require('./dev-reload');
 const { createRecent } = require('./recent');
 const { createSessionCheck } = require('./procident');
 const { createProgress } = require('./progress-file');
@@ -30,6 +31,7 @@ let DATA_DIR = path.join(HOME, '.claude-code-office');
 let COLORS_FILE = null;
 let INLINE_COLORS = {};
 let CSWAP_URL = null;
+let DEVRELOAD = null;   // --dev: tells an open page that its files changed (dev-reload.js)
 let CHAT = null;   // optional read-only bridge from the agentchat database
 let PROGRESS_FILE = null;   // the task tracker's snapshot of each chat's progress (progress-file.js, docs/progress.md)
 let COST_OPTS = {};   // pricesFile, discount, extraLogs for the cost worker
@@ -67,6 +69,7 @@ function configure(o) {
   RECENT_OPTS = { days: num(o.closedDays, 14), max: Math.max(1, num(o.closedMax, 50)), budgetMs: Math.max(1, num(o.closedBudgetMs ?? process.env.CCO_CLOSED_BUDGET_MS, 150)) };
   CLOSED_EVERY = Math.max(250, num(o.closedEveryMs ?? process.env.CCO_CLOSED_EVERY_MS, 30e3));
   DEMO = !!o.demo;
+  DEVRELOAD = o.dev || process.env.CCO_DEV === '1' ? createDevReload({ publicDir: PUBLIC }) : null;
   SITE = o.site || null;
 }
 
@@ -795,6 +798,7 @@ function handler(req, res, next) {
     req.on('close', () => clients.delete(res));
     return;
   }
+  if (DEVRELOAD && DEVRELOAD.handle(url.pathname, res)) return;
   if (url.pathname === '/api/config') return json(res, { version: VERSION, demo: DEMO, site: SITE, cswap: !!CSWAP_URL && !DEMO });
   if (url.pathname === '/api/state') return json(res, snapshot());
   if (url.pathname === '/api/closed') return json(res, { closed: closedList, days: RECENT_OPTS.days, max: RECENT_OPTS.max, scan: recent ? recent.stats : null });
@@ -817,7 +821,7 @@ function handler(req, res, next) {
       res.writeHead(404); return res.end('not found');
     }
     res.writeHead(200, { 'Content-Type': TYPES[path.extname(file)] || 'application/octet-stream', ...(etag ? { 'Cache-Control': 'public, max-age=3600', ETag: etag } : { 'Cache-Control': 'no-store' }) });
-    res.end(buf);
+    res.end(DEVRELOAD && file === path.join(PUBLIC, 'index.html') ? DEVRELOAD.inject(buf.toString('utf8')) : buf);
   });
   // The 3D scene's models (public/models, about 1.5 MB) are the one thing worth keeping in the browser: an hour without asking, then an ETag.
   if (!p.startsWith('/models/')) return serveFile(null);
@@ -899,6 +903,7 @@ function cli(argv) {
   --claude-dir <dir>  Claude config dir (default ~/.claude or $CLAUDE_CONFIG_DIR)
   --data-dir <dir>    Where the cost cache is kept (default ~/.claude-code-office)
   --chat-db <file>    agentchat SQLite database to show (read-only; or set CCO_CHAT_DB)
+  --dev               Dev preview: an open page offers a reload when its files change (or set CCO_DEV=1)
   --closed-days <n>   How far back closed sessions are listed on the shelf (default 14; 0 = off)
   --closed-max <n>    How many closed sessions at most (default 50)
   --progress-file <f> Task progress snapshot to show (default <claude dir>/office-progress.json or $OFFICE_PROGRESS_FILE)
@@ -911,6 +916,7 @@ function cli(argv) {
   if (val('claude-dir')) opts.claudeDir = val('claude-dir');
   if (val('data-dir')) opts.dataDir = val('data-dir');
   if (val('chat-db')) opts.chatDb = val('chat-db');
+  if (has('dev')) opts.dev = true;
   if (val('closed-days')) opts.closedDays = val('closed-days');
   if (val('closed-max')) opts.closedMax = val('closed-max');
   if (val('progress-file')) opts.progressFile = val('progress-file');
