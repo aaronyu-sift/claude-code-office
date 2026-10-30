@@ -812,7 +812,7 @@ export function createOfis(root, ctx, opts = {}) {
         return { slot: r.slot, id: r.id, vacant: r.vacant, style: l.style, theme: r.look.theme, work: l.work, soft: l.soft, sig: d && d.sig, tris: d && d.tris, items: d && d.items, models: d && d.models, lit: decor.litOf(r.slot) };
       });
     },
-    lit(slot) { return decor.litOf(slot); },                                  // the light of a slot's room now, 0..1 (it eases on when the first person of its chat is through the door, and off when the last has left)
+    lit(slot) { return decor.litOf(slot); },                                  // the light of a slot's room now, 0..1 (it eases on when the first person of its chat is through the door, and off a hold, a second of the scene's clock, after the last has left)
     litTarget(slot) { return decor.targetOf(slot); },                         // where that number is going: 1 or 0, thrown the moment the rule says so (the number follows over SWITCH_MS)
     // what one pass of the rule costs (the QA measures it, the app never calls it): the mean of `n` calls of lightsFor, in milliseconds, and how many figures and offices it read
     timeLights(n = 2000) { const t0 = performance.now(); for (let i = 0; i < n; i++) lightsFor(); return { ms: (performance.now() - t0) / n, figures: chars.size, rooms: (world.lightRooms || []).length }; },
