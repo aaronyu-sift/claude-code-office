@@ -92,7 +92,7 @@ async function observe({ tag, n, query, reducedMotion = false, root, pictures = 
     if (noLamp.length) bad(`${noLamp.length} of ${rooms.length} offices have no lamp (${noLamp.map(r => r.project).join(', ')})`);
     const wrongStyle = rooms.filter(r => !life.rooms[r.id] || life.rooms[r.id].style !== styles[r.id]);
     if (wrongStyle.length) bad(`${wrongStyle.length} offices were drawn in another style than the scene says (${wrongStyle.map(r => `${r.project}: ${(life.rooms[r.id] || {}).style} / ${styles[r.id]}`).join(', ')})`);
-    const strays = Object.keys(life.byRoom).filter(id => !ids.has(id));
+    const strays = Object.keys(life.byRoom).filter(id => id !== 'lounge' && !ids.has(id));          // the lounge on the plaza has lamps and candles of its own (office3d-lounge-qa.mjs checks them)
     if (strays.length) bad(`light sources in rooms that have no chat: ${strays.join(', ')}`);
     const vacantLit = life.panes - life.windows - life.screens;                            // the dark panes of the vacant offices
     out.vacantPanes = vacantLit;

@@ -366,7 +366,7 @@ if (want('board-setting')) {
 // one line broken in a copy of the repo, the check that guards it must fail there
 const MUTATIONS = [
   { name: 'the small project line is bigger than the name (3D plaque)', file: 'public/js/ofis.js', from: 'const sfs = Math.min(Math.round(h * 0.15), Math.round(fit.fs * 0.62));', to: 'const sfs = Math.round(h * 0.5);', fails: ['board-3d'] },
-  { name: 'the project is shown by default (setting default on)', file: 'public/js/pixel/settings.js', from: "shelf: DEFAULT_CAP, project: 'off', scene: '3d' }", to: "shelf: DEFAULT_CAP, project: 'on', scene: '3d' }", fails: ['board-3d', 'board-pixel', 'board-setting'] },
+  { name: 'the project is shown by default (setting default on)', file: 'public/js/pixel/settings.js', from: "shelf: DEFAULT_CAP, project: 'off', scene: '3d', lounge: 'text' }", to: "shelf: DEFAULT_CAP, project: 'on', scene: '3d', lounge: 'text' }", fails: ['board-3d', 'board-pixel', 'board-setting'] },
   { name: 'the project is bigger than the name (pixel board)', file: 'public/js/pixel/board.js', from: 'small: Math.max(9, Math.round(name * 0.62))', to: 'small: Math.round(name * 1.3)', fails: ['board-pixel'] },
   { name: 'a click on a board does nothing', file: 'public/js/pixel/index.js', from: 'if (onBoard) return { t: \'agent\', id: onBoard };', to: '', fails: ['board-pixel'] },
   { name: 'the address is ignored by the 3D scene', file: 'public/js/main.js', from: 'createOfficeSettings({ overrides: officeQuery(location.search) })', to: 'createOfficeSettings({ overrides: {} })', fails: ['board-setting'] },

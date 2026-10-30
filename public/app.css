@@ -670,6 +670,35 @@ main { flex: 1; min-height: 0; position: relative; }
 .oc-sep { height: 1px; margin: 5px 4px; background: rgba(150, 165, 255, .22); }
 .oc-hint { margin: 4px 4px 2px; padding: 6px 8px 2px; border-top: 1px solid rgba(150, 165, 255, .22); color: #a9b3d6; font-size: 12px; line-height: 1.4; }
 
+/* the lounge on the plaza (ofis-lounge.js, lounge-card.js): the sign over the message wall, the names of the people in it, and the posts in the card */
+.of-lsign {
+  display: inline-flex; align-items: center; gap: 8px; max-width: 360px; padding: 4px 12px 5px; border-radius: 999px; color: #eaeeff; font: 500 12px/1.4 var(--font);
+  background: rgba(9, 12, 28, .8); border: 1px solid rgba(196, 208, 255, .32); box-shadow: 0 8px 22px -10px rgba(0, 0, 0, .75); overflow: hidden;
+}
+.of-lsign i { flex: none; width: 8px; height: 8px; border-radius: 50%; background: #8fb0ff; }
+.of-lsign.ok i { background: #6ee7a0; }
+.of-lsign.off i { background: #a9b3d6; }
+.of-lsign.warn i { background: #fab219; }
+.of-lsign b { flex: none; font: 600 12px/1.4 var(--font-d); }
+.of-lsign span { min-width: 0; overflow: hidden; text-overflow: ellipsis; color: #a9b3d6; }
+.of-loungel:focus-visible { outline: 2px solid #ffd166; outline-offset: 2px; border-radius: 999px; }
+.of-lp { display: inline-flex; align-items: center; gap: 5px; max-width: 140px; padding: 1px 7px 2px; border-radius: 6px; font: 500 10px/1.35 var(--font); color: var(--text-2); background: color-mix(in srgb, var(--bg) 66%, transparent); overflow: hidden; text-overflow: ellipsis; }
+.of-lp i { flex: none; width: 7px; height: 7px; border-radius: 50%; }
+.of-lounge-card { width: min(380px, calc(100% - 16px)); }
+.lg-people { display: flex; flex-wrap: wrap; gap: 5px 6px; }
+.lg-person { display: inline-flex; align-items: center; gap: 6px; padding: 1px 9px; border: 1px solid rgba(196, 208, 255, .32); border-radius: 999px; font-size: 12.5px; background: rgba(10, 14, 32, .55); }
+.lg-person i { flex: none; width: 7px; height: 7px; border-radius: 50%; }
+.lg-chip { display: inline-flex; align-items: center; gap: 5px; max-width: 150px; padding: 0 8px; border-radius: 999px; font: 600 11px/1.7 var(--mono); color: var(--c, #8fb0ff); border: 1px solid color-mix(in srgb, var(--c, #8fb0ff) 70%, transparent); background: color-mix(in srgb, var(--c, #8fb0ff) 16%, transparent); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.lg-chip b { font-weight: 600; color: #eaeeff; }
+.lg-posts { margin: 0; padding: 0; list-style: none; }
+.lg-post { padding: 7px 0 8px; border-top: 1px solid rgba(150, 165, 255, .16); }
+.lg-post:first-child { border-top: 0; }
+.lg-top { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.lg-who { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font: 600 13px/1.4 var(--font-d); color: #eaeeff; }
+.lg-age { flex: none; font: 12px/1.4 var(--mono); color: #a9b3d6; }
+.lg-text { margin-top: 3px; font-size: 13.5px; line-height: 1.45; color: #d6dcf5; overflow-wrap: anywhere; }
+.lg-src { margin-bottom: 2px; font-size: 12.5px; }
+
 .of-hud { position: absolute; left: 16px; top: calc(var(--top-h, 72px) + 4px); right: 70px; pointer-events: none; }
 .of-sum {
   display: inline-flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; padding: 7px 13px;

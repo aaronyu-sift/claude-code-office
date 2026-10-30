@@ -1503,8 +1503,8 @@ if (want('settings')) {
     await sel('set-season', 'winter'); await sleep(400); const s11 = await st();               // a change keeps an explicit parameter in step and is remembered
     const same = (a, b) => JSON.stringify(a) === JSON.stringify(b);
     const E = { time: '06:30', season: 'autumn', weather: 'snow', hemisphere: 'south', shelf: 20 };
-    const ES = { ...E, project: 'off', scene: 'pixel' };                       // the settings in force: the setting `project` was never touched here, so it is at its default; `scene` is the ?scene=pixel that the harness adds
-    const fromAll = (f, v) => Object.entries(f).every(([k, x]) => x === (k === 'project' ? 'default' : k === 'scene' ? 'url' : v));
+    const ES = { ...E, project: 'off', scene: 'pixel', lounge: 'text' };      // the settings in force: `project` and `lounge` were never touched here, so they are at their defaults; `scene` is the ?scene=pixel that the harness adds
+    const fromAll = (f, v) => Object.entries(f).every(([k, x]) => x === (k === 'project' || k === 'lounge' ? 'default' : k === 'scene' ? 'url' : v));
     const noReload = [s2, s3, s4, s5].every(x => x.origin === s1.origin);
     const C = {
       defaults: s0.settings.time === 'auto' && s0.settings.season === 'auto' && s0.settings.weather === 'off' && s0.settings.hemisphere === 'north' && s0.settings.shelf === 10 && s1.shelfSel === '10' && s1.shelfOpts === '5,10,20,50' && Object.entries(s0.from).every(([k, v]) => v === (k === 'scene' ? 'url' : 'default')) && s0.weather === null && s0.stored === null && !s0.open,
@@ -1517,7 +1517,7 @@ if (want('settings')) {
       camera: camBtn && s6.proj === 'front' && s6b.proj === 'iso',
       stored: same(s7.settings, ES) && same(JSON.parse(s7.stored), E) && s7.shelfSel === '20' && s7.settings.shelf === 20 && s7.from.shelf === 'user',
       reload: same(s8.settings, ES) && fromAll(s8.from, 'stored') && s8.season === 'autumn' && s8.weather === 'snow' && s8.wcount > 0 && s8.clock === '06:30' && s8.fixed && !s8.open,
-      url: same(s9.settings, { time: '22:00', season: 'spring', weather: 'fog', hemisphere: 'north', shelf: 7, project: 'off', scene: 'pixel' }) && s9n.shelfSel === '7' && s9n.shelfOpts === '5,7,10,20,50' && /\?\u2060?shelf=7/.test(s9n.note) && fromAll(s9.from, 'url') && s9.season === 'spring' && s9.weather === 'fog' && s9.clock === '22:00' && same(JSON.parse(s9.stored), E) && /\?\u2060?season=spring/.test(s9n.note),
+      url: same(s9.settings, { time: '22:00', season: 'spring', weather: 'fog', hemisphere: 'north', shelf: 7, project: 'off', scene: 'pixel', lounge: 'text' }) && s9n.shelfSel === '7' && s9n.shelfOpts === '5,7,10,20,50' && /\?\u2060?shelf=7/.test(s9n.note) && fromAll(s9.from, 'url') && s9.season === 'spring' && s9.weather === 'fog' && s9.clock === '22:00' && same(JSON.parse(s9.stored), E) && /\?\u2060?season=spring/.test(s9n.note),
       back: same(s10.settings, ES) && s10.season === 'autumn',
       keepUrl: /season=winter/.test(s11.url) && s11.season === 'winter' && JSON.parse(s11.stored).season === 'winter',
       noErrors: S.page.errors.length === 0,

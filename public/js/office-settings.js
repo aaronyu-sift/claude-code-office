@@ -7,8 +7,8 @@
 //   createOfficeSettings({ storage, overrides, watch })   get(key) | get(), set(key, value), from(), on(key, fn); another tab's change arrives through `watch`'s storage event
 //   createSettingsHub({ getOffice, afterChange })          what the popover and the tab both talk to: set(key, value) applies a change to whichever scene is in force and
 //                                                         tells both controls (on(fn)), so a change in one shows at once in the other; settings(), from(), rows()
-//   officeQuery(search)                            the overrides of an address: ?time ?season ?weather ?hemisphere ?shelf ?project ?scene, and ?hour= as an older name of ?time=
-//   urlAfterChange(search, key, value)             the address after a change made with the controls, when the address named that setting (else null)
+//   officeQuery(search)                            the overrides of an address: ?time ?season ?weather ?hemisphere ?shelf ?project ?scene ?lounge, and ?hour= as an older name of ?time=
+//   urlAfterChange(search, key, value)             the address after a change made with the controls, when the address named that setting (else null); ?lounge=demo stays named
 //   rowsOf(office), tabRowsOf(office)              the rows of the popover and of the Settings tab that a scene supports
 //   sceneChoice({ storage, search })               the scene the page opens: the address, else the stored choice, else '3d'
 //   sourceOf(key, from, search)                    where a value comes from, for the note under a row: 'default', 'stored', 'visit' (changed, but not kept by the browser) or 'url' (the address names it)
@@ -47,6 +47,7 @@ export function urlAfterChange(search, key, value) {
   const q = new URLSearchParams(search || '');
   if (key === 'time' && q.has('hour') && !q.has('time')) { q.delete('hour'); q.set('time', value); return '?' + q; }
   if (!q.has(key)) return null;
+  if (key === 'lounge' && /(^|[\s,+])demo($|[\s,+])/i.test(q.get(key))) value = 'demo,' + value;       // the demo source is not part of the setting: it stays
   q.set(key, value);
   return '?' + q;
 }

@@ -9,8 +9,8 @@ test('office settings: defaults, then what is stored, then the address, and each
   const store = memory();
   save(store, { season: 'winter', weather: 'rain' });
   const s = createOfficeSettings({ storage: store, overrides: officeQuery('?season=spring&time=06:30') });
-  assert.deepEqual(s.get(), { time: '06:30', season: 'spring', weather: 'rain', hemisphere: 'north', shelf: 10, project: 'off', scene: '3d' });
-  assert.deepEqual(s.from(), { time: 'url', season: 'url', weather: 'stored', hemisphere: 'default', shelf: 'default', project: 'default', scene: 'default' });
+  assert.deepEqual(s.get(), { time: '06:30', season: 'spring', weather: 'rain', hemisphere: 'north', shelf: 10, project: 'off', scene: '3d', lounge: 'text' });
+  assert.deepEqual(s.from(), { time: 'url', season: 'url', weather: 'stored', hemisphere: 'default', shelf: 'default', project: 'default', scene: 'default', lounge: 'default' });
   assert.equal(s.get('weather'), 'rain');
   assert.equal(createOfficeSettings({ storage: memory() }).get('time'), 'auto');
 });
@@ -42,7 +42,7 @@ test('office settings: a choice is validated, remembered under the pixel scene\'
   assert.equal(s.set('shelf', 1000), false);
   assert.equal(s.get('weather'), 'rain');
   assert.deepEqual(JSON.parse(store.m[KEY]), { weather: 'rain', time: '21:30' });
-  assert.deepEqual(merge(load(store), {}).values, { time: '21:30', season: 'auto', weather: 'rain', hemisphere: 'north', shelf: 10, project: 'off', scene: '3d' }, 'the pixel scene would start with the same choices');
+  assert.deepEqual(merge(load(store), {}).values, { time: '21:30', season: 'auto', weather: 'rain', hemisphere: 'north', shelf: 10, project: 'off', scene: '3d', lounge: 'text' }, 'the pixel scene would start with the same choices');
   // and the other way round: a choice made in the pixel scene is the starting point here
   save(store, { season: 'autumn' });
   assert.equal(createOfficeSettings({ storage: store }).get('season'), 'autumn');

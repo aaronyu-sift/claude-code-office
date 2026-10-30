@@ -4,12 +4,12 @@ import { KEY, KEYS, DEFAULTS, clean, sanitize, fromQuery, merge, load, save, kee
 
 const memory = (init = {}) => { const m = { ...init }; return { m, getItem: k => (k in m ? m[k] : null), setItem: (k, v) => { m[k] = String(v); } }; };
 
-test('settings: the defaults are automatic time and season, weather off, northern hemisphere, ten chats on the shelf, no project folder on the boards, the 3D scene', () => {
-  assert.deepEqual({ ...DEFAULTS }, { time: 'auto', season: 'auto', weather: 'off', hemisphere: 'north', shelf: 10, project: 'off', scene: '3d' });
-  assert.deepEqual(KEYS, ['time', 'season', 'weather', 'hemisphere', 'shelf', 'project', 'scene']);
+test('settings: the defaults are automatic time and season, weather off, northern hemisphere, ten chats on the shelf, no project folder on the boards, the 3D scene, the lounge shows its text', () => {
+  assert.deepEqual({ ...DEFAULTS }, { time: 'auto', season: 'auto', weather: 'off', hemisphere: 'north', shelf: 10, project: 'off', scene: '3d', lounge: 'text' });
+  assert.deepEqual(KEYS, ['time', 'season', 'weather', 'hemisphere', 'shelf', 'project', 'scene', 'lounge']);
   const { values, from } = merge({}, {});
   assert.deepEqual(values, { ...DEFAULTS });
-  assert.deepEqual(Object.values(from), ['default', 'default', 'default', 'default', 'default', 'default', 'default']);
+  assert.deepEqual(Object.values(from), Array(8).fill('default'));
 });
 test('settings: the scene is 3d or pixel, from the store or the address; the address wins and is not stored; anything else is ignored', () => {
   assert.equal(clean('scene', '3d'), '3d'); assert.equal(clean('scene', 'pixel'), 'pixel'); assert.equal(clean('scene', ' Pixel '), 'pixel'); assert.equal(clean('scene', '3D'), '3d');
@@ -46,8 +46,8 @@ test('settings: URL overrides beat stored settings, stored beat the defaults, an
   const url = fromQuery('?season=spring&time=06:30&bogus=1&weather=hail&shelf=5');
   assert.deepEqual(url, { season: 'spring', time: '06:30', shelf: 5 });
   const { values, from } = merge(stored, url);
-  assert.deepEqual(values, { time: '06:30', season: 'spring', weather: 'rain', hemisphere: 'south', shelf: 5, project: 'off', scene: '3d' });
-  assert.deepEqual(from, { time: 'url', season: 'url', weather: 'stored', hemisphere: 'stored', shelf: 'url', project: 'default', scene: 'default' });
+  assert.deepEqual(values, { time: '06:30', season: 'spring', weather: 'rain', hemisphere: 'south', shelf: 5, project: 'off', scene: '3d', lounge: 'text' });
+  assert.deepEqual(from, { time: 'url', season: 'url', weather: 'stored', hemisphere: 'stored', shelf: 'url', project: 'default', scene: 'default', lounge: 'default' });
   assert.equal(merge(stored, fromQuery('?shelf=2')).values.shelf, 20, 'a shelf size out of range in the address is ignored');
   assert.equal(merge({ shelf: 'many' }, {}).values.shelf, 10, 'and so is a broken stored one');
   assert.deepEqual(merge(stored, {}).values.season, 'winter');

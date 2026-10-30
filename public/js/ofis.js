@@ -24,6 +24,7 @@ import {
   VACANT_CLS, minRoomsFrom, buildingPlan, classFor, nextClass, createSlots,
 } from './ofis-layout.js';
 import { boardName, boardProject, boardBadges, fitName } from './board-text.js';
+import { createLounge } from './ofis-lounge.js';
 
 // Models (ofis-assets.js has loaded them before this module runs): a piece that did not load is missing from PK and the procedural shape
 // below is drawn in its place. POLISH is the procedural polish: occlusion baked into the room batch, a noise floor, tone mapping, contact
@@ -422,6 +423,7 @@ export function createOfis(root, ctx, opts = {}) {
   selRing.renderOrder = 3;
   scene.add(selRing);
   let selectedId = null;
+  let lounge = null;            // the lounge on the plaza (ofis-lounge.js), made below once the interface exists
 
   // surroundings (street, river, woods, mountains): laid out around world.bounds in applyBounds, animated in step
   const atmosphere = opts.atmosphere || createAtmosphere({ settings: createOfficeSettings({ overrides: officeQuery(typeof location === 'undefined' ? '' : location.search) }) });
@@ -464,8 +466,21 @@ export function createOfis(root, ctx, opts = {}) {
   // the floating interface shared with the pixel scene (ofis-ui.js): the card beside a clicked agent, the shelf card and the zoom buttons
   const ui = createOfisUi({
     root, area, ctx, camera, size: () => [vw, vh], charOf: id => chars.get(id),
-    setSelected: id => { selectedId = id; },
+    setSelected: id => { selectedId = id; if (id && lounge) lounge.closeCard(); },       // an agent's card and the lounge's card are never open together
     onShelfFirst: () => { if (visible && autoFit) fit(); },
+  });
+
+  // The lounge (ofis-lounge.js): the pavilion on the plaza of the hub, its message wall and the agents that talk. What it needs from this scene comes in here.
+  lounge = createLounge({
+    scene, camera, root, area, store, decor, KIT, settings: opts.settings || createOfficeSettings({ overrides: officeQuery(typeof location === 'undefined' ? '' : location.search) }),
+    size: () => [vw, vh], anisotropy: aniso,
+    project: (x, y, z) => { PV.set(x, y, z).project(camera); return [(PV.x + 1) / 2 * vw, (1 - PV.y) / 2 * vh]; },
+    bounds: () => { const b = root.getBoundingClientRect(), a = area.getBoundingClientRect(), c = ui.covered(); return { x0: a.left - b.left, y0: a.top - b.top + c.top, x1: a.left - b.left + a.width - c.right, y1: a.top - b.top + a.height }; },
+    hitBox: (g, x, y, z, w, h, d) => hitBox(g, x, y, z, w, h, d),
+    mkLabel: (...a) => mkLabel(...a), setLabel: (...a) => setLabel(...a), dropLabel: L => dropLabel(L),
+    person: { make: (id, shirt) => makeChar(id, false, shirt, true), anim: (c, dt, T) => animChar(c, dt, T), remove: c => removeChar(c) },
+    sessionInfo: id => { const a = store.agents.get(id); return a ? { name: boardName(a) || a.project || '', color: a.color } : null; },
+    openAgent: id => ui.openAgent(id), closeAgentCard: () => ui.card.close(),
   });
 
   function assignThemes(list, cells) {
@@ -638,7 +653,9 @@ export function createOfis(root, ctx, opts = {}) {
     });
     world.plan = { bays: P.bays, size: P.size };
     world.lounge = P.lounge;
-    if (P.lounge) buildPlaza(B, P.lounge);
+    // the pavilion takes the place of the round bed. What it puts into the batch is measured here, around the call, not by the lounge itself (`o.loungeBatchTris`: the QA holds it to its budget)
+    world.loungeBatchTris = 0;
+    if (P.lounge) { buildPlaza(B, P.lounge, { bed: false }); const b0 = B.i.length / 3; lounge.build({ g, B, c: P.lounge, rng: rng(7) }); world.loungeBatchTris = B.i.length / 3 - b0; } else lounge.clear();
     buildHalls(B, g, items, areas);
     addVacantSigns(g);
     decor.finish(g);
@@ -750,6 +767,12 @@ export function createOfis(root, ctx, opts = {}) {
     rebuildNow() { world.sig = ''; sync(); return this.rebuildMs; },
     // the rooms' life (ofis-decor.js): panes, lamps, candles and the light they give right now; the style of every room; the living meshes can be hidden to compare pictures
     get life() { return decor.stats(); },
+    get lounge() { return lounge.snapshot(); },                   // the lounge: mode, state, the wall's posts and picture, the people, the poll, the card, what it cost (ofis-lounge.js)
+    loungeVisible(on, part) { lounge.setVisible(on, part); },
+    get frameNo() { return frameNo; },                                   // the scene's frames drawn so far (software GL draws 8 a second, not one per animation frame)
+    get loungeBatchTris() { return world.loungeBatchTris || 0; },       // the triangles the lounge's build put into the building's batch, counted around the call (not the lounge's own count)
+    get loungeAnim() { return lounge.paintState(); },                   // cheap: is a post fading in on the wall (the QA samples it every frame; `lounge` reads the canvas back)
+    loungeFeed(payload) { lounge.feed(payload); },                      // verification only: answer the lounge's poll by hand
     lifeVisible(on, part) { decor.setVisible(on, part); },
     styles() { return Object.fromEntries([...world.rooms.keys()].map(id => [id, styleAt(styleOf.get(id) ?? hash(id)).id])); },
     view(x, y, z, zm) { autoFit = false; camA = PV.set(x, y, z).dot(R); camB = PV.dot(U); lim = { a0: -1e9, a1: 1e9, b0: -1e9, b1: 1e9 }; zoom = clamp(zm, 1, 400); applyCam(); return [camA, camB, zoom]; },
@@ -1114,9 +1137,9 @@ export function createOfis(root, ctx, opts = {}) {
 
   // ---------------------------------------------------------- hall / lobby
 
-  // The hub of the X is a cell without a chat slot, reserved for a lounge that is furnished later (ofis-layout.js). Until then it is an open plaza:
-  // stone paving that runs on from the hall, a low curb on its street side, a row of planters and a round bed with a shrub. All of it is in the one batch.
-  function buildPlaza(B, c) {
+  // The hub of the X is a cell without a chat slot (ofis-layout.js): an open plaza of stone paving that runs on from the hall, a low curb on its street side, a row of planters
+  // and, without the lounge, a round bed with a shrub. All of it is in the one batch; the lounge (ofis-lounge.js) stands on it and takes the bed's place (`bed: false`).
+  function buildPlaza(B, c, o = {}) {
     const { X, Z, W, D } = c, cx = X + W / 2, cz = Z + D / 2;
     B.box(cx, 0.006, cz, W, 0.012, D, '#d6d0c2');
     B.box(cx, 0.03, Z + D - 0.12, W, 0.06, 0.24, '#b9b1a1');
@@ -1126,6 +1149,7 @@ export function createOfis(root, ctx, opts = {}) {
       B.put(GEO.ico, x, 0.72, z, 0.56, 0.62, 0.56, '#4f9f55', x);
       B.put(GEO.ico, x - 0.04, 1.0, z + 0.04, 0.38, 0.42, 0.38, '#66b35d', x * 2);
     }
+    if (o.bed === false) return;
     B.put(GEO.cyl, cx, 0.1, cz - 0.4, 2.6, 0.2, 2.6, '#b9b1a1');
     B.put(GEO.cyl, cx, 0.19, cz - 0.4, 2.3, 0.06, 2.3, '#7a5a40');
     B.put(GEO.ico, cx, 0.85, cz - 0.4, 1.5, 1.3, 1.5, '#4f9f55', cx);
@@ -1995,7 +2019,8 @@ export function createOfis(root, ctx, opts = {}) {
     B.root.position.y = c.pivotW / PK_K - PK_PIV;
   }
 
-  function makeChar(id, main, shirt) {
+  // plain: a person of the lounge (ofis-lounge.js): no name tag and no balloon of its own, and it is not an agent of the store
+  function makeChar(id, main, shirt, plain = false) {
     const h = hash(id);
     const f = buildPackFigure(h, shirt) || buildFigure({ skin: SKINS[h % SKINS.length], hair: HAIRS[(h >>> 4) % HAIRS.length], style: (h >>> 9) % 4, pants: PANTS[(h >>> 12) % PANTS.length], shirt });
     const { root, hip, upper, head, armL, armR, legL, legR } = f;
@@ -2044,6 +2069,7 @@ export function createOfis(root, ctx, opts = {}) {
       heading: -Math.PI / 2, th: -Math.PI / 2, sit: 1, walkPh: 0, ph: (h % 1000) / 159, doneAt: 0,
       tag: null, bal: null,
     };
+    if (plain) return c;
     c.tag = mkLabel('of-tagl', main ? 70 : 40, 'down', 3, main ? 0 : 12);
     c.bal = mkLabel('of-ball', main ? 60 : 30, 'up', 6, main ? 0 : 22);
     c.tag.agent = true;
@@ -2055,7 +2081,8 @@ export function createOfis(root, ctx, opts = {}) {
 
   function removeChar(c) {
     scene.remove(c.root);
-    c.root.traverse(o => { if (o.userData.own && o.geometry) o.geometry.dispose(); });
+    // a skinned figure has a bone texture of its own (made on its first draw): without skeleton.dispose() every person who leaves keeps one to two textures on the GPU for good
+    c.root.traverse(o => { if (o.userData.own && o.geometry) o.geometry.dispose(); if (o.isSkinnedMesh && o.skeleton) o.skeleton.dispose(); });
     dropLabel(c.tag);
     dropLabel(c.bal);
     const room = world.rooms.get(c.roomId);
@@ -2262,6 +2289,7 @@ export function createOfis(root, ctx, opts = {}) {
   function animChar(c, dt, T) {
     const a = store.agents.get(c.id);
     const pos = c.root.position;
+    if (c.force && c.force.still) T = 0;                  // a person of the lounge under prefers-reduced-motion keeps still (ofis-lounge.js)
 
     if (c.mode === 'walk' && c.path) {
       const p = c.path[c.pi];
@@ -2288,6 +2316,7 @@ export function createOfis(root, ctx, opts = {}) {
     else if (c.main && (st === 'waiting' || st === 'ask')) pose = 'wave';
     else if (st === 'dormant') pose = 'sleep';
     if (c.mode === 'seated') c.th = pose === 'wave' ? Math.PI / 4 : -Math.PI / 2;
+    if (c.force) { pose = c.force.pose; c.th = c.force.th; }       // a person of the lounge chats or listens, and faces where its seat faces
 
     c.heading = angTo(c.heading, c.th, Math.min(1, dt * (c.mode === 'walk' ? 12 : 5)));
     c.root.rotation.y = c.heading;
@@ -2304,6 +2333,8 @@ export function createOfis(root, ctx, opts = {}) {
       tgt.rx = -2.05; tgt.rz = 0.5; tgt.lx = -0.9; tgt.lz = -0.15; tgt.up = 0.04; tgt.hx = -0.06; tgt.hz = 0.12 + Math.sin(T * 1.3 + ph) * 0.05;
     } else if (pose === 'wave') {
       tgt.rx = -0.25; tgt.rz = -2.45 + Math.sin(T * 8) * 0.38; tgt.lx = -0.3; tgt.up = -0.05; tgt.hx = -0.1; tgt.hz = Math.sin(T * 3) * 0.08;
+    } else if (pose === 'talk') {
+      tgt.rx = -0.85 + Math.sin(T * 2.6 + ph) * 0.35; tgt.rz = 0.3; tgt.lx = -0.45; tgt.lz = -0.1; tgt.up = 0.02; tgt.hx = -0.02 + Math.sin(T * 1.7 + ph) * 0.05; tgt.hz = Math.sin(T * 1.3 + ph) * 0.08;
     } else if (pose === 'sleep') {
       tgt.lx = tgt.rx = -1.35; tgt.lz = -0.4; tgt.rz = 0.4; tgt.up = 0.95 + Math.sin(T * 1.6 + ph) * 0.025; tgt.hx = 0.25;
     } else {
@@ -2322,12 +2353,11 @@ export function createOfis(root, ctx, opts = {}) {
     c.legR.rotation.x = -1.5 * c.sit - legSwing * (1 - c.sit);
     c.hip.position.y = lerp(0.42, 0.5, c.sit) + (pose === 'walk' ? Math.abs(Math.cos(c.walkPh)) * 0.03 : 0);
 
-    const sc = c.mode === 'walk' ? clamp((world.entryX + 0.15 - pos.x) / 0.9, 0.02, 1) : 1;
+    const sc = c.force ? c.force.scale : c.mode === 'walk' ? clamp((world.entryX + 0.15 - pos.x) / 0.9, 0.02, 1) : 1;
     c.root.scale.setScalar(sc);
-    c.tag.off = c.bal.off = sc < 0.7;
-    c.tag.pos.set(pos.x, 0, pos.z);
+    if (c.tag) { c.tag.off = c.bal.off = sc < 0.7; c.tag.pos.set(pos.x, 0, pos.z); }
     if (c.pk) applyPack(c);
-    c.bal.pos.set(pos.x, c.pk ? c.pivotW + PK_TOP * PK_K + 0.25 : c.hip.position.y + 1.08, pos.z);
+    if (c.bal) c.bal.pos.set(pos.x, c.pk ? c.pivotW + PK_TOP * PK_K + 0.25 : c.hip.position.y + 1.08, pos.z);
   }
 
   const SC = new THREE.Color();
@@ -2399,6 +2429,7 @@ export function createOfis(root, ctx, opts = {}) {
     for (const fn of extraFrame) { try { fn(T, dt); } catch { /* decoration frame callback */ } }
     stepScreens(T);
     stepRooms(dt, T);
+    lounge.step(dt, T);
     decor.update(T, dt);
     doorWalkers.length = 0;
     env.frame(T, dt);
@@ -2410,6 +2441,9 @@ export function createOfis(root, ctx, opts = {}) {
       const c = chars.get(hover.id);
       if (c) { hoverRing.visible = true; hoverRing.position.set(c.root.position.x, 0.035, c.root.position.z); }
       else hoverRing.visible = false;
+    } else if (hover && hover.t === 'lounger') {
+      const p = lounge.hoverPos(hover.key);
+      if (p) { hoverRing.visible = true; hoverRing.position.set(p.x, 0.035, p.z); } else hoverRing.visible = false;
     } else hoverRing.visible = false;
     const sel = selectedId && chars.get(selectedId);
     if (sel) { selRing.visible = true; selRing.position.set(sel.root.position.x, 0.035, sel.root.position.z); }
@@ -2505,6 +2539,7 @@ export function createOfis(root, ctx, opts = {}) {
     ray.setFromCamera(NDC, camera);
     const objs = world.pick.slice();
     for (const c of chars.values()) objs.push(c.hit);
+    for (const c of lounge.people()) objs.push(c.hit);
     const hits = ray.intersectObjects(objs, false);
     for (const h of hits) {
       const p = h.object.userData.pick;
@@ -2541,6 +2576,7 @@ export function createOfis(root, ctx, opts = {}) {
     const id = h && (h.t === 'agent' || h.label) ? h.id : null;
     const a = id && store.agents.get(id);
     if (a) ctx.tip.show(tipHtml(a), e.clientX, e.clientY);
+    else if (h && h.t === 'lounger') { const tip = lounge.tipHtml(h.key); if (tip) ctx.tip.show(tip, e.clientX, e.clientY); else ctx.tip.hide(); }
     else if (h && h.t === 'extra' && h.html) ctx.tip.show(h.html, e.clientX, e.clientY);
     else ctx.tip.hide();
   }
@@ -2615,12 +2651,17 @@ export function createOfis(root, ctx, opts = {}) {
 
   function click(e, target) {
     if (emitPointer('click', e)) return;
+    const sg = target && target.closest ? target.closest('.of-l[data-lounge]') : null;                 // the lounge's sign
+    if (sg && root.contains(sg)) { lounge.openCard(sg); return; }
+    const lp = target && target.closest ? target.closest('.of-l[data-lounger]') : null;                // the name of a person in the lounge
+    if (lp && root.contains(lp)) { lounge.click({ t: 'lounger', key: lp.dataset.lounger }); return; }
     const lab = target && target.closest ? target.closest('.of-l[data-id]') : null;
     if (lab && root.contains(lab)) { ui.openAgent(lab.dataset.id); return; }
     const r = root.getBoundingClientRect();
     const h = pickAt(e.clientX - r.left, e.clientY - r.top);
-    if (!h) { ui.card.close(); return; }                         // empty scene: the card closes
+    if (!h) { ui.card.close(); lounge.closeCard(); return; }       // empty scene: the card closes
     if (h.t === 'extra') return;
+    if (h.t === 'lounge' || h.t === 'lounger') { lounge.click(h); return; }
     if (h.t === 'agent') { ui.openAgent(h.id); return; }
     if (h.t === 'room') {
       // a single click on empty floor opens the main agent; wait briefly so a double-click can reset the view
@@ -2669,6 +2710,7 @@ export function createOfis(root, ctx, opts = {}) {
       instantNext = false;
       refreshLabels();
       renderSum();
+      lounge.touch();
       renderer.shadowMap.needsUpdate = true;
     } catch (err) { logOnce('sync', err); }
   }
@@ -2762,10 +2804,12 @@ export function createOfis(root, ctx, opts = {}) {
       lastT = 0;
       cancelAnimationFrame(raf);
       raf = requestAnimationFrame(loop);
+      lounge.show();
     },
     hide() {
       visible = false;
       ui.setVisible(false);
+      lounge.hide();
       cancelAnimationFrame(raf);
       clearTimeout(clickTimer);
     },

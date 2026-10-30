@@ -10,6 +10,11 @@ const CHROME = process.env.CHROME_BIN || [
 ].find(p => existsSync(p));
 export const sleep = ms => new Promise(r => setTimeout(r, ms));
 
+// The Office asks the server for the data of the lounge (public/js/lounge-source.js). A server without that endpoint answers 404 by design: it means "the message board is off",
+// the way the optional local/ofis-extras.js probe is a 404 by design, so Chrome's console line for it is not an error of the page. It is kept in `page.expected` instead
+// (tools/qa/office3d-lounge-qa.mjs reads it), and never in `page.errors` or `page.failed`.
+const LOUNGE_404 = /\/api\/lounge(\?|$)/;
+
 // A helper process that dies with its runner (the QA server): own process group under a shell that polls the runner, so a run that times out,
 // crashes or is cancelled leaves nothing behind (the same watchdog as the Chrome below). kill() ends the whole group.
 export function spawnWatched(cmd, args, opts = {}) {
@@ -62,7 +67,7 @@ export async function launchChrome({ width = 1500, height = 900, dpr = 1, reduce
       ws.send(JSON.stringify({ id: n, method, params }));
     });
     const page = {
-      errors: [], failed: [], requests: [],
+      errors: [], failed: [], requests: [], expected: [],
       send, sleep,
       on(fn) { handlers.push(fn); },
       async evaluate(expr, awaitPromise = true) {
@@ -71,7 +76,7 @@ export async function launchChrome({ width = 1500, height = 900, dpr = 1, reduce
         return r.result.value;
       },
       async goto(url, settleMs = 1500) {
-        page.errors.length = 0; page.failed.length = 0; page.requests.length = 0;
+        page.errors.length = 0; page.failed.length = 0; page.requests.length = 0; page.expected.length = 0;
         await send('Page.navigate', { url: 'about:blank' });
         await sleep(100);
         await send('Page.navigate', { url: withScene(url, defaultScene) });
@@ -105,10 +110,10 @@ export async function launchChrome({ width = 1500, height = 900, dpr = 1, reduce
       const p = d.params;
       if (d.method === 'Runtime.exceptionThrown') page.errors.push('exception: ' + (p.exceptionDetails.exception && p.exceptionDetails.exception.description || p.exceptionDetails.text));
       else if (d.method === 'Runtime.consoleAPICalled' && p.type === 'error') page.errors.push('console.error: ' + p.args.map(a => a.value ?? a.description ?? '').join(' ').slice(0, 300));
-      else if (d.method === 'Log.entryAdded' && p.entry.level === 'error') page.errors.push('log: ' + p.entry.text + (p.entry.url ? ' ' + p.entry.url : ''));
+      else if (d.method === 'Log.entryAdded' && p.entry.level === 'error') (LOUNGE_404.test(p.entry.url || '') && /404/.test(p.entry.text) ? page.expected : page.errors).push('log: ' + p.entry.text + (p.entry.url ? ' ' + p.entry.url : ''));
       else if (d.method === 'Network.requestWillBeSent') page.requests.push(p.request.url);
       else if (d.method === 'Network.loadingFailed' && !p.canceled) page.failed.push(`${p.errorText} ${p.requestId}`);
-      else if (d.method === 'Network.responseReceived' && p.response.status >= 400) page.failed.push(`${p.response.status} ${p.response.url}`);
+      else if (d.method === 'Network.responseReceived' && p.response.status >= 400) (p.response.status === 404 && LOUNGE_404.test(p.response.url) ? page.expected : page.failed).push(`${p.response.status} ${p.response.url}`);
     });
     return page;
   } catch (e) { kill(); rmSync(profile, { recursive: true, force: true }); throw e; }
