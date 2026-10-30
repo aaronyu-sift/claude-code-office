@@ -317,9 +317,9 @@ if (want('scene')) {
     for (const mode of ['qa-nowrite', 'qa-nostorage']) {
       await page.evaluate(`localStorage.clear(); window.name = ${JSON.stringify(mode)}`);
       await S.load('', '#settings');
-      await click(page, '#st-scene button[data-v="pixel"]'); await sleep(300);
-      await sel(page, '#st-season', 'winter'); await sleep(300);
-      const u = await snap(page);
+      await click(page, '#st-scene button[data-v="pixel"]');
+      await sel(page, '#st-season', 'winter');
+      const u = await waitFor(async () => { const r = await snap(page); return r.src.season && r.src.season.from !== 'default' && r.src.scene && r.src.scene.from !== 'default' ? r : null; }, 15000) || await snap(page);       // a busy machine: wait for the page to answer, not a fixed time
       const text = await page.evaluate(`(() => { const p = document.querySelector('.st-pending'); const r = document.querySelector('#st-reload'); return { text: p.textContent.replace(/\\s+/g, ' ').trim(), reloadShown: r.getClientRects().length > 0 }; })()`);
       refused.push(`${mode}: scene tag "${u.src.scene && u.src.scene.text}", season tag "${u.src.season && u.src.season.text}", note "${text.text}"`);
       if (!(u.src.scene && u.src.scene.from === 'visit' && u.src.scene.text === 'This visit only' && u.tab.pending && /^Not kept/.test(text.text) && !/Saved/.test(text.text) && !text.reloadShown && u.engine === '3d')) bad.push(`${mode}: the scene row ${JSON.stringify({ src: u.src.scene, pending: u.tab.pending, text, engine: u.engine })}`);
@@ -501,6 +501,7 @@ if (want('narrow')) {
       for (const w of [360, 320, 280]) {
         await page.setViewport(w, 820); await sleep(350);
         const r = await strip();
+        if (w !== 360) await S.shot(`settings-${w}-${lang}.png`);
         small.push(`${w}: ${r.fits ? 'fits' : 'scrolls ' + r.scrolled}`);
         if (!(r.vw === w && r.selIn && r.docW <= w && (w >= 320 ? r.fits : true))) bad.push(`${label} at ${w} px: ${JSON.stringify(r)}`);
       }
