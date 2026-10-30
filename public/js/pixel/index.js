@@ -9,7 +9,7 @@ import { APPEARANCES } from './ids.js';
 import { createScene } from './scene.js';
 import { createScheduler } from './anim.js';
 import { ambient, rgba, fmtClock, createMinuteTicker } from './time.js';
-import { merge, load as loadSettings, save as saveSettings, clean as cleanSetting, timeMinutes } from './settings.js';
+import { merge, load as loadSettings, keep as keepSettings, clean as cleanSetting, timeMinutes } from './settings.js';
 import { seasonOfDate, dateKey, parseDateKey, lightMonth } from './season.js';
 import { resolveWeather, planFor, createField, drawRainbow, rainbowFor, PARTICLE_CAP } from './weather.js';
 import { createLabelLayer, placeLabels } from './labels.js';
@@ -187,8 +187,7 @@ export function createPixelOffice(root, ctx, opts = {}) {
     const v = cleanSetting(key, value);
     if (v == null || !(key in settings)) return false;
     settings = { ...settings, [key]: v };
-    from[key] = 'user';
-    saveSettings(storage, { [key]: v });
+    from[key] = keepSettings(storage, { [key]: v }) ? 'user' : 'visit';        // 'visit': the browser did not keep it (the Settings tab says so)
     if (key === 'time') { fixedMin = timeMinutes(v); armTicker(); applyTime(nowClock(), true); }
     else if (key === 'season') updateSeason();
     else if (key === 'hemisphere') { updateSeason(); applyTime(nowClock(), true); }

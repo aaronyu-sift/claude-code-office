@@ -15,6 +15,23 @@ test('office settings: defaults, then what is stored, then the address, and each
   assert.equal(createOfficeSettings({ storage: memory() }).get('time'), 'auto');
 });
 
+test('office settings: a change the browser did not keep says "visit" (not stored), one it kept says "user"; the address still wins the label', () => {
+  const quota = { getItem: () => null, setItem: () => { throw new Error('quota'); } };
+  for (const storage of [quota, null, { getItem: () => null, setItem: () => {} }]) {
+    const s = createOfficeSettings({ storage, watch: null }), seen = [];
+    s.on('season', v => seen.push(v));
+    assert.equal(s.set('season', 'winter'), true, 'the change still applies for this visit');
+    assert.equal(s.get('season'), 'winter'); assert.deepEqual(seen, ['winter']);
+    assert.equal(s.from().season, 'visit');
+    assert.equal(sourceOf('season', s.from(), ''), 'visit');
+    assert.equal(sourceOf('season', s.from(), '?season=winter'), 'url', 'the address that names it follows the control and wins the label');
+    assert.equal(sourceOf('weather', s.from(), ''), 'default', 'a row that was not touched');
+  }
+  const ok = memory(), s = createOfficeSettings({ storage: ok, watch: null });
+  s.set('season', 'winter');
+  assert.equal(s.from().season, 'user'); assert.equal(sourceOf('season', s.from(), ''), 'stored');
+});
+
 test('office settings: a choice is validated, remembered under the pixel scene\'s key, and read back by the pixel scene', () => {
   const store = memory();
   const s = createOfficeSettings({ storage: store });

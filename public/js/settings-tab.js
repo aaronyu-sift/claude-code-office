@@ -43,7 +43,7 @@ function build() {
     group('scene',
       row('scene', {
         label: msg('st.scene'), help: msg('st.scene.help'), control: seg('st-scene', 'scene', buttons(OPTIONS.scene, 'data-v')),
-        extra: `<p class="st-pending" role="status" hidden><span>${esc(msg('st.scene.pending'))}</span><button type="button" class="ghost-btn" id="st-reload">${esc(msg('st.scene.reload'))}</button></p>`,
+        extra: `<p class="st-pending" role="status" hidden><span class="st-pending-text">${esc(msg('st.scene.pending'))}</span><button type="button" class="ghost-btn" id="st-reload">${esc(msg('st.scene.reload'))}</button></p>`,
       }) +
       row('camera', { label: msg('set.camera'), help: msg('st.camera.help'), control: seg('st-camera', 'camera', buttons(OPTIONS.camera, 'data-proj'), ' proj-seg') })) +
     group('sky',
@@ -81,7 +81,7 @@ export function createSettingsTab(root, { hub, running = () => '3d', loadConfig 
   function source(key, kind, param) {
     const el = q(`[data-src="${key}"]`);
     if (!el) return;
-    const text = kind === 'url' ? msg('st.src.url', { param }) : msg(kind === 'stored' ? 'st.src.stored' : 'st.src.default');
+    const text = kind === 'url' ? msg('st.src.url', { param }) : msg(kind === 'stored' ? 'st.src.stored' : kind === 'visit' ? 'st.src.visit' : 'st.src.default');
     el.dataset.from = kind;
     if (el.textContent !== text) el.textContent = text;
   }
@@ -92,7 +92,12 @@ export function createSettingsTab(root, { hub, running = () => '3d', loadConfig 
     const from = hub.from(), addr = search(), rows = hub.rows(), fixed = s.time !== 'auto';
     for (const r of root.querySelectorAll('.st-row[data-row]')) if (r.dataset.row !== 'board') r.hidden = !rows.includes(r.dataset.row);
     for (const b of q('#st-scene').querySelectorAll('button')) b.setAttribute('aria-pressed', String(b.dataset.v === s.scene));
-    q('.st-pending').hidden = s.scene === running();                                // chosen, kept, and waiting for the next load
+    // a scene that is chosen but not running waits for the next load, when the browser kept the choice (or the address names it); a browser that does not keep settings says so
+    // instead, and has nothing to reload into
+    const waiting = s.scene !== running(), unkept = waiting && sourceOf('scene', from, addr) === 'visit';
+    q('.st-pending').hidden = !waiting;
+    q('.st-pending-text').textContent = msg(unkept ? 'st.scene.unkept' : 'st.scene.pending');
+    q('#st-reload').hidden = unkept;
     for (const b of q('#st-time-mode').querySelectorAll('button')) b.setAttribute('aria-pressed', String(b.dataset.v === (fixed ? 'fixed' : 'auto')));
     timeRow.hidden = !fixed || !rows.includes('time');
     if (fixed) { time.value = String(minutesOf(s.time)); timeOut.textContent = s.time; }

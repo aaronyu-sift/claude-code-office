@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { KEY, KEYS, DEFAULTS, clean, sanitize, fromQuery, merge, load, save, timeMinutes } from '../public/js/pixel/settings.js';
+import { KEY, KEYS, DEFAULTS, clean, sanitize, fromQuery, merge, load, save, keep, timeMinutes } from '../public/js/pixel/settings.js';
 
 const memory = (init = {}) => { const m = { ...init }; return { m, getItem: k => (k in m ? m[k] : null), setItem: (k, v) => { m[k] = String(v); } }; };
 
@@ -85,6 +85,18 @@ test('settings: saving merges into what is stored, a URL override is not stored 
   assert.deepEqual(load(null), {});
   assert.doesNotThrow(() => save(null, { season: 'autumn' }));
   assert.doesNotThrow(() => save({ getItem: () => null, setItem: () => { throw new Error('quota'); } }, { season: 'autumn' }));
+});
+test('settings: keep stores a change and says whether it stuck (the Settings tab must not call a lost change saved)', () => {
+  const ok = memory();
+  assert.equal(keep(ok, { season: 'winter' }), true);
+  assert.deepEqual(JSON.parse(ok.m[KEY]), { season: 'winter' });
+  assert.equal(keep(ok, { shelf: 20, project: 'on' }), true);
+  assert.deepEqual(JSON.parse(ok.m[KEY]), { season: 'winter', shelf: 20, project: 'on' });
+  assert.equal(keep(null, { season: 'winter' }), false, 'no storage at all');
+  assert.equal(keep({ getItem: () => null, setItem: () => { throw new Error('quota'); } }, { season: 'winter' }), false, 'the browser refuses the write');
+  assert.equal(keep({ getItem: () => { throw new Error('denied'); }, setItem: () => {} }, { season: 'winter' }), false, 'a write that cannot be read back');
+  assert.equal(keep({ getItem: () => null, setItem: () => {} }, { season: 'winter' }), false, 'a write that is silently dropped');
+  assert.equal(keep(memory(), { season: 'bogus' }), true, 'nothing valid to store: nothing was lost');
 });
 test('settings: a time setting is minutes after midnight, or null for the real clock', () => {
   assert.equal(timeMinutes('auto'), null); assert.equal(timeMinutes('07:30'), 450); assert.equal(timeMinutes('00:00'), 0); assert.equal(timeMinutes('23:55'), 1435);

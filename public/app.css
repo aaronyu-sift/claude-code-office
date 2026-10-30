@@ -857,6 +857,7 @@ main { flex: 1; min-height: 0; position: relative; }
 .st-src { padding: 1px 9px; border-radius: 999px; background: rgba(143, 176, 255, .08); color: var(--muted); font-size: 11.5px; line-height: 1.6; white-space: nowrap; max-width: 100%; overflow: hidden; text-overflow: ellipsis; }
 .st-src[data-from="stored"] { color: var(--text-2); }
 .st-src[data-from="url"] { background: rgba(144, 133, 233, .2); color: #d9d4ff; }
+.st-src[data-from="visit"] { background: var(--warn-soft); color: #f3d89a; }
 .st-ctl { justify-self: end; min-width: 0; display: flex; align-items: center; }
 .st-card .seg { background: rgba(143, 176, 255, .08); }
 .st-card .seg button[aria-pressed="true"] { background: var(--panel-3); color: var(--text); }
@@ -869,6 +870,7 @@ main { flex: 1; min-height: 0; position: relative; }
 .st-time output { min-width: 48px; text-align: right; font: 13px var(--mono); color: var(--text); }
 .st-pending { margin: 0; display: flex; flex-wrap: wrap; align-items: center; gap: 8px 14px; padding: 8px 12px; border-radius: 12px; background: rgba(144, 133, 233, .14); color: var(--text-2); font-size: 12.5px; }
 .st-pending .ghost-btn { margin-top: 0; background: rgba(143, 176, 255, .15); color: var(--text); }
+.st-pending [hidden] { display: none; }
 .st-note { margin: 0; color: var(--muted); font-size: 12px; }
 /* the sample of a board: what the project setting changes (the same plate as the room boards, in small); the project line only fades, nothing moves (docs/motion.md, mounted sign) */
 .st-sample {

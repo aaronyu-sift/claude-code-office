@@ -77,7 +77,7 @@ const SNAP = `(() => {
       project: q('#set-project').checked, timeMode: pressedOf('#set-time-mode'), sliderOut: q('#set-time-out').textContent, rows: all('#set-pop .set-row[data-row]').filter(r => shown(r)).map(r => r.dataset.row) },
     store: off ? off.settings.get() : px ? px.settings : null, from: off ? off.settings.from() : px ? px.settingsFrom : null, engine: off ? '3d' : px ? 'pixel' : null,
     dataScene: v && v.dataset.scene || null,
-    stored: localStorage.getItem('ajan-ofisi.settings'),
+    stored: (() => { try { return localStorage.getItem('ajan-ofisi.settings'); } catch { return 'THROWS'; } })(),
     board: { shown: shown(board), state: state ? state.dataset.state : null, text: state ? state.textContent.trim() : null },
     lang: document.documentElement.lang,
   });
@@ -302,6 +302,26 @@ if (want('scene')) {
     const back = await waitFor(() => page.evaluate(`!!document.querySelector('#view-ofis') && !!document.querySelector('#view-ofis').__office && !!document.querySelector('#view-settings .st')`).catch(() => false), 60000);
     const i = await snap(page);
     if (!(back && i.engine === '3d' && i.tab.scene === '3d' && !i.tab.pending)) bad.push(`3D again after a reload: ${JSON.stringify({ engine: i.engine, tab: i.tab })}`);
+    // a browser that does not keep settings (writes throw, or window.localStorage itself throws): nothing is called saved, the change holds for this visit, and the page does not
+    // promise a scene switch at the next load that cannot happen (window.name carries the flag across the reloads of this tab, the script runs before the page's own)
+    await page.send('Page.addScriptToEvaluateOnNewDocument', { source: `(() => {
+      if (window.name === 'qa-nowrite') Storage.prototype.setItem = function () { throw new DOMException('full', 'QuotaExceededError'); };
+      if (window.name === 'qa-nostorage') Object.defineProperty(window, 'localStorage', { configurable: true, get() { throw new DOMException('denied', 'SecurityError'); } });
+    })()` });
+    const refused = [];
+    for (const mode of ['qa-nowrite', 'qa-nostorage']) {
+      await page.evaluate(`localStorage.clear(); window.name = ${JSON.stringify(mode)}`);
+      await S.load('', '#settings');
+      await click(page, '#st-scene button[data-v="pixel"]'); await sleep(300);
+      await sel(page, '#st-season', 'winter'); await sleep(300);
+      const u = await snap(page);
+      const text = await page.evaluate(`(() => { const p = document.querySelector('.st-pending'); const r = document.querySelector('#st-reload'); return { text: p.textContent.replace(/\\s+/g, ' ').trim(), reloadShown: r.getClientRects().length > 0 }; })()`);
+      refused.push(`${mode}: scene tag "${u.src.scene && u.src.scene.text}", season tag "${u.src.season && u.src.season.text}", note "${text.text}"`);
+      if (!(u.src.scene && u.src.scene.from === 'visit' && u.src.scene.text === 'This visit only' && u.tab.pending && /^Not kept/.test(text.text) && !/Saved/.test(text.text) && !text.reloadShown && u.engine === '3d')) bad.push(`${mode}: the scene row ${JSON.stringify({ src: u.src.scene, pending: u.tab.pending, text, engine: u.engine })}`);
+      if (!(u.src.season && u.src.season.from === 'visit' && u.src.season.text === 'This visit only' && u.tab.season === 'winter' && u.store.season === 'winter' && (mode === 'qa-nowrite' ? u.stored === null : u.stored === 'THROWS'))) bad.push(`${mode}: the season row ${JSON.stringify({ src: u.src.season, season: u.tab.season, store: u.store && u.store.season, stored: u.stored })}`);
+    }
+    await page.evaluate(`window.name = ''`);
+    notes.push(`a browser that keeps nothing: ${refused.join(' | ')}`);
     notes.push(`fresh ${a.engine}/${a.src.scene.text}; Pixel chosen -> stored ${stored(b.stored).scene}, still ${b.engine}, note "${pendingText}"; reload -> ${c.engine}, camera row ${c.rows.includes('camera')} (${c.src.camera && c.src.camera.text}); front -> ${d.tab.camera} (${d.src.camera.text}); ?scene=3d over stored pixel -> ${e.engine} "${e.src.scene.text}", store kept ${stored(e.stored).scene}; ?scene=pixel over stored 3d -> ${g.engine}, store kept ${stored(g.stored).scene}; 3D chosen there -> ${h.search}, reload -> ${i.engine}`);
     const errs = S.problems();
     check('scene', bad.length === 0 && errs.length === 0 && offsite(S.requests).length === 0, `${bad.length ? 'PROBLEMS ' + bad.join('; ') + ' | ' : ''}${notes.join(' | ')}; console errors ${errs.length}${errs.length ? ' ' + errs.slice(0, 2).join(' / ') : ''}; requests off localhost ${offsite(S.requests).length}`);
@@ -497,7 +517,9 @@ const MUTATIONS = [
   { name: 'an address that names a setting does not follow the control', file: 'public/js/main.js', from: "const search = urlAfterChange(location.search, key, value);\n  if (search != null)", to: "const search = null;\n  if (search != null)", fails: ['store'] },
   { name: 'the address is ignored by the scene choice', file: 'public/js/office-settings.js', from: 'return merge(storage ? loadSettings(storage) : {}, officeQuery(search)).values.scene;', to: 'return merge(storage ? loadSettings(storage) : {}, {}).values.scene;', fails: ['scene'] },
   { name: 'the scene choice is not kept', file: 'public/js/settings-tab.js', from: "if (b) hub.set('scene', b.dataset.v);", to: "if (b) refresh();", fails: ['scene'] },
-  { name: 'the page does not say that the scene waits for the next load', file: 'public/js/settings-tab.js', from: 'q(\'.st-pending\').hidden = s.scene === running();', to: "q('.st-pending').hidden = true;", fails: ['scene'] },
+  { name: 'the page does not say that the scene waits for the next load', file: 'public/js/settings-tab.js', from: "q('.st-pending').hidden = !waiting;", to: "q('.st-pending').hidden = true;", fails: ['scene'] },
+  { name: 'the page calls a change saved when the browser kept nothing', file: 'public/js/office-settings.js', from: "origin[key] = keepSettings(storage, { [key]: v }) ? 'user' : 'visit';", to: "keepSettings(storage, { [key]: v }); origin[key] = 'user';", fails: ['scene'] },
+  { name: 'a write the browser dropped is not noticed', file: 'public/js/pixel/settings.js', from: 'return Object.keys(want).every(k => load(storage)[k] === want[k]);', to: 'return true;', fails: ['scene'] },
   { name: 'the 3D scene ignores the stored scene choice at load', file: 'public/js/main.js', from: "if (sceneChoice({ search: location.search }) === 'pixel') return", to: "if (new URLSearchParams(location.search).get('scene') === 'pixel') return", fails: ['scene'] },
   { name: 'the 3D scene does not read the project setting', file: 'public/js/ofis.js', from: "opts.settings.get('project') === 'on';", to: "opts.settings.get('project') === 'never';", fails: ['project'] },
   { name: 'the sample does not follow the switch', file: 'public/js/settings-tab.js', from: "q('.st-sample').dataset.on = String(s.project === 'on');", to: '', fails: ['project'] },

@@ -11,8 +11,8 @@
 //   urlAfterChange(search, key, value)             the address after a change made with the controls, when the address named that setting (else null)
 //   rowsOf(office), tabRowsOf(office)              the rows of the popover and of the Settings tab that a scene supports
 //   sceneChoice({ storage, search })               the scene the page opens: the address, else the stored choice, else '3d'
-//   sourceOf(key, from, search)                    where a value comes from, for the note under a row: 'default', 'stored' or 'url' (the address names it)
-import { merge, load as loadSettings, save as saveSettings, clean, fromQuery, sanitize, KEY, KEYS } from './pixel/settings.js';
+//   sourceOf(key, from, search)                    where a value comes from, for the note under a row: 'default', 'stored', 'visit' (changed, but not kept by the browser) or 'url' (the address names it)
+import { merge, load as loadSettings, keep as keepSettings, clean, fromQuery, sanitize, KEY, KEYS } from './pixel/settings.js';
 import { fmtClock, parseClock } from './pixel/time.js';
 
 // the rows of the popover, in the order they are shown; a scene lists the ones it supports (`settingRows`), a scene that lists none supports all of them
@@ -57,7 +57,7 @@ export function createOfficeSettings({ storage = defaultStorage(), overrides = {
   const held = sanitize(overrides);                                     // the address's overrides still in force (a setting the visitor changes is let go: the address follows the control)
   const m = merge(storage ? loadSettings(storage) : {}, held);
   let values = m.values;
-  const origin = { ...m.from };                                         // where each value came from: 'default', 'stored', 'url' or 'user'
+  const origin = { ...m.from };                                         // where each value came from: 'default', 'stored', 'url', 'user' (changed and kept) or 'visit' (changed, but the browser did not keep it)
   const listeners = new Map();                                          // key (or '*') -> Set of fn(value, key)
   const notify = (key, value) => { for (const k of [key, '*']) for (const fn of [...(listeners.get(k) || [])]) fn(value, key); };
   // another tab changed what is stored: take it over and tell the listeners of every setting that changed
@@ -71,15 +71,14 @@ export function createOfficeSettings({ storage = defaultStorage(), overrides = {
   if (watch && typeof watch.addEventListener === 'function') watch.addEventListener('storage', e => { if (e && (e.key === KEY || e.key == null)) reread(); });
   return {
     get: key => (key === undefined ? { ...values } : values[key]),
-    // a change by the visitor: kept for the next visit and told to every listener of that key; false for a value that is not valid
+    // a change by the visitor: kept for the next visit (when the browser lets it: otherwise the origin says 'visit') and told to every listener of that key; false for a value that is not valid
     set(key, value) {
       const v = clean(key, value);
       if (v == null || !KEYS.includes(key)) return false;
       const changed = values[key] !== v;
       values = { ...values, [key]: v };
-      origin[key] = 'user';
+      origin[key] = keepSettings(storage, { [key]: v }) ? 'user' : 'visit';
       delete held[key];
-      if (storage) saveSettings(storage, { [key]: v });
       if (changed) notify(key, v);
       return true;
     },
@@ -98,10 +97,12 @@ export function sceneChoice({ storage = defaultStorage(), search = '' } = {}) {
   return merge(storage ? loadSettings(storage) : {}, officeQuery(search)).values.scene;
 }
 
-// 'url' when the address names the setting (it wins at the next load, and a change made with the controls keeps it in step), else 'stored' when a choice was kept,
-// else 'default'. `from` is what the scene's settings say ('default', 'stored', 'url' or 'user').
+// 'url' when the address names the setting (it wins at the next load, and a change made with the controls keeps it in step), else 'stored' when a choice was kept, else 'visit'
+// when the visitor changed it but the browser did not keep it (it holds for this visit only), else 'default'. `from` is what the scene's settings say ('default', 'stored',
+// 'url', 'user' or 'visit').
 export function sourceOf(key, from, search = '') {
   if (Object.prototype.hasOwnProperty.call(officeQuery(search), key)) return 'url';
+  if (from && from[key] === 'visit') return 'visit';
   return from && (from[key] === 'stored' || from[key] === 'user' || from[key] === 'url') ? 'stored' : 'default';
 }
 

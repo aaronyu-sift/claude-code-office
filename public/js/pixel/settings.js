@@ -60,5 +60,13 @@ export function save(storage, patch) {
   try { storage.setItem(KEY, JSON.stringify(next)); } catch { /* storage disabled */ }
   return next;
 }
+// store a change and say whether it stuck: false when there is no storage, when the browser refuses the write, or when the value cannot be read back (the browser is not keeping
+// settings, so the choice holds for this visit only and the page must not call it saved)
+export function keep(storage, patch) {
+  const want = sanitize(patch);
+  if (!storage) return false;
+  save(storage, want);
+  return Object.keys(want).every(k => load(storage)[k] === want[k]);
+}
 // minutes after midnight for a time setting, or null for 'auto'
 export const timeMinutes = value => (value === 'auto' ? null : parseClock(value));

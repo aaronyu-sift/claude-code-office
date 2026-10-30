@@ -60,7 +60,8 @@ test('words: every language key that the tab uses exists, in every language', ()
   const used = new Set([...src.matchAll(/msg\('([\w.]+)'/g)].map(m => m[1]).filter(k => !k.endsWith('.')));       // 'st.g.' + id and the like are listed below
   for (const id of ['scene', 'sky', 'office', 'system']) used.add('st.g.' + id);
   for (const s of ['on', 'off', 'unsupported']) used.add('st.board.' + s);
-  for (const k of ['default', 'stored', 'url']) used.add('st.src.' + k);
+  for (const k of ['default', 'stored', 'visit', 'url']) used.add('st.src.' + k);
+  used.add('st.scene.unkept');                                               // chosen with msg(cond ? 'a' : 'b'), which the pattern above does not see
   assert.ok(used.size > 25, `${used.size} keys`);
   for (const l of LANGUAGES) assert.deepEqual([...used].filter(k => !(k in l.messages)), [], `${l.code} lacks keys the tab uses`);
   const indexKeys = [...html.matchAll(/data-i18n(?:-title|-aria|-tail)?="([^"]+)"/g)].map(m => m[1]);
