@@ -460,7 +460,7 @@ export function createOfis(root, ctx, opts = {}) {
   // ?arrive=calm: a page load, a scene switch or a rebuilt building sends everybody who is already in the data in at the normal pace (ofis-arrive.js hurries a big queue so that
   // all are in their seat within about 10 seconds)
   const CALM_LOAD = /[?&]arrive=calm(?:&|$)/.test(typeof location !== 'undefined' ? location.search : '');
-  const REC = { on: false, ev: [] };   // verification only (root.__ofis.rec): every figure's creation, removal and place on every frame
+  const REC = { on: false, ev: [], dt: 0 };   // verification only (root.__ofis.rec): every figure's creation, removal and place on every frame (dt: the frame's step, 0 outside a frame)
   let shakeAmp = 0;              // camera shake strength in screen pixels (api.shake); decays every frame
   let activeTool = null;         // exclusive interaction mode of a local add-on (api.setTool); kept across builds
   const toolFns = [];            // api.onToolChange listeners, per build like extraFrame
@@ -750,6 +750,23 @@ export function createOfis(root, ctx, opts = {}) {
     draw() { renderer.render(scene, camera); return this.info; },
     figureVisible(id, on) { const c = chars.get(id); if (c) c.root.visible = !!on; },
     rebuildNow() { world.sig = ''; sync(); return this.rebuildMs; },
+    // the walkers' state (tools/qa/office3d-walk-qa.mjs): the figures that are in the scene graph (a figure removed from `chars` must not stay in it), the desks of every office and
+    // who sits at them, and how far every hinged door is open
+    roots() {
+      const ids = [], chairs = [], where = [];
+      for (const o of scene.children) {
+        if (o.userData && o.userData.figureOf) { const c = chars.get(o.userData.figureOf); ids.push(o.userData.figureOf); where.push({ id: o.userData.figureOf, x: +o.position.x.toFixed(2), z: +o.position.z.toFixed(2), vis: o.visible, own: !!c && c.root === o }); }
+        if (o.userData && o.userData.chairOf) chairs.push(o.userData.chairOf);
+      }
+      return { ids, where, chairs, tags: [...document.querySelectorAll('.of-l.of-tagl[data-id]')].filter(e => root.contains(e)).map(e => e.dataset.id), balloons: [...document.querySelectorAll('.of-l.of-ball[data-id]')].filter(e => root.contains(e)).map(e => e.dataset.id) };
+    },
+    desks() {
+      return {
+        rooms: [...world.rooms.values()].map(r => ({ id: r.id, slot: r.slot, cap: r.cap, seats: r.slotChar.map(c => (c ? c.id : null)) })),
+        figures: [...chars.values()].filter(c => !c.main).map(c => ({ id: c.id, room: c.roomId, slot: c.slot, after: c.after })),
+      };
+    },
+    doors() { return [...world.rooms.values(), ...(world.vacant || [])].filter(r => r.doorPivot).map(r => ({ id: r.id, slot: r.slot, vacant: !!r.vacant, door: r.door, open: +r.doorOpen.toFixed(3), x: r.doorPt.x, z: r.doorPt.z })); },
     // the rooms' life (ofis-decor.js): panes, lamps, candles and the light they give right now; the style of every room; the living meshes can be hidden to compare pictures
     get life() { return decor.stats(); },
     lifeVisible(on, part) { decor.setVisible(on, part); },
@@ -2014,6 +2031,7 @@ export function createOfis(root, ctx, opts = {}) {
       (f.headHost || head).add(headset);
       // the chief's chair turns with the person who sits in it, but stays at the desk when the person walks (animChar keeps it at c.seatPos)
       const chair = new THREE.Group(); scene.add(chair);
+      chair.userData.chairOf = id;
       chairOf = chair;
       const chairBake = PK.chair && AS.bake(PK.chair, PAL.furniture, '');
       if (chairBake) {
@@ -2041,6 +2059,7 @@ export function createOfis(root, ctx, opts = {}) {
     hit.visible = false;
     hit.userData.pick = { t: 'agent', id };
     root.add(hit);
+    root.userData.figureOf = id;
     scene.add(root);
     const c = {
       id, main, root, hip, upper, head, armL, armR, legL, legR, hit, pk: f.bones || null, shirt, tinted: f.tinted ?? null,
@@ -2062,7 +2081,7 @@ export function createOfis(root, ctx, opts = {}) {
 
   // verification only: a figure's life, as root.__ofis.rec reads it
   function note(kind, c) {
-    if (REC.on) REC.ev.push({ k: kind, id: c.id, main: c.main, t: performance.now(), x: c.root.position.x, z: c.root.position.z, mode: c.mode, after: c.after, vis: c.root.visible, sit: +c.sit.toFixed(2), pace: c.pace, delay: +c.delay.toFixed(3) });
+    if (REC.on) REC.ev.push({ k: kind, id: c.id, main: c.main, t: performance.now(), dt: REC.dt, x: c.root.position.x, z: c.root.position.z, mode: c.mode, after: c.after, vis: c.root.visible, sit: +c.sit.toFixed(2), pace: c.pace, delay: +c.delay.toFixed(3), hy: +c.hip.position.y.toFixed(4), stand: c.standT > 0, turn: c.turnT > 0 });
   }
 
   // A figure leaves the scene only here, and only at the end of a walk out of the building (animChar), or when it never came in (it was still waiting at the entrance).
@@ -2317,7 +2336,7 @@ export function createOfis(root, ctx, opts = {}) {
           if (!c.doneAt) c.doneAt = nowMs;
           if (c.mode === 'walk' && c.after === 'sit') { turnAround(c); continue; }       // the job ended before the desk: back out the way it came
         }
-        if (c.mode === 'seated' && c.after !== 'gone' && c.doneAt && nowMs - c.doneAt > 4500) leaveRoom(c);
+        if (c.mode === 'seated' && c.after !== 'gone' && c.doneAt && nowMs - c.doneAt > DONE_SIT_MS) leaveRoom(c);
       }
       room.overflow = overflow;
     }
@@ -2410,6 +2429,8 @@ export function createOfis(root, ctx, opts = {}) {
 
   const tgt = { lx: 0, lz: 0, rx: 0, rz: 0, up: 0, hx: 0, hz: 0 };
   const WK = { x: 0, z: 0, path: null, pi: 0, travelled: 0, plen: 0 };      // a figure's walk, as stepWalk (ofis-arrive.js) takes it
+  const DONE_SIT_MS = 4500;                          // a sub-agent that is done stays at its desk this long (the check mark), then it leaves
+  let lastDoneSweep = 0;
   function animChar(c, dt, T) {
     const a = store.agents.get(c.id);
     const pos = c.root.position;
@@ -2563,8 +2584,16 @@ export function createOfis(root, ctx, opts = {}) {
   }
 
   function step(dt, T) {
+    // a sub-agent that is done sits out its 4.5 s (the check mark), then gets up: the time runs on the frame clock, not on the next update from the data
+    if (T - lastDoneSweep > 0.5) {
+      lastDoneSweep = T;
+      const nowMs = performance.now();
+      for (const c of [...chars.values()]) if (!c.main && c.mode === 'seated' && c.after !== 'gone' && c.doneAt && nowMs - c.doneAt > DONE_SIT_MS) leaveRoom(c);
+    }
+    REC.dt = dt;
     for (const c of [...chars.values()]) animChar(c, dt, T);
-    if (REC.on) for (const c of chars.values()) { note('frame', c); REC.ev[REC.ev.length - 1].dt = dt; }
+    if (REC.on) for (const c of chars.values()) note('frame', c);
+    REC.dt = 0;
     for (const fn of extraFrame) { try { fn(T, dt); } catch { /* decoration frame callback */ } }
     stepScreens(T);
     stepRooms(dt, T);
@@ -2921,6 +2950,7 @@ export function createOfis(root, ctx, opts = {}) {
     // seated at its desk, one on its way out is removed at the entrance, one still waiting at the entrance is released and seated; it returns how many walks it ended.
     // rec.start() begins to record every figure's creation, removal and place on every frame (events { k: 'create' | 'frame' | 'remove', id, t, dt, x, z, mode, after, vis, ... });
     // rec.take() returns what was recorded since and clears it, rec.stop() stops.
+    sync() { if (visible) sync(); },         // an update from the data now, for a check that changes the store itself
     settle() {
       let n = 0;
       for (const c of [...chars.values()]) {
