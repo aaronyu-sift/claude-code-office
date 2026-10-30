@@ -214,8 +214,9 @@ export function createLounge(host) {
   }
 
   // ---- the build
-  let visibleParts = true;
+  let visibleParts = true, parts = [];                                                  // parts: everything the lounge added to the building group (not the invisible boxes that are clicked)
   function build({ g, c, rng }) {
+    const first = g.children.length;
     cell = c; plan = loungePlan(c.W, c.D);
     const LB = host.newBatch(), { deck, board: b } = plan, X = c.X, Z = c.Z;
     // the deck: planks of three tones on a dark base, with a low lip all round
@@ -244,12 +245,11 @@ export function createLounge(host) {
     pavilion = new THREE.Mesh(LB.build(), host.stat);
     pavilion.castShadow = pavilion.receiveShadow = true;
     pavilion.userData.own = true;
-    pavilion.visible = visibleParts;
     g.add(pavilion);
     // the face of the wall, and the strip of light under it
     boardMesh = new THREE.Mesh(new THREE.PlaneGeometry(b.w, b.h), boardMat);
     boardMesh.position.set(bx, b.y0 + b.h / 2, bz + b.t / 2 + 0.004);
-    boardMesh.userData.own = true; boardMesh.visible = visibleParts;
+    boardMesh.userData.own = true;
     g.add(boardMesh);
     strip = new THREE.Mesh(new THREE.PlaneGeometry(b.w + 0.9, 0.34), stripMat);
     strip.position.set(bx, 0.27, bz + b.t / 2 + 0.03);
@@ -258,6 +258,8 @@ export function createLounge(host) {
     // what a click or a hover hits: the wall and the deck
     host.hitBox(g, bx, b.y0 + b.h / 2, bz + 0.1, b.w + 0.5, b.h + 0.3, 0.7).userData.pick = { t: 'lounge' };
     host.hitBox(g, dcx, 0.03, dcz, dw, 0.06, dd).userData.pick = { t: 'lounge' };
+    parts = g.children.slice(first).filter(m => !m.userData.pick);
+    for (const m of parts) if (m !== strip) m.visible = visibleParts;
     group = g;
     built = { tris: tris + 4 + plan.lights.reduce((s, l) => s + 80 + 2 + (l.pool > 0 ? 2 : 0), 0), staticTris: tris, furnishTris: tris - t0, lights: plan.lights.length, builds: built.builds + 1 };
     painted.key = ''; painted.anim = null; sign = sign && sign.el.isConnected ? sign : null; signHtml = '';
@@ -310,7 +312,7 @@ export function createLounge(host) {
   // verification only: hide the lounge to measure it (everything, or only the people, or only the pavilion with its wall and strip)
   function setVisible(on, part) {
     const v = !!on;
-    if (part !== 'people') { visibleParts = v; for (const m of [pavilion, boardMesh, strip]) if (m) m.visible = v; }
+    if (part !== 'people') { visibleParts = v; for (const m of parts) m.visible = v && (m !== strip || pulse > 0.003); }
     if (part !== 'building') for (const P of folk.values()) P.c.root.visible = v;
   }
 
