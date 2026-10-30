@@ -112,7 +112,7 @@ test('normalizePayload: a field of the wrong type is ignored, the rest of the po
   ]));
   assert.equal(n.messages.length, 3);
   const [a, b, c] = n.messages;
-  assert.deepEqual([a.ts, a.channel, a.from, a.to, a.text], [0, '', '?', [], ''], 'every field wrong: blank, not thrown');
+  assert.deepEqual([a.ts, a.channel, a.from, a.to, a.text], [0, '', '?', ['bob'], ''], 'every field wrong: blank, not thrown (a recipient given as text is the board\'s comma-separated form, so it is read)');
   assert.deepEqual([b.channel, b.from, b.to, b.text], ['c', 'a', ['b', 'c'], 'ok']);
   assert.equal(c.ts, 0);
   assert.equal(normalizePayload(payload([{ ts: NaN }, { ts: Infinity }])).messages.every(m => m.ts === 0), true);

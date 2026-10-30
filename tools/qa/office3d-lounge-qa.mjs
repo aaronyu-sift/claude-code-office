@@ -1,8 +1,8 @@
 // QA of the lounge on the plaza of the 3D office (public/js/ofis-lounge.js and the modules it uses: lounge-model.js, lounge-plan.js, lounge-paint.js, lounge-source.js, lounge-card.js):
 // headless Chrome with software WebGL in a throw-away profile, the server against a fake ~/.claude, one `CHECK lounge PASS|FAIL <detail>` line and a final `QA PASS` or `QA FAIL`.
-//   node tools/qa/office3d-lounge-qa.mjs [--scenes demo,reduced,live,churn,stub] [--mutations [--mutation <words>[,<words>]]] [--shots <dir>]
+//   node tools/qa/office3d-lounge-qa.mjs [--scenes demo,reduced,live,off,churn,stub] [--mutations [--mutation <words>[,<words>]]] [--shots <dir>]
 //
-//   lounge  five scenes
+//   lounge  six scenes
 //     demo     ?lounge=demo at 22:00 with 4 chats: the wall shows the posts the demo script produced (read from the canvas by the page's own fillText calls and by its pixels), the
 //              people are in the lounge (named, on the deck, the first two tied to the chats of the Office, the figures of the Office are unchanged), a click on the wall opens the card
 //              with its posts newest first and a line that says where the data comes from, Escape closes it, the sign is reachable and openable from the keyboard, the pointer changes over the
@@ -13,6 +13,7 @@
 //     reduced  the same with prefers-reduced-motion: the pulse is still, no post animates, the people do not pop
 //     live     no ?lounge= and a server without the endpoint (a 404): the board says it is off, with its hint, no request after the 404 (a first request that failed under load is retried
 //              by design), no people, no error
+//     off      no ?lounge= and this checkout's server without --chat-db (the endpoint answers 200 with state off): the board says it is off and how to start it, one request in 30 seconds, no error
 //     churn    the same server, reduced motion (a person pops in and out at once): 100 people come and go through the lounge by hand-fed answers and the GPU textures stay at their
 //              baseline (a person who leaves must not keep the bone texture of its skeleton)
 //     stub     the endpoint answered by the QA (Chrome's Fetch domain): 30 posts of which some are hostile (bidi marks, control characters, 5000 characters, a long channel), 9 posters, two of
@@ -57,6 +58,15 @@ const LAST_PAINT = `(() => { const a = window.__wallTexts || [], i = a.lastIndex
 const SNAP = o3('o.lounge');
 
 async function hook(page) { await page.send('Page.addScriptToEvaluateOnNewDocument', { source: HOOK }); }
+// a server without the endpoint (an older Office server): GET /api/lounge answers 404. The server of this checkout has the endpoint now (it says `off` without a database: scene off).
+async function hook404(page) {
+  await hook(page);
+  await page.send('Fetch.enable', { patterns: [{ urlPattern: '*/api/lounge*' }] });
+  page.on(async d => {
+    if (d.method !== 'Fetch.requestPaused') return;
+    await page.send('Fetch.fulfillRequest', { requestId: d.params.requestId, responseCode: 404, responseHeaders: [{ name: 'Content-Type', value: 'text/plain' }], body: Buffer.from('not found').toString('base64') }).catch(() => {});
+  });
+}
 const snap = page => page.evaluate(SNAP);
 const painted = page => page.evaluate(LAST_PAINT);
 async function until(page, test, ms = 20000, every = 200) {
@@ -355,11 +365,11 @@ async function sceneReduced({ root }) {
 }
 
 // =====================================================================================================================================================================
-// scene live: a server without the endpoint
+// scene live: a server without the endpoint (404)
 async function sceneLive({ root, shots }) {
   const out = { tag: 'live', problems: [], notes: [] };
   const bad = m => out.problems.push('live: ' + m);
-  const S = await scenario3d(4, { tag: 'llive', query: NIGHT, root, fixture: { subs: () => [] }, intercept: hook });
+  const S = await scenario3d(4, { tag: 'llive', query: NIGHT, root, fixture: { subs: () => [] }, intercept: hook404 });
   try {
     const { page } = S;
     if (!S.ready.ok) { bad('the scene did not become ready'); return out; }
@@ -402,6 +412,42 @@ async function sceneLive({ root, shots }) {
 }
 
 // =====================================================================================================================================================================
+// scene off: this checkout's own server, started without --chat-db: the endpoint answers 200 with state `off`. The board says it is off and how to start it, the poll slows to one
+// request in 30 seconds (nothing on that server changes faster), and the page has no console error and no failed request: this is the default state of the Office today.
+async function sceneOff({ root, shots }) {
+  const out = { tag: 'off', problems: [], notes: [] };
+  const bad = m => out.problems.push('off: ' + m);
+  const S = await scenario3d(4, { tag: 'loff', query: NIGHT, root, fixture: { subs: () => [] }, intercept: hook });
+  try {
+    const { page } = S;
+    if (!S.ready.ok) { bad('the scene did not become ready'); return out; }
+    await toHub(page, 60);
+    const s = await until(page, x => x.status === 'ok' && x.state === 'off', 30000);
+    if (!s) { bad(`the endpoint's answer "off" did not arrive (${JSON.stringify((await snap(page)).state)})`); return out; }
+    await sleep(20000);
+    const t = await snap(page);
+    if (t.poll.requests !== s.poll.requests) bad(`${t.poll.requests - s.poll.requests} requests started in the 20 s after a board that is off: it is asked again only after 30 seconds`);
+    if (t.boardVisible) bad('the wall draws its face although the board is off');
+    if (!t.signLabel || !/Agent message board is off/.test(t.signLabel.text)) bad(`the sign does not say the board is off (${t.signLabel && t.signLabel.text})`);
+    if (t.people.length || t.wall.length) bad('people or posts on a board that is off');
+    const err = page.errors.filter(e => !/\/local\/ofis-extras\.js/.test(e));
+    if (err.length) bad(`console error: ${err[0].slice(0, 160)}`);
+    const nf = page.failed.filter(f => !/ofis-extras/.test(f));
+    if (nf.length) bad(`failed request: ${nf[0].slice(0, 120)}`);
+    if (page.expected.some(e => /^404 /.test(e))) bad('the endpoint answered 404: this checkout has it');
+    out.foreign = foreignOf(page);
+    if (out.foreign.length) bad(`a request leaves 127.0.0.1: ${out.foreign[0].slice(0, 100)}`);
+    const [bx, by] = await boardAt(page, t.cell);
+    await page.mouse.click(bx, by);
+    const cd = await until(page, x => x.card.open, 3000, 150);
+    if (!cd) bad('a click on the wall of a board that is off opens no card');
+    else if (!/--chat-db/.test(cd.card.note.join(' '))) bad(`the card does not say how to start the board: ${cd.card.note.join(' | ')}`);
+    out.notes.push(`the answer "off" read once (${s.poll.requests} request), none in the next 20 s, the sign and the card say how to start it`);
+    return out;
+  } finally { await S.done(); }
+}
+
+// =====================================================================================================================================================================
 // scene churn: people come and go. Every poster is a new person (a skinned figure with a bone texture of its own, made on its first draw) and each one leaves when the next arrives:
 // the GPU textures must stay where they were (a person who leaves must not keep its skeleton's texture). The answers are fed by hand (`o.loungeFeed`), the server has no endpoint.
 const CHURN = (from, to) => o3(`(async () => {
@@ -416,7 +462,7 @@ const CHURN_N = 100, CHURN_WARM = 12, CHURN_SLACK = 12;           // a leak is 1
 async function sceneChurn({ root }) {
   const out = { tag: 'churn', problems: [], notes: [] };
   const bad = m => out.problems.push('churn: ' + m);
-  const S = await scenario3d(4, { tag: 'lchurn', query: NIGHT, root, reducedMotion: true, fixture: { subs: () => [] }, intercept: hook });
+  const S = await scenario3d(4, { tag: 'lchurn', query: NIGHT, root, reducedMotion: true, fixture: { subs: () => [] }, intercept: hook404 });
   try {
     const { page } = S;
     if (!S.ready.ok) { bad('the scene did not become ready'); return out; }
@@ -634,11 +680,12 @@ async function sceneStub({ root, shots }) {
 }
 
 // =====================================================================================================================================================================
-const want = new Set((val('scenes') || 'demo,reduced,live,churn,stub').split(','));
+const want = new Set((val('scenes') || 'demo,reduced,live,off,churn,stub').split(','));
 export async function runLounge({ root, scenes = want, shots = shotsDir } = {}) {
   if (shots) mkdirSync(shots, { recursive: true });
   const runs = [];
   if (scenes.has('live')) runs.push(await sceneLive({ root, shots }));
+  if (scenes.has('off')) runs.push(await sceneOff({ root, shots }));
   if (scenes.has('churn')) runs.push(await sceneChurn({ root, shots }));
   if (scenes.has('stub')) runs.push(await sceneStub({ root, shots }));
   if (scenes.has('reduced')) runs.push(await sceneReduced({ root, shots }));
@@ -680,6 +727,7 @@ const MUTATIONS = [
   { name: 'the face of the wall is drawn although the board is off', file: L, from: "const boardShown = () => !!view && (view.state === 'ok' || view.state === 'unsupported' || view.state === 'failed');", to: 'const boardShown = () => !!view;', scenes: ['live'] },
   { name: 'the wall is painted again every frame', file: L, from: 'if (view.key !== painted.key) {', to: 'if (true) {', scenes: ['stub'] },
   // the findings of the review: each of these passed the QA before it had the check that catches it
+  { name: 'the poll ignores that the board is off', file: SRC, from: "stats.lastStatus === 'ok' && said === 'off' ? offMs : pollMs;", to: "pollMs;", scenes: ['off'] },
   { name: 'a person who leaves keeps the bone texture of its skeleton', file: O, from: ' if (o.isSkinnedMesh && o.skeleton) o.skeleton.dispose();', to: '', scenes: ['churn'] },
   { name: 'the pavilion hides 8,400 triangles from its own counter', file: L, from: '    const tris = B.i.length / 3 - t0;', to: "    const tris = B.i.length / 3 - t0;\n    for (let i = 0; i < 700; i++) B.box(X + 1 + (i % 20) * 0.1, 0.5, Z + 1 + (i >> 5) * 0.1, 0.05, 0.05, 0.05, '#ff00ff');", scenes: ['live'] },
   { name: 'a new post does not fade in', file: L, from: "const added = !first && !reducedNow() && view.state === 'ok' ?", to: 'const added = false ?', scenes: ['demo'] },

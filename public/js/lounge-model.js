@@ -11,9 +11,9 @@
 //                              them, dimmed (`view.stale`), once the last good answer is older than `staleMs`
 //   ageText(ms), splitLines(text), chipColour(name), personColour(name)
 //
-// The endpoint (built by the chat-source agent, not yet merged when this was written):
+// The endpoint (chat-source.js, docs/chat-source.md; the real answer is checked in test/lounge-model.test.mjs):
 //   GET /api/lounge -> { state: { state: 'ok' | 'off' | 'unsupported', schema, reason }, messages: [{ seq, ts, channel, from, to: [names], text }] (newest last, text clipped to
-//   400 characters), channels: { <name>: <count> }, agents: [{ name, lastSeenMs, session }] } (session: the Office agent id of the chat agent, or empty).
+//   400 characters), channels: { <name>: <count> } or [{ name, count }], agents: [{ name, lastSeenMs, session, office }] } (office: the Office chat the board agent belongs to, or empty).
 // `ts` is epoch milliseconds. `lastSeenMs` is read as epoch milliseconds, or, when it is smaller than 1e11 (that would be 1973), as the milliseconds since the agent was seen.
 
 export const LIMITS = Object.freeze({
@@ -119,7 +119,8 @@ export function normalizePayload(raw) {
     tail.forEach((m, i) => {
       if (!isObj(m)) return;
       const to = [];
-      if (Array.isArray(m.to)) for (const n of m.to.slice(0, LIMITS.inTo)) { const c = cleanText(n, LIMITS.name); if (c) to.push(c); }
+      const names = Array.isArray(m.to) ? m.to : typeof m.to === 'string' ? m.to.slice(0, 2000).split(',') : [];          // a list, or the comma-separated text the board stores
+      for (const n of names.slice(0, LIMITS.inTo)) { const c = cleanText(n, LIMITS.name); if (c) to.push(c); }
       out.messages.push({
         seq: num(m.seq) ?? i, ts: num(m.ts) > 0 ? m.ts : 0, channel: cleanText(m.channel, LIMITS.channel), from: cleanText(m.from, LIMITS.name) || '?', to,
         text: cleanText(m.text, LIMITS.cardText), at: i,
@@ -128,14 +129,15 @@ export function normalizePayload(raw) {
     out.messages.sort((a, b) => (a.ts && b.ts ? a.ts - b.ts : 0) || a.at - b.at);
     for (const m of out.messages) delete m.at;
   }
-  if (isObj(raw.channels)) {
-    for (const [k, v] of Object.entries(raw.channels).slice(0, LIMITS.inChannels)) { const name = cleanText(k, LIMITS.channel), n = num(v); if (name && n != null && n >= 0) out.channels[name] = n; }
-  }
+  // channels: { name: count }, or the list the chat source answers with, [{ name, count }]
+  const chans = isObj(raw.channels) ? Object.entries(raw.channels) : Array.isArray(raw.channels) ? raw.channels.filter(isObj).map(c => [c.name, c.count]) : [];
+  for (const [k, v] of chans.slice(0, LIMITS.inChannels)) { const name = cleanText(k, LIMITS.channel), n = num(v); if (name && n != null && n >= 0) out.channels[name] = n; }
   if (Array.isArray(raw.agents)) {
     for (const a of raw.agents.slice(0, LIMITS.inAgents)) {
       if (!isObj(a)) continue;
       const name = cleanText(a.name, LIMITS.name);
-      if (name) out.agents.push({ name, lastSeenMs: num(a.lastSeenMs), session: cleanText(a.session, LIMITS.session) });
+      // `office` is the id of the Office chat the board agent belongs to (the chat source's answer); `session` is its own session id, which the Office may not have
+      if (name) out.agents.push({ name, lastSeenMs: num(a.lastSeenMs), session: cleanText(a.office, LIMITS.session) || cleanText(a.session, LIMITS.session) });
     }
   }
   return out;

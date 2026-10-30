@@ -4,14 +4,16 @@
 //   sourceFromQuery(search)       { source: 'demo' | 'live', mode: 'text' | 'names' | 'off' | null } from ?lounge=; the words may be joined: ?lounge=demo,names
 //   fetchReader({ fetchFn, url })  one read of the endpoint: { status: 'ok' | 'nofile' | 'failed', http, payload }; a 404 is `nofile` (the server has no such endpoint), never an error
 //   createDemoSource({ now, sessions, start })  a read function with the same result shape that answers from a script of posts, no network
-//   createPoller({ read, now, setTimer, clearTimer, canPoll, onData, pollMs, retryMs })   runs `read` on a cadence
+//   createPoller({ read, now, setTimer, clearTimer, canPoll, onData, pollMs, retryMs, offMs })   runs `read` on a cadence
 //
 // The cadence: a request at most every 3 seconds (pollMs), never two at once, and none while `canPoll()` is false (the tab is hidden, the Office view is not shown, the
 // lounge is not on the screen, the setting is off). Nothing runs while it cannot poll: the owner calls `kick()` when that may have changed. A server that answers 404 has no
 // endpoint, so it is asked again only every 5 minutes (retryMs): every 404 is a red line in the browser's console, and a server does not grow an endpoint in the minute.
+// A server that answers but says the board is `off` (no --chat-db, or the file is not there yet) is asked again every 30 seconds (offMs): nothing on it changes faster than that.
 
 export const POLL_MS = 3000;
 export const RETRY_MS = 5 * 60e3;
+export const OFF_MS = 30e3;
 export const TIMEOUT_MS = 8000;
 
 const MODES = ['text', 'names', 'off'];
@@ -98,8 +100,8 @@ export function createDemoSource({ now = Date.now, sessions = () => [], start } 
 // ------------------------------------------------------------ the cadence
 
 // opts: read () => Promise<{ status, http, payload }>, now () => ms, setTimer / clearTimer (the page's own), canPoll () => boolean, onData (result, { receivedAt }),
-//       pollMs, retryMs
-export function createPoller({ read, now = Date.now, setTimer = setTimeout, clearTimer = clearTimeout, canPoll = () => true, onData = () => {}, pollMs = POLL_MS, retryMs = RETRY_MS } = {}) {
+//       pollMs, retryMs, offMs
+export function createPoller({ read, now = Date.now, setTimer = setTimeout, clearTimer = clearTimeout, canPoll = () => true, onData = () => {}, pollMs = POLL_MS, retryMs = RETRY_MS, offMs = OFF_MS } = {}) {
   let timer = null, inflight = false, stopped = true, lastStart = -Infinity, wait = pollMs;
   const stats = { requests: 0, starts: [], lastStatus: 'none' };
   const clear = () => { if (timer != null) { clearTimer(timer); timer = null; } };
@@ -120,7 +122,8 @@ export function createPoller({ read, now = Date.now, setTimer = setTimeout, clea
     try { res = await read(); } catch { res = { status: 'failed', http: 0, payload: null }; }
     inflight = false;
     stats.lastStatus = res && res.status || 'failed';
-    wait = stats.lastStatus === 'nofile' ? retryMs : pollMs;
+    const st = res && res.payload && res.payload.state, said = st && typeof st === 'object' ? st.state : st;          // what the server says about the board: 'ok' | 'off' | 'unsupported'
+    wait = stats.lastStatus === 'nofile' ? retryMs : stats.lastStatus === 'ok' && said === 'off' ? offMs : pollMs;
     if (!stopped) { try { onData(res, { receivedAt: now() }); } catch { /* the owner's handler must not stop the poll */ } }
     arm();
   }

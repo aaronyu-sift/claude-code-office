@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { POLL_MS, RETRY_MS, sourceFromQuery, fetchReader, createDemoSource, createPoller, DEMO_SCRIPT, DEMO_PERIOD, DEMO_AGENTS } from '../public/js/lounge-source.js';
+import { POLL_MS, RETRY_MS, OFF_MS, sourceFromQuery, fetchReader, createDemoSource, createPoller, DEMO_SCRIPT, DEMO_PERIOD, DEMO_AGENTS } from '../public/js/lounge-source.js';
 import { normalizePayload, buildView, LIMITS } from '../public/js/lounge-model.js';
 
 // a clock and timers that only move when the test says so
@@ -41,6 +41,22 @@ test('poller: a request every 3 seconds, no faster, from the first moment', asyn
   await c.advance(10_000);
   assert.equal(p.stats.requests, 4, 'stopped means stopped');
   assert.equal(c.pending, 0);
+});
+
+test('poller: a server that answers but says the board is off is asked every 30 seconds, and a board that comes on is read at the next ask', async () => {
+  const c = fake(), t0 = c.now();
+  let said = 'off';
+  const read = async () => ({ status: 'ok', http: 200, payload: { state: { state: said }, messages: [], channels: [], agents: [] } });
+  const p = createPoller({ read, ...c });
+  p.start();
+  await c.advance(65_000);
+  assert.deepEqual(p.stats.starts.map(x => x - t0), [0, OFF_MS, 2 * OFF_MS], 'at 0, 30 and 60 seconds');
+  said = 'ok';
+  await c.advance(OFF_MS);                                                       // to 95 s: the ask at 90 finds the board on
+  assert.deepEqual(p.stats.starts.map(x => x - t0), [0, OFF_MS, 2 * OFF_MS, 3 * OFF_MS, 3 * OFF_MS + POLL_MS], 'and from then on every 3 seconds');
+  await c.advance(POLL_MS);
+  assert.equal(p.stats.starts.length, 6);
+  p.stop();
 });
 
 test('poller: never two at once, and a slow answer pushes the next request back instead of piling up', async () => {
