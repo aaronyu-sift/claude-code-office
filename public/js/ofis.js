@@ -8,6 +8,10 @@ import { catColor, hash, esc, icon, fmtShort } from './util.js';
 import { t as msg } from './i18n.js';
 import { labelParts, labelHtml } from './office-labels.js';
 import { createEnv } from './ofis-env.js';
+import { createDecor } from './ofis-decor.js';
+import { STYLE_IDS, assignStyles, neighbourMap, planRoom, styleAt, wallColour, floorColour } from './ofis-styles.js';
+import { createAtmosphere } from './office-atmosphere.js';
+import { createOfficeSettings, officeQuery } from './office-settings.js';
 import { LOOP, wave } from './motion.js';
 import { createOfisUi } from './ofis-ui.js';
 import { layoutLabels } from './ofis-label-layout.js';
@@ -133,6 +137,8 @@ const GEO = {
 };
 GEO.smile = new THREE.TorusGeometry(0.04, 0.0085, 5, 10, Math.PI);
 const SHARED = new Set(Object.values(GEO));
+// what ofis-decor.js draws with: the shared shapes, the palettes, the models, and this file's small helpers and colour lists
+const KIT = { GEO, PAL, PK, AS, POSTERS, BOOKS, shade };
 const roundedCache = new Map();
 function rounded(w, h, d, r) {
   const key = [w, h, d, r].map(v => v.toFixed(3)).join('|');
@@ -419,7 +425,10 @@ export function createOfis(root, ctx, opts = {}) {
   let selectedId = null;
 
   // surroundings (street, river, woods, mountains): laid out around world.bounds in applyBounds, animated in step
-  const env = createEnv({ scene, camera, lights: { hemi, sun }, lightDir: LIGHT, softwareGL: SOFTWARE_GL, fitBox: () => projBounds(), atmosphere: opts.atmosphere });
+  const atmosphere = opts.atmosphere || createAtmosphere({ settings: createOfficeSettings({ overrides: officeQuery(typeof location === 'undefined' ? '' : location.search) }) });
+  const env = createEnv({ scene, camera, lights: { hemi, sun }, lightDir: LIGHT, softwareGL: SOFTWARE_GL, fitBox: () => projBounds(), atmosphere });
+  // what makes an occupied office its own: its style's furniture, windows and lamps, and the light of the lamps and windows (ofis-decor.js; it follows the same atmosphere as the surroundings)
+  const decor = createDecor({ atmosphere, aniso });
 
   // ---------------------------------------------------------- state
 
@@ -440,6 +449,7 @@ export function createOfis(root, ctx, opts = {}) {
   let labelSeq = 0;
   const signs = new Map();       // session id → sign label
   const themeOf = new Map();     // project → theme index; open projects get distinct colors when possible
+  const styleOf = new Map();     // project → room style index (ofis-styles.js): the style a room has, kept while the page is open
   let extras = null;             // optional local decoration module { mod, w }
   const extraLabels = [];
   const extraFrame = [];
@@ -474,6 +484,9 @@ export function createOfis(root, ctx, opts = {}) {
       themeOf.set(p, t);
       used.add(t);
     }
+    // the same for the room style: the project's own pick (a hash), a free one when it is taken, and never the style of the office next to it (ofis-styles.js assignStyles)
+    const named = list.map(it => { const a = store.agents.get(it.id); return { project: (a && a.project) || it.id, slot: it.slot }; });
+    for (const [p, i] of assignStyles(live, styleOf, neighbourMap(named, slots.perRow))) styleOf.set(p, i);
   }
 
   // ---------------------------------------------------------- label layer
@@ -554,6 +567,7 @@ export function createOfis(root, ctx, opts = {}) {
     builds++;
     floorJobs = [];
     disposeWorld();
+    decor.beginBuild();
     const g = new THREE.Group();
     world.group = g;
     scene.add(g);
@@ -623,6 +637,7 @@ export function createOfis(root, ctx, opts = {}) {
     world.plan = { rows: P.rowCount, perRow: P.perRow, size: P.cells.length };
     buildHalls(B, g, items, areas);
     addVacantSigns(g);
+    decor.finish(g);
 
     if (POLISH) {
       const occ = PL.makeOcc(B.p, B.i);
@@ -632,7 +647,7 @@ export function createOfis(root, ctx, opts = {}) {
         const fg = PL.floorMesh(j.X, j.Z, j.W, j.D, j.hex, occ, 0.012, j.quiet ? 0.6 : 0.3);
         if (j.room) j.room.tris += fg.index.count / 3;
         if (j.quiet) { quiet.push(fg); continue; }
-        const fm = new THREE.Mesh(fg, MAT.stat);
+        const fm = new THREE.Mesh(fg, (j.pattern && decor.floorMaterial(j.pattern)) || MAT.stat);
         fm.receiveShadow = true; fm.userData.own = true;
         g.add(fm);
       }
@@ -728,6 +743,10 @@ export function createOfis(root, ctx, opts = {}) {
     draw() { renderer.render(scene, camera); return this.info; },
     figureVisible(id, on) { const c = chars.get(id); if (c) c.root.visible = !!on; },
     rebuildNow() { world.sig = ''; sync(); return this.rebuildMs; },
+    // the rooms' life (ofis-decor.js): panes, lamps, candles and the light they give right now; the style of every room; the living meshes can be hidden to compare pictures
+    get life() { return decor.stats(); },
+    lifeVisible(on) { decor.setVisible(on); },
+    styles() { return Object.fromEntries([...world.rooms.keys()].map(id => { const a = store.agents.get(id), key = (a && a.project) || id; return [id, styleAt(styleOf.get(key) ?? hash(key)).id]; })); },
     view(x, y, z, zm) { autoFit = false; camA = PV.set(x, y, z).dot(R); camB = PV.dot(U); lim = { a0: -1e9, a1: 1e9, b0: -1e9, b1: 1e9 }; zoom = clamp(zm, 1, 400); applyCam(); return [camA, camB, zoom]; },
     room(id) { const r = world.rooms.get(id) || (world.vacant || []).find(v => v.id === id); return r ? { X: r.X, Z: r.Z, W: r.W, D: r.D } : null; },
     // every office of the building, vacant ones included, in slot order: the stable layout's state (tools/qa/office3d-qa.mjs)
@@ -743,11 +762,11 @@ export function createOfis(root, ctx, opts = {}) {
   // joins the other vacant floors in one mesh (a coarser mesh: nobody walks on it).
   function buildShell(B, g, X, Z, W, D, th, door, quiet = false) {
     const T = WALL_T, H = WALL_H;
-    const wall = th.wall, wain = shade(wall, -0.13), rail = shade(wall, 0.5), cap = shade(wall, -0.55), base = shade(wall, -0.38);
+    const wall = th.wall, wain = shade(wall, th.wain != null ? th.wain : -0.13), rail = shade(wall, 0.5), cap = shade(wall, -0.55), base = shade(wall, -0.38);
     const trim = '#f3efe6';
     const b = (x, y, z, w, hh, d, col, ry) => B.box(X + x, y, Z + z, w, hh, d, col, ry);
 
-    if (POLISH) floorJobs.push({ X, Z, W, D, hex: th.floor, quiet });       // drawn after the furniture exists (occlusion), with vertex colours
+    if (POLISH) floorJobs.push({ X, Z, W, D, hex: th.floor, quiet, pattern: th.pattern });       // drawn after the furniture exists (occlusion), with vertex colours
     else {
       const fg = new THREE.PlaneGeometry(W, D).rotateX(-Math.PI / 2);
       const fuv = fg.attributes.uv;
@@ -828,6 +847,7 @@ export function createOfis(root, ctx, opts = {}) {
     const th = VACANT_THEME;
     const b = (x, y, z, w, hh, d, col, ry) => B.box(X + x, y, Z + z, w, hh, d, col, ry);
     const shell = buildShell(B, g, X, Z, W, D, th, it.door, true);
+    decor.furnishVacant({ B, X, Z, W, door: it.door });
     const room = { id: it.id, cls: it.cls, cap: CAP[it.cls], X, Z, W, D, door: it.door, hall: it.hall, slot: it.slot, vacant: true };
     const desk = (x, z, dep, len) => {                      // a top and its two end panels
       b(x, 0.6, z, dep, 0.05, len, WOOD);
@@ -893,7 +913,10 @@ export function createOfis(root, ctx, opts = {}) {
   function buildRoom(B, g, it) {
     const X = it.X, Z = it.Z, W = it.W, D = ROOM_D, T = WALL_T, H = WALL_H;
     const a = store.agents.get(it.id);
-    const th = THEMES[themeOf.get((a && a.project) || it.id) ?? (hash(it.id) % THEMES.length)];
+    const key = (a && a.project) || it.id;
+    const base = THEMES[themeOf.get(key) ?? (hash(key) % THEMES.length)];
+    const style = styleAt(styleOf.get(key) ?? hash(key));
+    const th = { wall: wallColour(base, style), floor: floorColour(base, style), pattern: style.floor.pattern, wain: style.wain };      // the project's colours, tinted by the room's style
     const r = rng(hash(it.id));
     const b = (x, y, z, w, hh, d, col, ry) => B.box(X + x, y, Z + z, w, hh, d, col, ry);
     const rb = (x, y, z, w, hh, d, rr, col, ry) => B.rbox(X + x, y, Z + z, w, hh, d, rr, col, ry);
@@ -988,127 +1011,18 @@ export function createOfis(root, ctx, opts = {}) {
       pt(GEO.ico, 0.78, top.chef + 0.16, cz + 0.95, 0.2, 0.18, 0.2, '#5aa85a', rot / 2);
     }
 
-    // whiteboard (back-left wall)
-    b(0.03, 1.44, cz, 0.04, 0.76, 1.6, '#c9ced7');
-    b(0.055, 1.44, cz, 0.02, 0.68, 1.5, '#fbfbfd');
-    b(0.08, 1.07, cz, 0.06, 0.03, 1.2, '#b7bcc7');
-    const ink = ['#3b6fd1', '#d8484a', '#2f9e6a'];
-    for (let i = 0; i < 4; i++) {
-      const len = 0.35 + r() * 0.5;
-      b(0.068, 1.66 - i * 0.12, cz - 0.62 + len / 2, 0.01, 0.024, len, ink[i % 3]);
-    }
-    const notes = ['#ffd766', '#ff9fb2', '#8fd3ff', '#b5ec8e'];
-    for (let i = 0; i < 4; i++) b(0.068, 1.62 - (i >> 1) * 0.2, cz + 0.36 + (i & 1) * 0.2, 0.01, 0.14, 0.14, notes[(i + (r() * 4 | 0)) % 4]);
-
-    // corner plant
-    const spin = r() * 6, leaf = [r() * 3, r() * 3, r() * 3];
-    if (!B.model('plant', X + 0.42, 0, Z + 0.42, { h: 1.0, pal: PAL.potFloor, pk: 'floor', ry: spin })) {
-      pt(GEO.pot, 0.42, 0.19, 0.42, 0.36, 0.38, 0.36, '#c8704a');
-      b(0.42, 0.37, 0.42, 0.3, 0.02, 0.3, '#5a3f2b');
-      pt(GEO.cyl, 0.42, 0.62, 0.42, 0.05, 0.5, 0.05, '#6b4a2e');
-      pt(GEO.ico, 0.42, 0.98, 0.42, 0.66, 0.58, 0.66, '#4c9a4f', leaf[0]);
-      pt(GEO.ico, 0.34, 1.3, 0.48, 0.46, 0.46, 0.46, '#63b25c', leaf[1]);
-      pt(GEO.ico, 0.52, 1.22, 0.33, 0.38, 0.38, 0.38, '#57a856', leaf[2]);
-    }
-
-    // filing cabinet
-    b(0.25, 0.44, 1.2, 0.46, 0.88, 0.56, '#aab2bf');
-    for (let i = 0; i < 3; i++) {
-      b(0.485, 0.18 + i * 0.28, 1.2, 0.01, 0.02, 0.46, '#8a93a3');
-      b(0.49, 0.25 + i * 0.28, 1.2, 0.02, 0.03, 0.14, '#6e7686');
-    }
-    b(0.25, 0.94, 1.2, 0.36, 0.12, 0.4, '#e3e6ec');
-    b(0.25, 1.005, 1.2, 0.26, 0.012, 0.3, '#f7f7f5');
-
-    // bookshelf (back-left wall, toward the front); the pack's shelf is stretched to this size and the books follow its boards
-    const bz = cz + 1.92;
-    let bookRows = [0, 1, 2].map(k => ({ y: 0.05 + k * 0.515, gap: 0.5 }));
-    if (B.model('shelf', X + 0.19, 0, Z + bz, { ry: Math.PI / 2, fx: 1.375, fy: 2.025, fz: 1.44 })) {
-      const tops = AS.boardTops(AS.bake(PK.shelf, PAL.furniture, '').geo).map(y => y * 2.025);
-      if (tops.length >= 2) bookRows = tops.slice(0, -1).map((y, i) => ({ y, gap: tops[i + 1] - y }));
-    } else {
-      b(0.03, 0.8, bz, 0.04, 1.6, 1.1, WOOD_D);
-      b(0.2, 0.8, bz - 0.53, 0.36, 1.6, 0.04, WOOD);
-      b(0.2, 0.8, bz + 0.53, 0.36, 1.6, 0.04, WOOD);
-      for (const y of [0.03, 0.54, 1.06, 1.58]) b(0.2, y, bz, 0.36, 0.04, 1.1, WOOD);
-    }
-    for (const row of bookRows) {
-      let z = bz - 0.49;
-      while (z < bz + 0.45) {
-        const bw = 0.05 + r() * 0.05, bh = Math.min(0.26 + r() * 0.14, row.gap - 0.08);
-        if (r() < 0.12) { z += 0.08; continue; }
-        b(0.19, row.y + bh / 2, z + bw / 2, 0.24, bh, bw, BOOKS[(r() * BOOKS.length) | 0]);
-        z += bw + 0.008;
-      }
-    }
-
     // back-right wall: room sign (project name + session title), with posters and a clock in the space left over
     const sg0 = shell.signX0, sg1 = shell.signX1;
     const sw = Math.min(sg1 - sg0, 5.4), sh = SIGN_H;
     const scx = sg0 + Math.min(sw / 2 + 0.2, (sg1 - sg0) / 2);
     makeSign(g, room, X + scx, SIGN_Y, Z, sw, sh);
     b(scx, SIGN_Y, 0.012, sw + 0.1, sh + 0.1, 0.024, cap);
-    const poster = x => {
-      const bg = POSTERS[(r() * POSTERS.length) | 0], fg = POSTERS[(r() * POSTERS.length) | 0];
-      b(x, 1.42, 0.03, 0.62, 0.82, 0.04, '#2d313b');
-      b(x, 1.42, 0.052, 0.54, 0.74, 0.01, bg);
-      pt(GEO.cyl, x + 0.1, 1.58, 0.062, 0.22, 0.012, 0.22, shade(fg, 0.25), 0, Math.PI / 2);
-      b(x, 1.22, 0.06, 0.54, 0.16, 0.008, shade(bg, -0.25));
-      b(x - 0.08, 1.7, 0.06, 0.3, 0.04, 0.008, '#ffffff');
-    };
-    const clock = x => {
-      pt(GEO.cyl, x, 1.55, 0.035, 0.38, 0.04, 0.38, '#2d313b', 0, Math.PI / 2);
-      pt(GEO.cyl, x, 1.55, 0.058, 0.32, 0.01, 0.32, '#fbfbf7', 0, Math.PI / 2);
-      b(x, 1.6, 0.066, 0.018, 0.1, 0.006, '#23252d');
-      b(x + 0.04, 1.55, 0.066, 0.08, 0.016, 0.006, '#23252d');
-    };
-    let px = scx + sw / 2 + 0.75, first = true;
-    while (px + 0.4 < sg1) { (first ? clock : poster)(px); first = false; px += 1.35; }
-
-    // water cooler (next to the door)
-    b(W - 0.3, 0.42, 0.32, 0.34, 0.84, 0.34, '#e9edf2');
-    b(W - 0.3, 0.6, 0.5, 0.12, 0.08, 0.04, '#5c6474');
-    b(W - 0.3, 0.86, 0.32, 0.3, 0.04, 0.3, '#cfd5de');
-    pt(GEO.cyl, W - 0.3, 1.07, 0.32, 0.26, 0.38, 0.26, '#8fd0ee');
-
-    // lounge corner: at the front of a room that widened to fill its row
-    const cols = COLS[it.cls];
-    const lx0 = CHEF_W + cols * COL_W + 0.3, lx1 = W - 0.3, lw = lx1 - lx0;
-    if (lw >= 1.5) {
-      const lz = 3.9, sofa = shade(th.wall, -0.28), cushion = shade(th.wall, 0.18);
-      b((lx0 + lx1) / 2, 0.018, lz, Math.min(lw - 0.1, 3.4), 0.012, 2.6, '#efe6d2');
-      b((lx0 + lx1) / 2, 0.02, lz, Math.min(lw - 0.1, 3.4) - 0.24, 0.012, 2.36, shade(th.floor, 0.35));
-      const sx = lx0 + 0.42;
-      rb(sx, 0.26, lz, 0.72, 0.26, 1.8, 0.06, sofa);
-      rb(sx - 0.28, 0.56, lz, 0.18, 0.52, 1.8, 0.06, sofa);
-      rb(sx, 0.36, lz - 0.86, 0.72, 0.36, 0.16, 0.05, shade(sofa, -0.1));
-      rb(sx, 0.36, lz + 0.86, 0.72, 0.36, 0.16, 0.05, shade(sofa, -0.1));
-      rb(sx + 0.04, 0.41, lz - 0.38, 0.56, 0.08, 0.72, 0.04, cushion);
-      rb(sx + 0.04, 0.41, lz + 0.38, 0.56, 0.08, 0.72, 0.04, cushion);
-      if (lw >= 1.9) {
-        const tx = sx + 1.0;
-        rb(tx, 0.34, lz, 0.5, 0.05, 0.9, 0.02, WOOD);
-        b(tx, 0.16, lz, 0.38, 0.32, 0.78, WOOD_D);
-        pt(GEO.cyl, tx, 0.4, lz + 0.22, 0.09, 0.08, 0.09, '#f5f3ee');
-        b(tx + 0.02, 0.375, lz - 0.2, 0.2, 0.02, 0.26, POSTERS[(r() * POSTERS.length) | 0], 0.3);
-      }
-      const plx = lw >= 3.2 ? lx0 + 0.35 : lx1 - 0.25;
-      pt(GEO.pot, plx, 0.2, 1.15, 0.34, 0.4, 0.34, '#e9e4da');
-      pt(GEO.ico, plx, 0.62, 1.15, 0.5, 0.56, 0.5, '#4f9f55', r() * 3);
-      pt(GEO.ico, plx - 0.05, 0.86, 1.2, 0.34, 0.36, 0.34, '#66b35d', r() * 3);
-      if (lw >= 3.2) {
-        const ax = lx1 - 0.35, az = 1.45, body = POSTERS[(r() * POSTERS.length) | 0];
-        b(ax, 0.72, az, 0.56, 1.44, 0.56, shade(body, -0.35));
-        b(ax - 0.29, 1.1, az, 0.02, 0.4, 0.46, '#1c2030');
-        b(ax - 0.3, 1.1, az, 0.01, 0.34, 0.4, shade(body, 0.3));
-        b(ax - 0.33, 0.82, az, 0.16, 0.06, 0.5, '#2a2f3a');
-        b(ax - 0.36, 0.86, az - 0.1, 0.03, 0.06, 0.03, '#e24d4d');
-        b(ax - 0.36, 0.86, az + 0.1, 0.04, 0.03, 0.04, '#3b8fe0');
-        b(ax, 1.47, az, 0.58, 0.08, 0.58, body);
-      }
-    }
+    // everything else that is not a desk, the sign or the door is the room's style: ofis-styles.js plans it, ofis-decor.js draws it (windows, lamps, furniture, extras)
+    const plan = planRoom(style.id, { cls: it.cls, door: it.door, W, D, top: top.chef });
+    decor.furnish({ B, kit: KIT, X, Z, W, D, plan, style, theme: th, color: a && a.color, rng: r, top: top.chef, roomId: it.id });
 
     // subagent desks
+    const cols = COLS[it.cls];
     for (let c = 0; c < cols; c++) {
       for (let rr = 0; rr < 3; rr++) {
         const slot = c * 3 + rr;
@@ -2451,6 +2365,7 @@ export function createOfis(root, ctx, opts = {}) {
     for (const fn of extraFrame) { try { fn(T, dt); } catch { /* decoration frame callback */ } }
     stepScreens(T);
     stepRooms(dt, T);
+    decor.update(T, dt);
     doorWalkers.length = 0;
     env.frame(T, dt);
     for (const [id, L] of signs) {

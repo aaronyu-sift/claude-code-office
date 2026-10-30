@@ -10,7 +10,7 @@ const F = MODEL_DIR + 'kenney-furniture/', N = MODEL_DIR + 'kenney-nature/', M =
 export const DECOR_FILES = [
   'lampRoundFloor', 'lampRoundTable', 'lampSquareFloor', 'lampSquareTable', 'loungeSofa', 'loungeSofaLong', 'loungeChair', 'loungeChairRelax', 'loungeDesignSofa', 'stoolBar',
   'benchCushion', 'tableCoffee', 'tableCoffeeGlass', 'tableRound', 'table', 'sideTable', 'sideTableDrawers', 'bookcaseOpenLow', 'coatRackStanding', 'kitchenCoffeeMachine',
-  'kitchenFridgeSmall', 'kitchenCabinet', 'televisionModern', 'speaker', 'laptop', 'pottedPlant', 'plantSmall2', 'plantSmall3', 'books', 'pillow', 'rugRound', 'rugRectangle',
+  'kitchenFridgeSmall', 'kitchenCabinet', 'speaker', 'laptop', 'pottedPlant', 'plantSmall2', 'plantSmall3', 'books', 'pillow', 'rugRound', 'rugRectangle',
   'rugRounded', 'rugSquare',
 ];
 export const DECOR_PLANTS = ['pottedPlant', 'plantSmall2', 'plantSmall3'];

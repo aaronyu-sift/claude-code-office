@@ -37,7 +37,7 @@ test('styles: six, each with a floor, a wall tint, the pack colours and furnitur
 });
 
 test('styles: every model a style names is a file of the manifest, and its size is what the file says', () => {
-  const used = new Set([...Object.values(STYLES).flatMap(st => st.items.map(it => it.m).filter(Boolean)), 'lampRoundTable', 'lampSquareTable', 'televisionModern']);
+  const used = new Set([...Object.values(STYLES).flatMap(st => st.items.map(it => it.m).filter(Boolean)), 'lampRoundTable', 'lampSquareTable']);
   for (const k of used) {
     assert.ok(PROPS[k], `${k} is not in the manifest (ofis-rig.js DECOR_FILES)`);
     assert.ok(MODEL_SIZE[k], `${k} has no size in MODEL_SIZE`);

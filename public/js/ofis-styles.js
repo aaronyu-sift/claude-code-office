@@ -162,10 +162,10 @@ export const STYLES = {
       win('n', 8.0, 1.2, 1.0, 1.0), win('n', 10.2, 1.2, 1.0, 1.0),
       { k: 'wb', wall: 'w', c: 3.4, w: 1.6, menu: true },
       { k: 'bulbs', a: [6.3, 2.12, 0.13], b: [11.0, 2.12, 0.13], n: 8, sag: 0.1, tone: 'warm' },
-      m('kitchenFridgeSmall', 0.35, 0.95, { ry: Math.PI / 2 }),
-      m('kitchenCabinet', 0.45, 1.72, { ry: Math.PI / 2 }),
-      m('kitchenCoffeeMachine', 0.45, 1.72, { y: 0.77, s: 1.6, ry: Math.PI / 2, on: true }),
-      m('coatRackStanding', 1.1, 0.55, { s: 1.5 }),
+      m('coatRackStanding', 0.45, 0.42, { s: 1.5 }),
+      m('kitchenFridgeSmall', 0.35, 1.0, { ry: Math.PI / 2, s: 1.6 }),
+      m('kitchenCabinet', 0.42, 1.72, { ry: Math.PI / 2, s: 1.6 }),
+      m('kitchenCoffeeMachine', 0.42, 1.72, { y: 0.72, s: 1.5, ry: Math.PI / 2, on: true }),
       m('pottedPlant', 0.5, 6.2, { s: 1.6 }),
       lamp('lampSquareFloor', 2.0, 6.0),
       m('tableRound', 9.0, 2.4, { lounge: true }),
@@ -190,7 +190,7 @@ export const MODEL_SIZE = {
   tableCoffee: [0.66, 0.23, 0.40], tableCoffeeGlass: [0.66, 0.23, 0.40], tableRound: [0.69, 0.37, 0.80], table: [0.84, 0.33, 0.45], sideTable: [0.53, 0.38, 0.22],
   sideTableDrawers: [0.53, 0.38, 0.39], bookcaseOpenLow: [0.40, 0.40, 0.25], coatRackStanding: [0.27, 0.77, 0.27],
   kitchenCoffeeMachine: [0.27, 0.30, 0.33], kitchenFridgeSmall: [0.43, 0.60, 0.32], kitchenCabinet: [0.43, 0.45, 0.48],
-  televisionModern: [0.68, 0.45, 0.13], speaker: [0.15, 0.64, 0.15], laptop: [0.60, 0.37, 0.55],
+  speaker: [0.15, 0.64, 0.15], laptop: [0.60, 0.37, 0.55],
   pottedPlant: [0.25, 0.54, 0.29], plantSmall2: [0.19, 0.28, 0.19], plantSmall3: [0.17, 0.29, 0.20],
   books: [0.15, 0.10, 0.09], pillow: [0.23, 0.22, 0.09], rugRound: [0.92, 0.01, 0.92], rugRectangle: [1.57, 0.01, 0.92], rugRounded: [1.57, 0.01, 0.92], rugSquare: [0.90, 0.01, 0.92],
 };
@@ -346,6 +346,7 @@ const DESK_LAMP_TONE = { lab: 'cool' };
 export const CHIEF_LAMP = { x: 0.62, z: 2.36, s: 1.4 };            // the lamp on the chief's desk; its height is the desk top (ofis.js)
 
 // the plan of a room: ctx = { cls, door ('front' | 'back'), W, D, top (height of the chief's desk) }
+const FLOOR_KINDS = new Set(['m', 'lamp', 'rug', 'candle', 'shelf', 'plantwall', 'rack', 'printer']);
 const planCache = new Map();
 export function planRoom(styleId, ctx) {
   const st = STYLES[styleId];
@@ -368,7 +369,7 @@ export function planRoom(styleId, ctx) {
     ...st.items.filter(keep).map(it => ({ ...it }))];
   // every office has a window and a light, whatever its style or cell: a style that lost its windows gets one on the west wall above the chief's desks
   if (!items.some(it => it.k === 'win')) items.push(win('w', 3.4, 1.4, 1.0, 1.0));
-  for (let i = 0; i < items.length; i++) { items[i].id = `${styleId}-${i}`; if (items[i].y == null) items[i].y = 0; }
+  for (let i = 0; i < items.length; i++) { items[i].id = `${styleId}-${i}`; if (items[i].y == null && FLOOR_KINDS.has(items[i].k)) items[i].y = 0; }     // wall pieces have a height of their own (or a fixed one)
   const plan = { style: styleId, items, windows: items.filter(it => it.k === 'win'), lights: lightsOf(items, styleId), zones: zonesOf({ cls, door, W, D }), lounge, dropped, W, D, cls, door };
   planCache.set(key, plan);
   return plan;
@@ -379,7 +380,7 @@ export function planRoom(styleId, ctx) {
 // r: the glow (metres); pool: the light on the floor around it (0 = none); floorY: the height of what it stands on
 const LIGHT_OF = {
   lamp: it => ({ kind: 'lamp', x: it.x, z: it.z, y: (it.y || 0) + MODEL_SIZE[it.m][1] * (it.s ?? SCALE) * 0.78, tone: it.tone || 'warm', r: it.y ? 0.42 : 0.62, pool: it.y ? 0.85 : 1.5, floorY: it.y || 0 }),
-  sconce: it => (it.wall === 'n' ? { kind: 'sconce', x: it.c, z: 0.14, y: it.y, tone: it.tone || 'warm', r: 0.55, pool: 0, floorY: 0 } : { kind: 'sconce', x: 0.14, z: it.c, y: it.y, tone: it.tone || 'warm', r: 0.55, pool: 0, floorY: 0 }),
+  sconce: it => (it.wall === 'n' ? { kind: 'sconce', x: it.c, z: 0.27, y: it.y, tone: it.tone || 'warm', r: 0.55, pool: 0, floorY: 0 } : { kind: 'sconce', x: 0.27, z: it.c, y: it.y, tone: it.tone || 'warm', r: 0.55, pool: 0, floorY: 0 }),
   screen: it => (it.wall === 'n' ? { kind: 'screen', x: it.c, z: 0.1, y: it.y, tone: it.tone || 'cyan', r: 0.95, pool: 0, floorY: 0 } : { kind: 'screen', x: 0.1, z: it.c, y: it.y, tone: it.tone || 'cyan', r: 0.95, pool: 0, floorY: 0 }),
 };
 const BULB_TONES = ['warm', 'rose', 'gold', 'sky', 'green'];
