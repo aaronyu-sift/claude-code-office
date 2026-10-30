@@ -27,7 +27,7 @@
 // Why 1.0 s: when a chat closes and another takes the SAME office while the first one's chief is still walking out of it, the old chief leaves the floor box and the new chief crosses the
 // door a moment apart (the review measured the light going off and on again 0.4 to 1.1 s apart in the office nearest the entrance), and the room blinked. A gap shorter than the hold
 // never reaches the switch (gaps of 0.4 and 0.9 s were measured and switch nothing now). The hold is a pure delay, so it does not close every gap: a gap of 1.5 s still goes dark for
-// 0.5 s (the gap less the hold) and comes on again, which the walk QA counts as the `handover` sweep; closing those would take a look at who is walking towards the door, which
+// about 0.5 s (the gap less the hold; 0.4 s measured) and comes on again, which the walk QA counts as the `handover` sweep; closing those would take a look at who is walking towards the door, which
 // this rule, given only positions and the clock, does not do. 1.0 s keeps a person who turns back at a door, or a new person coming in behind the last one, in a lit room, and is short
 // enough that an office is dark about a second after its last person has gone (the feedback kind of docs/motion.md: a blink of a light is a flaw, a light that stays a second after you
 // is what a room does). It is the same with prefers-reduced-motion: the switch is a step there, which makes a blink harder, not easier to bear.

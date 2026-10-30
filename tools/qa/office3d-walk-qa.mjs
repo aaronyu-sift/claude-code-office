@@ -37,7 +37,7 @@
 //                    A chat arrives (its office is dark until the chief is through the door, then eases on), a chat with three sub-agents closes (lit while anybody is inside and for the hold,
 //                    1 s of the scene's clock, after the last is out, then off), a brief job never lights its office, a job that ends 0.3 to 0.9 m before its door never lights it and two that end
 //                    0.3 m and 1 m inside the door light it while the chief is inside and for the hold after it is out, a rebuild while a chief walks in does not light it and one while a chief walks
-//                    out does not darken it (read in the very task of the rebuild), a chat that is back in another office while its chief walks out of the old one (the new chat of the old
+//                    out does not darken it (every switch and every light number is read in the very task of the rebuild, before any frame, and is what it was before: the rebuild throws nothing), a chat that is back in another office while its chief walks out of the old one (the new chat of the old
 //                    office has not been inside: dark once the old chat's people are out, lit when its own chief is in), a page load with ten chats (dark in the first frame, each office lit in
 //                    the frame its own chief comes through the door), prefers-reduced-motion with the lounge's people about (the light is 0 or 1 and no person of the lounge is at an office), and a
 //                    handover (a chat closes and another takes the same office a moment later, for gaps of -0.8 to 3 s between the old chief leaving and the new one coming in: a gap shorter than
@@ -730,6 +730,7 @@ async function runHidden(ctx) {
     if (!S.ready.ok) problems.push('the scene did not become ready');
     await page.evaluate(HELPERS);
     await ev(page, 's.rec.take().length');
+    await ev(page, 's.rec.takeLights().length');
     await qa(page, `q.chat('h1'); q.chat('h3'); q.sub('h3', 'h3-sub'); q.sub('h3', 'h3-x'); q.sync();`);
     await sleep(2500);
     const before = await ev(page, 'o.figures().filter(f => f.mode === "walk").map(f => [f.id, f.x, f.z])');
@@ -740,8 +741,14 @@ async function runHidden(ctx) {
     await page.evaluate(`location.hash = '#ofis'`);
     await sleep(800);
     if (!(await idle(page))) problems.push('somebody was still walking after 2 minutes');
-    const st = await ev(page, '({ rec: s.rec.take(), office: o.office(), figs: o.figures().map(f => f.id) })');
+    const st = await ev(page, '({ rec: s.rec.take(), lights: s.rec.takeLights(), office: o.office(), figs: o.figures().map(f => f.id) })');
     const lists = byId(st.rec);
+    // the lights across the hide and the show (the show rebuilds the building with the scene's `instantNext` on, and nothing in that rebuild throws a switch: the first frame reads the rule from
+    // the people where they stand): the same audit as 3d-walk-lights, against every figure of this page
+    const subOf = { 'h-sub': 'h3', 'h3-sub': 'h3', 'h3-x': 'h3' };
+    const hl = auditLights(st.rec, st.lights, st.office, id => subOf[String(id)] || String(id).split(':')[0], 'lights: ');
+    problems.push(...hl.problems);
+    if (hl.st.frames < 50 || hl.st.inside < 10) problems.push(`lights: only ${hl.st.frames} frames and ${hl.st.inside} readings of somebody inside an office to judge the lights by`);
     if (before.length < 2) problems.push(`only ${before.length} figures were walking when the view was left`);
     for (const l of lists.values()) problems.push(...jumps(l));
     for (const id of ['h1', 'h2', 'h-sub', 'h3-sub', 'h3-x']) {
@@ -754,7 +761,7 @@ async function runHidden(ctx) {
     if (st.figs.includes('h1')) problems.push('h1 (its chat ended while the view was hidden) is still in the scene');
     problems.push(...(await books(page)), ...(await seated(page)));
     if (errorsOf(page).length) problems.push(`console error: ${errorsOf(page)[0].slice(0, 120)}`);
-    return [report('3d-walk-hidden', problems, `the view was left for 2 s with ${before.length} people walking, a chat ended, a sub-agent finished, one was taken out of the data and a chat and a sub-agent came meanwhile: back in the view nobody jumped, the three that were over walked out (turning round where they still walked in) and were removed at the entrance, the new ones were made at the entrance and sat down, ${st.figs.length} figures in the scene`)];
+    return [report('3d-walk-hidden', problems, `the view was left for 2 s with ${before.length} people walking, a chat ended, a sub-agent finished, one was taken out of the data and a chat and a sub-agent came meanwhile: back in the view nobody jumped, the three that were over walked out (turning round where they still walked in) and were removed at the entrance, the new ones were made at the entrance and sat down, ${st.figs.length} figures in the scene; the lights over the hide and the show: ${hl.st.frames} frames judged, ${hl.st.inside} readings of somebody inside an office, the switch followed the people in every frame`)];
   } finally { await S.done(); }
 }
 
@@ -1438,6 +1445,7 @@ const takeLightsRec = async (page, into) => { const r = await ev(page, '({ e: s.
 // wait for `sec` seconds of the scene's own clock (the sum of the frames' steps, which the hold of the lights runs on), not of the wall clock; null if the scene did not get there in 3 minutes
 const sceneWait = (page, sec) => page.evaluate(`(async () => { const sc = document.querySelector('#view-ofis').__ofis; const goal = sc.sceneTime + ${sec}; return await Promise.race([new Promise(res => { const tick = () => (sc.sceneTime >= goal ? res(sc.sceneTime) : requestAnimationFrame(tick)); tick(); }), new Promise(res => setTimeout(() => res(null), 180000))]); })()`);
 const targetsOf = 'o.office().slots.map(s => o.litTarget(s.slot)).join("")';
+const litsOf = 'o.office().slots.map(s => o.lit(s.slot)).join(",")';
 const inAnyRoom = (office, p) => office.slots.some(s => strictIn(s, p));
 
 // `main`: one page, one chat of the page's own in slot 0 (seated, lit). A chat arrives (dark until its chief is through the door); a chat with three sub-agents is seated and closes (lit while
@@ -1504,10 +1512,12 @@ async function lightsMain(ctx) {
     const way = await until(async () => ev(page, `(f => (f && f.vis && f.mode === 'walk' && f.x < o.office().entryX - 2 ? [f.x, f.z] : null))(o.figures().find(f => f.id === 'rbi'))`), 60000, 40);
     const off1 = await ev(page, 'o.office()');
     if (!way || inAnyRoom(off1, { x: way[0], z: way[1] })) problems.push('the chief walking in was not in the hall, outside every office, for the rebuild: the case was not made');
-    const r1 = await ev(page, `(() => { const all = () => ${targetsOf}, f = () => o.figures().find(f => f.id === 'rbi'); const before = [all(), o.litTarget(${rbi})]; o.rebuildNow(); const mid = [all(), o.litTarget(${rbi}), f().mode]; window.__qa.chat('rbi2'); window.__qa.sync(); const after = [all(), o.litTarget(${rbi}), f().mode]; return { before, mid, after }; })()`);
+    const r1 = await ev(page, `(() => { const all = () => ${targetsOf}, num = () => ${litsOf}, f = () => o.figures().find(f => f.id === 'rbi'); const before = [all(), o.litTarget(${rbi})], nb = num(); o.rebuildNow(); const mid = [all(), o.litTarget(${rbi}), f().mode], nm = num(); window.__qa.chat('rbi2'); window.__qa.sync(); const after = [all(), o.litTarget(${rbi}), f().mode], na = num(); return { before, mid, after, nb, nm, na }; })()`);
     if (r1.mid[2] !== 'walk' || r1.after[2] !== 'walk') problems.push('the chief was no longer walking when the rebuild was read');
     if (r1.mid[1] !== 0 || r1.after[1] !== 0) problems.push(`a rebuild lit the office of a chat whose chief is still in the hall (switch ${r1.mid[1]} after a rebuild, ${r1.after[1]} after a rebuild for a new chat)`);
     if (r1.before[0] !== r1.mid[0] || r1.before[0] !== r1.after[0]) problems.push(`a rebuild changed the switches of the offices (${r1.before[0]} -> ${r1.mid[0]} -> ${r1.after[0]})`);
+    // the light itself, in the first frame after a rebuild (nothing has drawn yet: the rebuild repaints from the switches, which belong to the slots and stay): every office's number is what it was
+    if (r1.nb !== r1.nm || r1.nb !== r1.na) problems.push(`a rebuild changed the light of an office before the next frame (${r1.nb} -> ${r1.nm} -> ${r1.na})`);
     if (!(await idle(page))) problems.push('the chiefs of the rebuild case were still walking after 2 minutes');
     await sleep(700);
     await takeLightsRec(page, got);
@@ -1521,10 +1531,11 @@ async function lightsMain(ctx) {
     await qa(page, `q.remove('rbo'); q.sync();`);
     const out = await until(async () => ev(page, `(f => (f && f.after === 'gone' && f.mode === 'walk' && f.x > ${boxO.X + 2 * BAND} && f.x < ${boxO.X + boxO.W - 2 * BAND} && f.z > ${boxO.Z + 2 * BAND} && f.z < ${boxO.Z + boxO.D - 2 * BAND} ? [f.x, f.z] : null))(o.figures().find(f => f.id === 'rbo'))`), 30000, 25);
     if (!out) problems.push('the chief of the closed chat was never read walking out inside its office');
-    const r2 = await ev(page, `(() => { const all = () => ${targetsOf}, f = () => o.figures().find(f => f.id === 'rbo'); const before = [all(), o.litTarget(${rbo}), f() && f().mode]; o.rebuildNow(); const mid = [all(), o.litTarget(${rbo}), f() && f().mode]; return { before, mid }; })()`);
+    const r2 = await ev(page, `(() => { const all = () => ${targetsOf}, num = () => ${litsOf}, f = () => o.figures().find(f => f.id === 'rbo'); const before = [all(), o.litTarget(${rbo}), f() && f().mode], nb = num(); o.rebuildNow(); const mid = [all(), o.litTarget(${rbo}), f() && f().mode], nm = num(); return { before, mid, nb, nm }; })()`);
     if (r2.before[1] !== 1) problems.push(`the office of the closing chat was dark (switch ${r2.before[1]}) while its chief was walking out inside it`);
     if (r2.mid[1] !== 1) problems.push(`a rebuild darkened an office with its chief still walking out inside it (switch ${r2.mid[1]} after the rebuild)`);
     if (r2.before[0] !== r2.mid[0]) problems.push(`a rebuild changed the switches of the offices (${r2.before[0]} -> ${r2.mid[0]})`);
+    if (r2.nb !== r2.nm) problems.push(`a rebuild changed the light of an office before the next frame (${r2.nb} -> ${r2.nm})`);
     if (!(await idle(page))) problems.push('the chief walking out was still walking after 2 minutes');
     await sleep(900);
     await takeLightsRec(page, got);
@@ -1861,6 +1872,10 @@ const MUTATIONS = [
   { name: 'a slot that is seen for the first time is lit, and held', file: 'public/js/ofis-presence.js', from: 'st = { owner: r.owner, entered: false, lit: false, offAt: null };', to: 'st = { owner: r.owner, entered: false, lit: true, offAt: null };', fails: ['unit-presence', 'lights'], parts: ['load'] },
   { name: 'the hold runs on the wall clock, not on the scene\'s', file: 'public/js/ofis.js', from: 'roomLights(lightMem, rooms, lightPeople, lightOut, n, sceneT);', to: 'roomLights(lightMem, rooms, lightPeople, lightOut, n, performance.now() / 1000);', fails: 'lights', parts: ['handover'] },
   { name: 'the memory of the rule is lost every frame (no hold, no latch)', file: 'public/js/ofis.js', from: 'roomLights(lightMem, rooms, lightPeople, lightOut, n, sceneT);', to: 'roomLights(new Map(), rooms, lightPeople, lightOut, n, sceneT);', fails: 'lights', parts: ['handover'] },
+  // the latch ("a person of the chat has been inside since it took the office"): the page cannot reach a state where it matters (the chief of a chat that has the office sits inside it for as long as
+  // the chat has it, so somebody of the chat is always inside once it has entered), so the rule's unit tests hold it, and these two run them
+  { name: 'the latch is lost: a chat that has had a person inside is dark the moment nobody is inside', file: 'public/js/ofis-presence.js', from: 'if (inside || (r.owner !== null && st.entered)) {', to: 'if (inside) {', fails: 'unit-presence' },
+  { name: 'the latch is not forgotten when another chat takes the office', file: 'public/js/ofis-presence.js', from: 'else if (st.owner !== r.owner) { st.owner = r.owner; st.entered = false; }', to: 'else if (st.owner !== r.owner) { st.owner = r.owner; }', fails: 'unit-presence' },
 ];
 
 const editsOf = m => m.edits || [[m.from, m.to]];            // a mutation is one line broken, or a few (edits: [[from, to], ...]) that only make a break together
