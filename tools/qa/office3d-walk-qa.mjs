@@ -15,13 +15,14 @@
 //                    and one that comes and ends within one sync: each turns around where it stands, walks back out and is removed at the entrance, never seen at its seat, no seat stays taken
 //   3d-walk-leave    a chat that closes (the real server) while its chief and two sub-agents sit: they stand up (and stand still while they do), walk the way they came, the door of the office
 //                    that is vacant now opens for them, they are removed at the entrance, and a sub-agent that finishes leaves too, after its 4.5 s, clear of the furniture
-//   3d-walk-flap     appears, ends, appears again: a chat and a sub-agent come back while they walk out, one figure each, seated at the end, no stuck seat, no ghost label
+//   3d-walk-flap     appears, ends, appears again: a chat and a sub-agent come back while they walk out, one figure each, seated at the end, no stuck seat, no ghost label; a sub-agent that is wanted again goes back to the seat it left, not the first free one
 //   3d-walk-rebuild  the 20th chat adds a bay and moves the entrance while 30 people are walking in: nobody jumps, nobody is dropped, everybody is seated at the end
 //   3d-walk-growout  the building grows (the entrance moves 14 units) while a closed chat's chief and sub-agent walk out of their vacant office: they go on to today's entrance
 //   3d-walk-seats    a chat with 12 sub-agents (an office with desks, lounge seats and stools): all 13 walk in and sit on their own seat (every reading inside the office keeps 0.2 m from the
 //                    furniture, nobody jumps, each ends facing as its seat does with its hip at that seat's cushion, nobody shares a seat); a job ends on each kind of seat while the chat goes
 //                    on and the person gets up where it sits and walks out clear of the furniture; the chat closes and all do the same
-//   3d-walk-turnback twelve jobs and a chat end while the person is inside the office, each a little deeper in than the one before: the walk back is the way it came in, clear of the furniture
+//   3d-walk-turnback twelve jobs and a chat end while the person is inside the office, each a little deeper in than the one before: the walk back is the way it came in (every reading of it is
+//                    on the line the figure had walked in, to within 5 cm), clear of the furniture
 //   3d-walk-reseat  a sub-agent walking out of its seat is wanted again, a newcomer has taken that seat: it goes back along the way out and in along the route of another seat, not
 //                    straight through the table (a pair of seats of an arrangement where the straight line does cut through furniture)
 //   3d-walk-readmit a chat closes, another chat takes its office while its chief walks out, and the first chat is back: it gets another office. Three cases (one hall from inside the office,
@@ -205,7 +206,8 @@ async function queues(page) {
   return { problems, note: `three queues (3, 1 and 1 sub-agents, 0.4 s and 0.3 s apart): left the entrance at least ${f1(gaps.length ? Math.min(...gaps) : 0)} ms apart, the closest two were ${closest.toFixed(2)} units apart, all seated` };
 }
 
-// While the figures walk in, the page is read every 120 ms: the camera, and the doors next to a walking chief (the chief's own door must be open when it is in the doorway).
+// While the figures walk in, the page is read every 120 ms: the camera, the doors next to a walking chief (the chief's own door must be open when it is in the doorway), and the chief's own
+// screen (dark while the chief walks, on once it has sat: a sub-agent's screen is dark until it sits, and so is the chat's).
 async function runLoad(ctx) {
   const problems = [];
   const S = await scenario3d(10, { tag: 'wload', root: ctx.root, width: 1100, height: 700, settle: false, intercept: recordFromStart });
@@ -213,11 +215,18 @@ async function runLoad(ctx) {
     const { page } = S;
     if (!S.ready.ok) problems.push('the scene did not become ready');
     const cam0 = await ev(page, '[s.zoom, ...s.project(0, 0, 0)]');
-    let cam = cam0, camMoved = 0, doorSamples = 0, doorOpen = 0, subDoorSamples = 0, subDoorOpen = 0, samples = 0;
+    let cam = cam0, camMoved = 0, doorSamples = 0, doorOpen = 0, subDoorSamples = 0, subDoorOpen = 0, samples = 0, scrWalk = 0, scrLitWhileWalking = 0;
     const t0 = Date.now();
     while (Date.now() - t0 < 120000) {
-      const r = await ev(page, '({ walking: s.walking.length, cam: [s.zoom, ...s.project(0, 0, 0)], doors: o.doors(), figs: o.figures().map(f => [f.id, f.main, f.mode, f.x, f.z, f.vis]) })');
+      const r = await ev(page, '({ walking: s.walking.length, cam: [s.zoom, ...s.project(0, 0, 0)], doors: o.doors(), scr: o.screens(), figs: o.figures().map(f => [f.id, f.main, f.mode, f.x, f.z, f.vis]) })');
       samples++;
+      // the chief's own screen is dark while the chief walks (the figures and the screens are read in one task: no frame comes between them)
+      for (const f of r.figs) if (f[1] && f[2] === 'walk' && f[5]) {
+        const mine = r.scr.list.filter(x => x.kind === 'chef' && x.room === f[0]);
+        if (!mine.length) continue;
+        scrWalk++;
+        if (mine.some(x => x.hex !== r.scr.off)) scrLitWhileWalking++;
+      }
       cam = r.cam;
       if (cam.some((v, i) => Math.abs(v - cam0[i]) > 0.01)) camMoved++;
       for (const d of r.doors) {
@@ -258,13 +267,21 @@ async function runLoad(ctx) {
     if (subDoorSamples < 3) problems.push(`only ${subDoorSamples} readings of a sub-agent in a doorway (nothing to judge the doors by)`);
     else if (subDoorOpen / subDoorSamples < 0.9) problems.push(`the door was open in ${subDoorOpen} of ${subDoorSamples} readings of a sub-agent in its doorway`);
     if (camMoved) problems.push(`the camera moved in ${camMoved} of ${samples} readings`);
+    if (scrWalk < 20) problems.push(`only ${scrWalk} readings of a walking chief and its screen (nothing to judge "dark until the chief has sat" by)`);
+    else if (scrLitWhileWalking) problems.push(`the chief's screen was on in ${scrLitWhileWalking} of ${scrWalk} readings of the chief walking in (it stays dark until the chief has sat)`);
+    const scrEnd = await ev(page, 'o.screens()');
+    const chiefScr = new Map();
+    const withChat = new Set(off.slots.filter(x => !x.vacant).map(x => x.id));                 // (a vacant office has the chief's screen too: nobody sits there)
+    for (const x of scrEnd.list) if (x.kind === 'chef' && withChat.has(x.room)) chiefScr.set(x.room, (chiefScr.get(x.room) || false) || x.hex !== scrEnd.off);
+    const scrOn = [...chiefScr.values()].filter(Boolean).length;
+    if (scrOn < chiefScr.size || chiefScr.size < 8) problems.push(`${scrOn} of ${chiefScr.size} chiefs' screens are on once everybody sits (they show the chat's work)`);
     problems.push(...(await books(page)), ...(await seated(page)));
     const q2 = await queues(page);
     problems.push(...q2.problems);
     if (errorsOf(page).length) problems.push(`console error: ${errorsOf(page)[0].slice(0, 120)}`);
     return [report('3d-walk-load', problems,
       `${all.length} figures (${all.filter(l => l[0].main).length} chiefs) made at the entrance at ${f1(delays[0])} to ${delays[delays.length - 1].toFixed(2)} s, ${f1(Math.min(...gaps) * 1000)} to ${f1(Math.max(...gaps) * 1000)} ms apart, ${hurried} hurried (up to ${Math.max(...Object.values(st.paces)).toFixed(1)} times), `
-      + `all seated after ${lastArrival.toFixed(1)} s of the scene's time (earliest ${Math.min(...arrive).toFixed(1)}), ${all.reduce((n, l) => n + l.length, 0)} events and no jump, ${doorOpen} of ${doorSamples} readings with the chief's door open and ${subDoorOpen} of ${subDoorSamples} with a sub-agent's, step bounce ${f1((Math.max(...hy) - Math.min(...hy)) * 100)} cm, the camera stayed; ${q2.note}`)];
+      + `all seated after ${lastArrival.toFixed(1)} s of the scene's time (earliest ${Math.min(...arrive).toFixed(1)}), ${all.reduce((n, l) => n + l.length, 0)} events and no jump, ${doorOpen} of ${doorSamples} readings with the chief's door open and ${subDoorOpen} of ${subDoorSamples} with a sub-agent's, step bounce ${f1((Math.max(...hy) - Math.min(...hy)) * 100)} cm, the camera stayed, the chief's screen was dark in all ${scrWalk} readings of the chief walking and on for ${scrOn} of ${chiefScr.size} once they sat; ${q2.note}`)];
   } finally { await S.done(); }
 }
 
@@ -383,11 +400,21 @@ async function runLeave(ctx) {
     const room = await roomOf(page, pick.id), keys = await seatKeys(page);                 // the office's furniture and the seat of each of them, read while they sit
     const paces0 = await ev(page, 's.pace');                                                      // (the page load hurried this crowd: they walked in at more than the normal pace)
     if (!mine.some(id => paces0[id] > 1)) problems.push('nobody of the chat was hurried at the page load, so the pace of the walk out proves nothing');
+    // the chief's balloon (what it is doing) is shown while its chat is open: the control that there is a balloon to switch off
+    const balSel = `document.querySelector('.of-l.of-ball[data-id=' + ${JSON.stringify(JSON.stringify(pick.id))} + ']')`;
+    const balloon0 = await until(async () => (await ev(page, `(e => (e ? e.style.visibility : null))(${balSel})`)) === 'visible', 15000, 200);
+    if (!balloon0) problems.push('the chief\'s balloon was not shown before its chat closed: nothing to judge "a gone agent\'s balloon is switched off" by');
     fx.closeSession(pick.id);
-    let doorSamples = 0, doorOpen = 0, subSamples = 0, subOpen = 0;
+    let doorSamples = 0, doorOpen = 0, subSamples = 0, subOpen = 0, balSamples = 0, balShown = 0, goneAt = null;
     const t0 = Date.now();
     while (Date.now() - t0 < 120000) {
-      const r = await ev(page, '({ doors: o.doors(), figs: o.figures().map(f => [f.id, f.main, f.mode, f.x, f.z]) })');
+      const r = await ev(page, `({ doors: o.doors(), figs: o.figures().map(f => [f.id, f.main, f.mode, f.x, f.z, f.after]), bal: (e => (e ? e.style.visibility : null))(${balSel}) })`);
+      // a chat that is gone from the data has no balloon about work that is over: once the chief has walked out for half a second (a frame or two after the data changed) its balloon is hidden
+      const chiefNow = r.figs.find(f => f[0] === pick.id);
+      if (chiefNow && chiefNow[5] === 'gone') {
+        if (goneAt === null) goneAt = Date.now();
+        else if (Date.now() - goneAt > 500) { balSamples++; if (r.bal === 'visible') balShown++; }
+      }
       for (const d of r.doors) {
         if (!d.vacant || d.slot !== slotOf(pick.id).slot) continue;
         const chief = r.figs.find(f => f[0] === pick.id && f[2] === 'walk');
@@ -428,6 +455,8 @@ async function runLeave(ctx) {
       if (doorSamples < 2) problems.push(`only ${doorSamples} readings of the chief in the doorway of the vacant office`); else if (doorOpen / doorSamples < 0.9) problems.push(`the door of the vacant office was open in ${doorOpen} of ${doorSamples} readings of the chief in its doorway`);
       if (subSamples < 2) problems.push(`only ${subSamples} readings of a sub-agent in the doorway of the vacant office`); else if (subOpen / subSamples < 0.9) problems.push(`the door of the vacant office was open in ${subOpen} of ${subSamples} readings of a sub-agent in its doorway`);
     }
+    if (balloon0 && balSamples < 5) problems.push(`only ${balSamples} readings of the walking chief's balloon after its chat was gone (nothing to judge by)`);
+    else if (balShown) problems.push(`the chief's balloon was still shown in ${balShown} of ${balSamples} readings of it walking out after its chat was gone`);
     problems.push(...(await books(page)));
     // a sub-agent that finishes sits for 4.5 s (the check mark), then stands up and walks out
     const other = fx.agents.find(a => a.id !== pick.id), sub = other.subs[0];
@@ -461,7 +490,7 @@ async function runLeave(ctx) {
     else if (l2.length) problems.push('the finished sub-agent had no seat to compare its walk out with');
     problems.push(...(await books(page)));
     if (errorsOf(page).length) problems.push(`console error: ${errorsOf(page)[0].slice(0, 120)}`);
-    return [report('3d-walk-leave', problems, `the chat closed with its chief and ${pick.subs.length} sub-agents seated: ${stood} of ${mine.length} stood up first (still for 0.25 s or more), walked out clear of the office's furniture and were removed at the entrance with no jump, the vacant office is vacant, ${hinged ? `its door was open in ${doorOpen} of ${doorSamples} readings of the chief in the doorway and ${subOpen} of ${subSamples} of a sub-agent` : 'its door is an opening'}; a finished sub-agent (its walk out clear of the furniture too) sat ${seatedFor.toFixed(1)} s after the data said it was done, then stood up, walked out and was removed at the entrance (${((Date.now() - tFinish) / 1000).toFixed(0)} s on the wall clock in all)`)];
+    return [report('3d-walk-leave', problems, `the chat closed with its chief and ${pick.subs.length} sub-agents seated: ${stood} of ${mine.length} stood up first (still for 0.25 s or more), walked out clear of the office's furniture and were removed at the entrance with no jump, the vacant office is vacant, ${hinged ? `its door was open in ${doorOpen} of ${doorSamples} readings of the chief in the doorway and ${subOpen} of ${subSamples} of a sub-agent` : 'its door is an opening'}; the chief's balloon was hidden in all ${balSamples} readings of it walking out; a finished sub-agent (its walk out clear of the furniture too) sat ${seatedFor.toFixed(1)} s after the data said it was done, then stood up, walked out and was removed at the entrance (${((Date.now() - tFinish) / 1000).toFixed(0)} s on the wall clock in all)`)];
   } finally { await S.done(); }
 }
 
@@ -517,11 +546,48 @@ async function runFlap(ctx) {
     }
     if (cameBack < 2) problems.push(`only ${cameBack} of the two figures that flapped came back while they walked out`);
     problems.push(...(await books(page)), ...(await seated(page)));
+    // a sub-agent that is wanted again while it walks out goes back to the seat it left, when that seat is still free: not to the first free one (seat 0 is free as well here)
+    await qa(page, `q.chat('ph-host'); q.sub('ph-host', 'ph0'); q.sub('ph-host', 'ph1'); q.sub('ph-host', 'ph2'); q.sync();`);
+    await ev(page, 's.settle()');
+    await sleep(900);
+    const phSeats = () => ev(page, `o.seats().rooms.find(r => r.id === 'ph-host').seats`);
+    const ph0 = await phSeats();
+    if (ph0[0] !== 'ph0' || ph0[1] !== 'ph1' || ph0[2] !== 'ph2') problems.push(`the three sub-agents of the chat sit at seats ${JSON.stringify(ph0.slice(0, 4))}, want ph0, ph1, ph2 at 0, 1, 2`);
+    await qa(page, `q.remove('ph0'); q.sync();`);                                              // seat 0 is free at once, ph0 walks out
+    await qa(page, `q.remove('ph2'); q.sync();`);                                              // ph2 stands up and walks out of seat 2, which is free at once as well
+    await sleep(700);
+    const ph1 = await ev(page, `(f => (f ? [f.after, f.mode] : null))(o.figures().find(f => f.id === 'ph2'))`);
+    if (!ph1 || ph1[0] !== 'gone') problems.push(`ph2 was not walking out when it was wanted again (${JSON.stringify(ph1)})`);
+    await qa(page, `q.sub('ph-host', 'ph2'); q.sync();`);                                      // wanted again: seat 2 and seat 0 are both free
+    const ph2 = await phSeats();
+    if (ph2[2] !== 'ph2' || ph2.indexOf('ph2') !== 2) problems.push(`ph2 was given seat ${ph2.indexOf('ph2')} when it was wanted again, not the seat 2 it left (seat 0 was free too: ${JSON.stringify(ph2.slice(0, 4))})`);
+    if (!(await idle(page))) problems.push('somebody was still walking after 2 minutes (the seat case)');
+    await sleep(900);
+    const ph3 = await ev(page, `({ seats: o.seats().rooms.find(r => r.id === 'ph-host').seats.slice(0, 3), at: o.sitting().find(f => f.id === 'ph2'), room: o.room('ph-host'), arr: o.arrange('ph-host') })`);
+    const seat2 = ph3.arr.seats.find(x => x.key === 2);
+    if (!ph3.at || ph3.at.mode !== 'seated' || Math.hypot(ph3.at.x - (ph3.room.X + seat2.pos[0]), ph3.at.z - (ph3.room.Z + seat2.pos[1])) > 0.05) problems.push(`ph2 does not sit on the seat it left (${ph3.at ? ph3.at.mode : 'not in the scene'}, seats ${JSON.stringify(ph3.seats)})`);
     if (errorsOf(page).length) problems.push(`console error: ${errorsOf(page)[0].slice(0, 120)}`);
     const counts = ['flap-chat', 'flap-sub', 'fast', 'flap-sub-2'].map(id => { const l = lists.get(id) || []; return `${id} made ${l.filter(e => e.k === 'create').length}, removed ${l.filter(e => e.k === 'remove').length}`; }).join('; ');
-    return [report('3d-walk-flap', problems, `a chat and a sub-agent flapped with time to walk (end, back 0.5 s later): ${cameBack} of 2 came back while walking out, as the same figure; two flapped within single syncs, still at the entrance (${counts}); all ended seated at their seats, ${st.figs.length} figures in the scene and in the data, no duplicate, label or balloon left over, no seat stuck`)];
+    return [report('3d-walk-flap', problems, `a chat and a sub-agent flapped with time to walk (end, back 0.5 s later): ${cameBack} of 2 came back while walking out, as the same figure; two flapped within single syncs, still at the entrance (${counts}); all ended seated at their seats, ${st.figs.length} figures in the scene and in the data, no duplicate, label or balloon left over, no seat stuck; a sub-agent wanted again while it walked out went back to the seat it left (seat 2, with seat 0 free as well)`)];
   } finally { await S.done(); }
 }
+
+// A figure that waits at the entrance (made, its turn not come) is not drawn, and it cannot be hovered or clicked either: its pick box is not offered to the ray. This reads it in ONE task
+// (o.draw() first, so that the figures' pick boxes stand where the rebuild put them: a pick reads the matrices of the last render; then a pointer event sent to the stage as a mouse sends it,
+// the tooltip read before any frame): the place of a waiting figure that has no drawn figure within 1.2 units, and, as the control
+// that the probe can show a tooltip at all, a figure that walks in the hall. After a growth rebuild the new entrance is 14 units from every figure that walks, so a waiting figure stands alone there.
+const HOVER_PROBE = `(() => {
+  const rect = v.getBoundingClientRect(), area = v.querySelector('.of-area'), tipEl = document.getElementById('tip'), slots = o.office().slots;
+  const hover = (f, h = 0.8) => { const [x, y] = s.project(f.x, h, f.z); area.dispatchEvent(new PointerEvent('pointermove', { pointerType: 'mouse', clientX: rect.left + x, clientY: rect.top + y, bubbles: true })); const on = tipEl.classList.contains('on'), text = tipEl.textContent; area.dispatchEvent(new PointerEvent('pointerleave', { bubbles: true })); return { on, text, at: [Math.round(x), Math.round(y)] }; };
+  o.draw();
+  // (a figure at the entrance is drawn at a sixth of its size, so its pick box is a sixth as tall: hover at three heights of it)
+  const hovers = f => { const r = [0.08, 0.13, 0.2].map(h => hover(f, h)); return r.find(x => x.on) || r[0]; };
+  const figs = o.figures(), waiting = figs.filter(f => !f.vis), walkers = figs.filter(f => f.vis && f.mode === 'walk');
+  const clear = f => walkers.every(g => Math.hypot(g.x - f.x, g.z - f.z) > 1.2);
+  const inRoom = f => slots.some(r => f.x > r.X && f.x < r.X + r.W && f.z > r.Z && f.z < r.Z + r.D);
+  const w = waiting.find(clear), tried = walkers.filter(f => !inRoom(f) && f.x < o.office().entryX - 3).slice(0, 12).map(f => [f.id.slice(-8), +f.x.toFixed(1), +f.z.toFixed(1), hover(f).on]);
+  return { nWaiting: waiting.length, clear: !!w, control: tried.some(t => t[3]) ? { on: true } : null, tried, waited: w ? hovers(w) : null };
+})()`;
 
 // ---- 3d-walk-rebuild
 // ?rooms=19: the building has 19 offices (10 bays); 14 more chats with a sub-agent each open at once and walk in; 3 s later two more come: the 20th adds a bay to the bar, the bar's hall
@@ -544,7 +610,10 @@ async function runRebuild(ctx) {
     await qa(page, `q.sub('g1', 'late-sub'); q.chat('g15'); q.sub('g15', 'g15-sub'); q.sync();`);
     await sleep(150);
     const onTheWay = await ev(page, 'o.figures().filter(f => f.mode === "walk" && f.vis).map(f => f.id)');
-    await qa(page, `q.chat('g16'); q.sub('g16', 'g16-sub'); q.sync();`);
+    const probe = await ev(page, `(() => { window.__qa.chat('g16'); window.__qa.sub('g16', 'g16-sub'); window.__qa.sync(); return ${HOVER_PROBE}; })()`);
+    if (!probe.clear) problems.push(`no figure waited alone at the new entrance when the building grew (${probe.nWaiting} waiting): nothing to judge "a waiting figure cannot be hovered" by`);
+    else if (!probe.control || !probe.control.on) problems.push(`the probe showed no tooltip on any of ${probe.tried.length} figures that walk in the hall (${JSON.stringify(probe.tried.slice(0, 4))}): it proves nothing about the figures that wait`);
+    else if (probe.waited.on) problems.push(`hovering the place of a figure that waits at the entrance, not drawn yet, showed a tooltip ("${probe.waited.text.slice(0, 50)}")`);
     const grown = await ev(page, '({ office: o.office(), builds: o.builds })');
     if (grown.office.entryX <= off0.entryX + 1) problems.push(`the building did not grow to the right (entrance ${off0.entryX} to ${grown.office.entryX}): nothing was re-pathed`);
     if (grown.builds <= mid.builds) problems.push('the building was not rebuilt');
@@ -568,7 +637,7 @@ async function runRebuild(ctx) {
     problems.push(...(await books(page)), ...(await seated(page)));
     if (st.office.bays <= off0.bays) problems.push(`${st.office.bays} bays (was ${off0.bays}): the building did not grow`);
     if (errorsOf(page).length) problems.push(`console error: ${errorsOf(page)[0].slice(0, 120)}`);
-    return [report('3d-walk-rebuild', problems, `${off0.bays} to ${st.office.bays} bays, the entrance moved ${f1(off0.entryX)} to ${f1(grown.office.entryX)} with ${mid.walking} people walking: ${n} figures recorded (${st.figs.length} in the scene at the end, all seated), ${onTheWay.length} of them drawn and on the way when the 20th chat came: none jumped, none was dropped or made twice, all went on to their seats`)];
+    return [report('3d-walk-rebuild', problems, `${off0.bays} to ${st.office.bays} bays, the entrance moved ${f1(off0.entryX)} to ${f1(grown.office.entryX)} with ${mid.walking} people walking: ${n} figures recorded (${st.figs.length} in the scene at the end, all seated), ${onTheWay.length} of them drawn and on the way when the 20th chat came: none jumped, none was dropped or made twice, all went on to their seats; ${probe.nWaiting} figures waited at the new entrance when it moved, and hovering the place of one of them showed no tooltip (a figure that walks does)`)];
   } finally { await S.done(); }
 }
 
@@ -860,6 +929,26 @@ function crossings(list, room, key, tag) {
   }
   return { bad, inside };
 }
+// A walk back is the way the figure came in (turnBack): every reading after it turned round lies on the line it had walked until then, from the entrance to the point where it turned. A
+// walk steps exactly onto each corner of its path (stepWalk ends a frame on the point it reaches), so the line the readings make IS the path: TRAIL_TOL (5 cm) only absorbs rounding, and
+// a corner cut in the hall (0.15 m beside a door in the back wall, more beside a front door) is seen. Returns { bad, n, max }: the readings after the turn that are further than that from
+// the trail, how many were read, and the furthest.
+const TRAIL_TOL = 0.05;
+const segDist = (x, z, a, b) => { const vx = b[0] - a[0], vz = b[1] - a[1], l2 = vx * vx + vz * vz, t = l2 ? Math.max(0, Math.min(1, ((x - a[0]) * vx + (z - a[1]) * vz) / l2)) : 0; return Math.hypot(x - (a[0] + vx * t), z - (a[1] + vz * t)); };
+function retrace(list, tag) {
+  const t = list.findIndex(e => e.turn);
+  if (t < 1) return { bad: [], n: 0, max: 0 };
+  const trail = list.slice(0, t + 1).filter(e => e.k !== 'remove' && e.vis !== false).map(e => [e.x, e.z]);
+  const bad = []; let n = 0, max = 0;
+  for (const e of list.slice(t + 1)) {
+    if (e.vis === false) continue;
+    let d = Infinity;
+    for (let i = 1; i < trail.length; i++) d = Math.min(d, segDist(e.x, e.z, trail[i - 1], trail[i]));
+    n++; max = Math.max(max, d);
+    if (d > TRAIL_TOL && bad.length < 3) bad.push(`${tag}: ${d.toFixed(2)} m from the way it came in at (${f1(e.x)}, ${f1(e.z)}) walking out`);
+  }
+  return { bad, n, max };
+}
 const turnDiff = (a, b) => Math.abs((((a - b + Math.PI) % (2 * Math.PI)) + 2 * Math.PI) % (2 * Math.PI) - Math.PI);      // the angle between two headings, whatever turns the figure has made
 
 // ---- 3d-walk-seats
@@ -1003,7 +1092,7 @@ async function runTurnBack(ctx) {
     for (const id of [...subs, 'tb2']) if (!(await gone(page, id, 240000))) problems.push(`${short(id)} never left`);
     const st = await ev(page, '({ rec: s.rec.take(), office: o.office() })');
     const lists = byId(st.rec);
-    let turnedIn = 0, inside = 0;
+    let turnedIn = 0, inside = 0, retraced = 0, farthest = 0;
     for (const id of [...subs, 'tb2']) {
       const l = lists.get(id);
       if (!l) { problems.push(`${short(id)}: not recorded`); continue; }
@@ -1012,6 +1101,9 @@ async function runTurnBack(ctx) {
       const c = crossings(l, r, key, short(id));
       problems.push(...c.bad);
       inside += c.inside;
+      const rt = retrace(l, short(id));
+      problems.push(...rt.bad);
+      retraced += rt.n; farthest = Math.max(farthest, rt.max);
       const t = l.find(e => e.turn);
       if (t) {
         const lx = t.x - r.box.X, lz = t.z - r.box.Z;
@@ -1022,7 +1114,7 @@ async function runTurnBack(ctx) {
     if (turnedIn < 7) problems.push(`only ${turnedIn} figures were seen turning round inside the office (want 7 or more)`);
     problems.push(...(await books(page)));
     if (errorsOf(page).length) problems.push(`console error: ${errorsOf(page)[0].slice(0, 120)}`);
-    return [report('3d-walk-turnback', problems, `${ended.size} of 13 jobs (12 sub-agents and a chat's chief) ended while the person was inside the office, at depths from 0.35 m to nearly the seat; ${turnedIn} were seen turning round inside it: each walked back out the way it came, clear of the furniture (${inside} readings inside the office), with no jump, and was removed at the entrance`)];
+    return [report('3d-walk-turnback', problems, `${ended.size} of 13 jobs (12 sub-agents and a chat's chief) ended while the person was inside the office, at depths from 0.35 m to nearly the seat; ${turnedIn} were seen turning round inside it: each walked back out the way it came (${retraced} readings of the walks back, none more than ${farthest.toFixed(2)} m from the line walked in, the limit is ${TRAIL_TOL}), clear of the furniture (${inside} readings inside the office), with no jump, and was removed at the entrance`)];
   } finally { await S.done(); }
 }
 
@@ -1550,6 +1642,12 @@ const MUTATIONS = [
   { name: 'every seat has the old fixed height of the hip', file: 'public/js/ofis.js', from: 'const seatHip = c => (c.seat && c.seat.hip) || PK_SEAT;', to: 'const seatHip = c => PK_SEAT;', fails: 'seats' },
   { name: 'the seat a person walks to is not recorded: it sits on no seat of its own', file: 'public/js/ofis.js', from: '    c.seat = seatFor(room, seatKey(c, c.slot));\n    c.root.position.set(route[0].x, 0, route[0].z);', to: '    c.root.position.set(route[0].x, 0, route[0].z);', fails: 'seats' },
   { name: '?arrive=calm is ignored', file: 'public/js/ofis.js', from: "{ rush: instant && !CALM_LOAD,", to: "{ rush: instant,", fails: 'calm' },
+  // guards that no check had (each was broken in a scratch copy and the walk checks still passed)
+  { name: 'the chief\'s screen is on before the chief has sat', file: 'public/js/ofis.js', from: "if (!ch || ch.mode !== 'seated' || ch.sit < 0.85) { col = SCR_OFF; }", to: 'if (!ch) { col = SCR_OFF; }', fails: 'load' },
+  { name: 'a figure that waits at the entrance can be hovered and clicked', file: 'public/js/ofis.js', from: 'for (const c of chars.values()) if (c.delay <= 0) objs.push(c.hit);', to: 'for (const c of chars.values()) objs.push(c.hit);', fails: 'rebuild' },
+  { name: 'a gone agent\'s balloon stays on above the figure that walks out', file: 'public/js/ofis.js', from: 'if (!a) { c.bal.want = false; continue; }', to: 'if (!a) { continue; }', fails: 'leave' },
+  { name: 'a sub-agent that is wanted again takes the first free seat, not the one it left', file: 'public/js/ofis.js', from: 'slot = c.slotWas >= 0 && c.slotWas < room.cap && !room.slotChar[c.slotWas] ? c.slotWas : room.slotChar.indexOf(null);', to: 'slot = room.slotChar.indexOf(null);', fails: 'flap' },
+  { name: 'a walk back cuts the corner in the hall instead of taking the way it came in', file: 'public/js/ofis-arrive.js', from: '...path.slice(0, Math.max(0, Math.min(pi, path.length))).reverse()]);', to: '...path.slice(0, Math.max(0, Math.min(pi, path.length))).filter((_, i) => i !== 1).reverse()]);', fails: 'turnback' },
   // the lights follow the people (3d-walk-lights; `parts` are the scenes that guard the line)
   { name: 'the lights follow the data again: an office with a chat is lit at once, a vacant one is dark', file: 'public/js/ofis.js', from: '    for (const [slot, on] of lightOut) decor.setLit(slot, on, instant);', to: '    for (const r of rooms) decor.setLit(r.slot, r.owner !== null, instant);', fails: 'lights', parts: ['main'] },
   { name: 'the lights go off the moment a chat closes, with its people still walking out', file: 'public/js/ofis-presence.js', from: 'out.set(r.slot, inside || (r.owner !== null && st.entered));', to: 'out.set(r.slot, r.owner !== null && (inside || st.entered));', fails: 'lights', parts: ['main'] },
