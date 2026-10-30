@@ -53,7 +53,10 @@ const BUDGET = { calls: 190, tris: 215000, rebuildMs: 220, modelBytes: 1.5e6 };
 // them): the scene takes 115k triangles and 63 draw calls, a rebuild takes 67 to 86 ms on a machine with a load of 30. The limits are the
 // measurement plus 10 percent (the time is the 100 ms of the target). A vacant office may cost at most 15 percent of an office with a chat (it
 // costs 8 to 9 percent; with its own door leaf, floor and sign meshes it is 20 percent and 79 draw calls: a mutation below).
-const TYPICAL = { calls: 70, tris: 126000, rebuildMs: 100, lighter: 0.15 };
+// Measured on the merged X with the room styles (11 offices, 3 chats): 110k triangles and 71 draw calls. The two rows with the room styles (10 offices,
+// 58fba7d) measured 66 and the X without them 63; the cause of the difference was not traced. The call limit is 71 plus 10 percent. A vacant office with
+// meshes of its own is still 86 calls (the mutation below).
+const TYPICAL = { calls: 78, tris: 126000, rebuildMs: 100, lighter: 0.15 };
 const COLOUR_MIN_PX = 40;                               // pixels of the agent's colour on a figure's own pixels at zoom 150
 const NOISE = /\/local\/ofis-extras\.js/;               // the old scene probes an optional file that is absent (a 404 by design)
 
