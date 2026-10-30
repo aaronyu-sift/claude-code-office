@@ -2,7 +2,7 @@
 // the server against a fake ~/.claude, one `CHECK <name> PASS|FAIL <detail>` line per check and a final `QA PASS` or `QA FAIL`.
 //   node tools/qa/office3d-env-qa.mjs [--only settings|time|weather|season] [--mutations]      (--only also narrows the mutations to the ones that guard that check)
 //
-//   3d-settings  the popover shows for the 3D scene with the rows it supports (no camera row), a choice is applied and remembered across a reload and by the pixel scene,
+//   3d-settings  the popover shows for the 3D scene with the rows it supports (no camera row, the agent lounge row last), a choice is applied and remembered across a reload and by the pixel scene,
 //                the address (?time ?hour ?season ?weather ?hemisphere ?shelf) wins over what is stored and is not stored, and follows a change made with the controls
 //   3d-time      a fixed 03:00 and 13:00 give clearly different lit windows and sun intensity; the change is eased (sampled frame by frame at a constant rate, never a step); dawn
 //                and dusk follow the month and the hemisphere; the popover slider, ?time= and ?hour= reach the light; ?env=0 still leaves the surroundings out
@@ -31,7 +31,7 @@ const stored = text => { try { return JSON.parse(text); } catch { return null; }
 const popRows = `(() => [...document.querySelectorAll('#set-pop .set-row')].filter(r => getComputedStyle(r).display !== 'none').map(r => r.dataset.row || (r.classList.contains('set-time') ? 'time-slider' : '?')))()`;
 const state = `(() => { const n = document.querySelector('#set-note'), q = id => document.querySelector('#' + id), w = q('set-wrap');
   return JSON.stringify({ wrapShown: !w.hidden, headerCamera: !q('proj-seg').hidden, open: !q('set-pop').hidden, rows: ${popRows}, stored: localStorage.getItem('ajan-ofisi.settings'), url: location.search,
-    season: q('set-season').value, hemi: q('set-hemisphere').value, weather: q('set-weather').value, shelf: q('set-shelf').value,
+    season: q('set-season').value, hemi: q('set-hemisphere').value, weather: q('set-weather').value, shelf: q('set-shelf').value, lounge: q('set-lounge').value,
     timeMode: [...document.querySelectorAll('#set-time-mode button')].find(b => b.getAttribute('aria-pressed') === 'true')?.dataset.v, slider: q('set-time').value, sliderOut: q('set-time-out').textContent,
     note: n.hidden ? '' : n.textContent, scene: document.querySelector('#view-ofis').dataset.scene }); })()`;
 
@@ -78,9 +78,9 @@ async function runSettings(ctx) {
     const s1 = await d.st();
     const fixedBtn = await d.click('#set-time-mode button[data-v="fixed"]'); await sleep(200);
     const s1b = await d.st();
-    await d.sel('set-season', 'winter'); await d.sel('set-weather', 'rain'); await d.sel('set-hemisphere', 'south'); await d.sel('set-shelf', '20'); await d.range(1320); await sleep(400);
+    await d.sel('set-season', 'winter'); await d.sel('set-weather', 'rain'); await d.sel('set-hemisphere', 'south'); await d.sel('set-shelf', '20'); await d.sel('set-lounge', 'names'); await d.range(1320); await sleep(400);
     const s2 = await d.st();
-    const E = { time: '22:00', season: 'winter', weather: 'rain', hemisphere: 'south', shelf: 20 };
+    const E = { time: '22:00', season: 'winter', weather: 'rain', hemisphere: 'south', shelf: 20, lounge: 'names' };
     const s3 = await load('?scene=3d');                                                      // reload, no parameters: what was chosen is still there
     await d.click('#set-btn'); await sleep(250);
     const s3o = await d.st();
@@ -102,10 +102,10 @@ async function runSettings(ctx) {
 
     const C = {
       shown: s0.scene === '3d' && s0.wrapShown && !s0.headerCamera && opened && s1.open,
-      rows: same(s1.rows, ['time', 'season', 'hemisphere', 'weather', 'shelf', 'project']) && !s1.rows.includes('camera'),
-      slider: fixedBtn && same(s1b.rows, ['time', 'time-slider', 'season', 'hemisphere', 'weather', 'shelf', 'project']) && s1b.timeMode === 'fixed',
-      applied: s2.season === 'winter' && s2.weather === 'rain' && s2.hemi === 'south' && s2.shelf === '20' && s2.sliderOut === '22:00' && same(stored(s2.stored), E) && s2.url === '?scene=3d',
-      reload: s3.wrapShown && same(stored(s3.stored), E) && s3o.season === 'winter' && s3o.weather === 'rain' && s3o.hemi === 'south' && s3o.shelf === '20' && s3o.timeMode === 'fixed' && s3o.sliderOut === '22:00' && same(s3o.rows, s1b.rows),
+      rows: same(s1.rows, ['time', 'season', 'hemisphere', 'weather', 'shelf', 'project', 'lounge']) && !s1.rows.includes('camera') && s1.lounge === 'text',
+      slider: fixedBtn && same(s1b.rows, ['time', 'time-slider', 'season', 'hemisphere', 'weather', 'shelf', 'project', 'lounge']) && s1b.timeMode === 'fixed',
+      applied: s2.season === 'winter' && s2.weather === 'rain' && s2.hemi === 'south' && s2.shelf === '20' && s2.lounge === 'names' && s2.sliderOut === '22:00' && same(stored(s2.stored), E) && s2.url === '?scene=3d',
+      reload: s3.wrapShown && same(stored(s3.stored), E) && s3o.season === 'winter' && s3o.weather === 'rain' && s3o.hemi === 'south' && s3o.shelf === '20' && s3o.lounge === 'names' && s3o.timeMode === 'fixed' && s3o.sliderOut === '22:00' && same(s3o.rows, s1b.rows),
       pixel: pixel && Object.keys(E).every(k => pixel.settings[k] === E[k] && pixel.from[k] === 'stored'),                       // the keys this check set; the pixel scene has more (`project`)
       url: same(stored(s4.stored), E) && s4o.season === 'spring' && s4o.weather === 'fog' && s4o.hemi === 'north' && s4o.shelf === '7' && s4o.timeMode === 'fixed' && s4o.sliderOut === '03:00'
         && /season=spring/.test(s4o.note) && /time=03:00/.test(s4o.note.replace(/\u2060/g, '')) && /shelf=7/.test(s4o.note.replace(/\u2060/g, '')),
@@ -117,7 +117,7 @@ async function runSettings(ctx) {
     const bad = Object.keys(C).filter(k => !C[k]), ok = bad.length === 0;
     return [make('3d-settings', ok,
       `${ok ? '' : 'FAILED PARTS: ' + bad.join(', ') + '; '}3D scene: popover button shown ${s0.wrapShown}, header camera toggle shown ${s0.headerCamera}, rows ${s1.rows.join('/')} (camera row hidden), after Fixed: ${s1b.rows.join('/')}; `
-      + `chosen winter, rain, south, shelf 20, 22:00 -> stored ${s2.stored}, address unchanged ${s2.url}; after a reload the popover reads ${s3o.season}, ${s3o.weather}, ${s3o.hemi}, shelf ${s3o.shelf}, ${s3o.timeMode} ${s3o.sliderOut}; `
+      + `chosen winter, rain, south, shelf 20, lounge names, 22:00 -> stored ${s2.stored}, address unchanged ${s2.url}; after a reload the popover reads ${s3o.season}, ${s3o.weather}, ${s3o.hemi}, shelf ${s3o.shelf}, lounge ${s3o.lounge}, ${s3o.timeMode} ${s3o.sliderOut}; `
       + `the pixel scene (?scene=pixel) starts with ${pixel ? JSON.stringify(pixel.settings) : 'no scene'}; address ?season=spring&weather=fog&time=03:00&hemisphere=north&shelf=7 -> popover ${s4o.season}, ${s4o.weather}, ${s4o.hemi}, shelf ${s4o.shelf}, ${s4o.timeMode} ${s4o.sliderOut}, store unchanged ${same(stored(s4.stored), E)}, note "${s4o.note.replace(/\u2060/g, '').slice(0, 90)}"; `
       + `?hour=21.5 -> ${s5o.timeMode} ${s5o.sliderOut}, then a change of the slider gives address ${s5c.url}; ?season=spring then autumn chosen -> ${s6.url}`)];
   } finally { await S.done(); }
