@@ -954,7 +954,7 @@ export function createOfis(root, ctx, opts = {}) {
   }
 
   // An office, occupied or vacant. The walls, floor, furniture and look are a property of the slot (ofis-arrange.js looksAll and planRoom), so a vacant office is the very room a chat
-  // gets, with the lights off (decor.setLit through lightsFor) and nobody in it. What only an occupied office has: the sign with the chat's name, the door leaf, the dark overlay of a
+  // gets, with the lights off once nobody is in it (the light follows the people: ofis-presence.js, decor.setLit through lightsFor). What only an occupied office has: the sign with the chat's name, the door leaf, the dark overlay of a
   // sleeping chat, the beam and the rings of a chat that waits, and the boxes the pointer hits. A vacant office has a blank sign (addVacantSigns), a shut door of boxes (buildShell quiet)
   // and only its two outer walls block the pointer. Every office has the seats of the largest class (12 besides the chat's own): the class only says how many are in use.
   // `open`: a person is still walking out of this vacant office (its chat has just left), so for this build its door is a real, hinged one that opens for the person (the shut door of
