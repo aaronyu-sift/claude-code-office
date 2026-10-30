@@ -17,6 +17,10 @@ export const SAY_MAX = 56;       // characters of the line of what an agent just
 
 export const clipTxt = (s, n) => { s = String(s || ''); return s.length > n ? s.slice(0, n - 1) + '…' : s; };
 
+// A label's markup without the text of its running clocks (an element with `data-since` is kept current by the page's ticker, main.js): two markups that differ only in the seconds are
+// the same label, so a waiting chat's label is not rebuilt every second (a rebuild restarts the animation of its chip and its balloon, and measures it again).
+export const unticked = html => String(html).replace(/(<[^>]*data-since="[^"]*"[^>]*>)[^<]*/g, '$1');
+
 // the description of a sub-agent cut at a word (the whole description if it fits): its description, else its type, else the word for "subagent"
 export function shortDesc(s, fallback = t('agent.sub'), max = DESC_MAX) {
   const d = String(s.desc || s.atype || fallback).trim().replace(/\s+/g, ' ');
