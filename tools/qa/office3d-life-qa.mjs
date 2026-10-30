@@ -73,6 +73,9 @@ async function observe({ tag, n, query, reducedMotion = false, root, pictures = 
     const out = { tag, problems: [], notes: [] };
     const bad = m => out.problems.push(`${tag}: ${m}`);
     if (!S.ready.ok) { bad(`the scene did not become ready (${JSON.stringify(S.ready.last)})`); return out; }
+    // the lights follow the people (ofis-presence.js): an office with a chat is lit once its chief is through the door; the harness has ended every walk (s.settle()), so the
+    // chiefs are seated and the ease of the lights (a fraction of a second on the wall clock) is waited out here; a vacant office stays dark
+    for (let t = 0; t < 20 && (await page.evaluate(o3('o.looks().some(l => l.lit !== 0 && l.lit !== 1)'))); t++) await sleep(250);
     const rooms = fx.agents.filter(a => a.status !== 'dormant');                       // an asleep chat is on the shelf: it has no room
     out.rooms = rooms.length;
     const err = page.errors.filter(e => !/\/local\/ofis-extras\.js/.test(e));
@@ -237,7 +240,7 @@ const MUTATIONS = [
   { name: 'the flicker is three times as strong', file: L, from: 'candle: 0.07', to: 'candle: 0.3', scenes: ['night'] },
   { name: 'the flicker never moves', file: L, from: 'if (reduced) return 1;', to: 'if (true) return 1;', scenes: ['night'] },
   { name: 'every lamp is its own mesh: 40 more draw calls', file: D, from: "      out.lights = lights;\n", to: "      out.lights = lights;\n      for (let i = 0; i < 40; i++) g.add(new THREE.Mesh(new THREE.BoxGeometry(0.01, 0.01, 0.01), new THREE.MeshBasicMaterial()));\n", scenes: ['day'] },
-  { name: 'a vacant office has its lamps and windows lit at night', file: O, from: 'for (const it of items) decor.setLit(it.slot, !it.vacant, instant);', to: 'for (const it of items) decor.setLit(it.slot, true, instant);', scenes: ['night'] },
+  { name: 'a vacant office has its lamps and windows lit at night', file: 'public/js/ofis-presence.js', from: 'out.set(r.slot, inside || (r.owner !== null && st.entered));', to: 'out.set(r.slot, true);', scenes: ['night'] },
   { name: 'a vacant office has no lamp: it is furnished without its lights', file: D, from: "      for (const l of plan.lights) build.lights.push(", to: "      for (const l of plan.lights.filter(l => roomId.startsWith('vacant') ? l.kind === 'screen' : true)) build.lights.push(", scenes: ['night'] },
 ];
 

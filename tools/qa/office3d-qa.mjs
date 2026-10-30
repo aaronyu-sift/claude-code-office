@@ -10,8 +10,8 @@
 //                figure its place, a new chat takes the lowest free slot, and the camera is not refitted while the building stays the same
 //   3d-vacant    3 chats in the 11 offices of the X (8 vacant, and the hub plaza): the building as it is used stays inside its budget (triangles, draw
 //                calls, rebuild time), and a vacant office is the room a chat gets with the lights off: the same slot, vacant at 3 chats and with a chat at 10,
-//                draws the same furniture (the plan's hash and its triangles) and the same look, its light is 0 then 1, and its triangles differ by the door and
-//                the sign only (public/js/ofis-arrange.js, ofis-decor.js; the coworking checks are in office3d-cowork-qa.mjs)
+//                draws the same furniture (the plan's hash and its triangles) and the same look, its light is 0 then 1 (on once the chat's chief is through the door: the
+//                walks are ended with the QA hook settle(), because in software GL a chief takes 15 to 28 s), and its triangles differ by the door and the sign only (public/js/ofis-arrange.js, ofis-decor.js; the coworking checks are in office3d-cowork-qa.mjs)
 //   3d-expand    a chat whose sub-agents outgrow its 6 desks grows its room inside its cell and nothing else changes; the 11th chat takes the last office of
 //                the X (no change); the 12th chat adds a bay (two offices): the first eleven offices, the hub, the reception, their chats and the sub-agents
 //                still walking stay as they are, and the view refits once
@@ -48,7 +48,7 @@ const BUDGET = { calls: 181, tris: 176000, rebuildMs: 175, modelBytes: 1.5e6 };
 // 3d-vacant is the building as it is used: 3 chats in the 11 offices of the X, 8 of them vacant. A vacant office is the same room as an occupied one (before it was a shell with a few bare
 // desks at a tenth of the cost, and a rule that it costs at most 15 percent): now it costs the same minus the people and the overlays, so the rule is parity. The same slot, vacant with
 // 3 chats and occupied with 10, must draw the same furniture (the hash of what the plan drew, and the triangles it added) and differ in the lights only (off while vacant, on with a
-// chat); its triangles in the batch may differ by the door (a closed one in the batch while vacant) and the sign, which are PARITY.tris at most. Measured: 146.1k triangles, 69 draw
+// chat whose chief is in the office); its triangles in the batch may differ by the door (a closed one in the batch while vacant) and the sign, which are PARITY.tris at most. Measured: 146.1k triangles, 69 draw
 // calls, a rebuild of 150 to 160 ms (before: 111.6k, 76 calls, 73 to 131 ms: eight vacant offices were a shell each); the limits are that plus 10 percent. A vacant office with
 // meshes of its own again (a door leaf, floor and sign each) is 77 calls: a mutation below.
 const TYPICAL = { calls: 76, tris: 161000, rebuildMs: 176 };
@@ -241,7 +241,7 @@ const MUTATIONS = [
   { name: 'a room is built for 3 desks: the fourth sub-agent changes it', file: 'public/js/ofis-layout.js', from: 'export const BASE_CLS = 1;', to: 'export const BASE_CLS = 0;', group: 'stable', fails: '3d-stable-layout' },
   // the vacant office is the slot's own room with the lights off: the same furniture, nobody in it, and still no meshes of its own
   { name: 'a vacant office is planned from another seed than the same slot with a chat', file: 'public/js/ofis.js', from: 'const plan = planRoom(lookOf(look), { door: it.door });', to: 'const plan = planRoom(lookOf(vac ? { ...look, seed: look.seed + 1 } : look), { door: it.door });', group: 'stable', fails: '3d-vacant' },
-  { name: 'a vacant office keeps its lights on', file: 'public/js/ofis.js', from: 'for (const it of items) decor.setLit(it.slot, !it.vacant, instant);', to: 'for (const it of items) decor.setLit(it.slot, true, instant);', group: 'stable', fails: '3d-vacant' },
+  { name: 'a vacant office keeps its lights on', file: 'public/js/ofis-presence.js', from: 'out.set(r.slot, inside || (r.owner !== null && st.entered));', to: 'out.set(r.slot, true);', group: 'stable', fails: '3d-vacant' },
   { name: 'a vacant office has its own door leaf, floor and sign meshes again', file: 'public/js/ofis.js', from: 'buildShell(B, g, X, Z, W, D, th, it.door, vac && !open)', to: 'buildShell(B, g, X, Z, W, D, th, it.door, false)', group: 'stable', fails: '3d-vacant' },
   { name: 'a vacant office has a different look from the slot with a chat (the style follows the chat)', file: 'public/js/ofis.js', from: 'const look = world.looks.get(it.slot);', to: 'const look = it.vacant ? { ...world.looks.get(it.slot), style: (world.looks.get(it.slot).style + 1) % 6 } : world.looks.get(it.slot);', group: 'stable', fails: '3d-vacant' },
   { name: 'a rebuild seats the sub-agents that are still walking', file: 'public/js/ofis.js', from: "      if (walking) {\n        if (moved) startWalk(c, out ? leadOut(way, pos, c.path, c.pi) : rejoin(was, route, pos, c.path, c.pi), c.after);\n        continue;\n      }", to: "      if (walking) {\n        if (!out) { const e = route[route.length - 1]; pos.x = e.x; pos.z = e.z; c.path = null; c.mode = 'seated'; c.after = null; }\n        continue;\n      }", group: 'stable', fails: '3d-expand' },
@@ -363,7 +363,10 @@ async function runStable(ctx) {
     const rebuilds3 = [];
     for (let i = 0; i < 3; i++) rebuilds3.push(await page.evaluate(o3('o.rebuildNow()')));
     const best3 = Math.min(...rebuilds3);
-    const s3 = await settle(3);
+    // the lights follow the people (ofis-presence.js): an office with a chat is lit once its chief is through the door, so the walks are ended (the QA hook the app never calls), then the light's ease is waited out
+    await page.evaluate(o3('s.settle()'));
+    let s3 = await settle(3);
+    for (let t = 0; t < 20 && s3.looks.some(l => l.lit !== 0 && l.lit !== 1); t++) { await sleep(250); s3 = await read(); }
     const first = s3.office.slots.map(rectKey);
     if (s3.office.slots.length !== OFFICES || s3.office.bays !== BAYS || vacant(s3) !== OFFICES - 3 || !s3.office.lounge) problems.push(`3 chats: ${s3.office.slots.length} offices in ${s3.office.bays} bays, ${vacant(s3)} vacant, hub ${s3.office.lounge ? 'reserved' : 'missing'} (want ${OFFICES} in ${BAYS}, ${OFFICES - 3} vacant, a hub)`);
     if (![0, 1, 2].every(i => slotOf(s3).get(id(i)) === i)) problems.push(`3 chats: slots ${[0, 1, 2].map(i => slotOf(s3).get(id(i)))} (want 0,1,2)`);
@@ -400,7 +403,10 @@ async function runStable(ctx) {
     // ---- 10 chats
     [7, 8, 9].forEach(open);
     let s10 = await settle(10);
-    for (let t = 0; t < 20 && s10.looks.some(l => l.lit !== 0 && l.lit !== 1); t++) { await sleep(250); s10 = await read(); }       // the lights of the new offices ease on over a fraction of a second
+    await page.evaluate(o3('s.settle()'));                      // the three new chiefs are through their doors (the lights follow the people), then the lights of the new offices ease on over a fraction of a second
+    await sleep(500);
+    s10 = await read();
+    for (let t = 0; t < 20 && s10.looks.some(l => l.lit !== 0 && l.lit !== 1); t++) { await sleep(250); s10 = await read(); }
     problems.push(...compare(s7, s10, '7 -> 10 chats'));
     const par = parityOf(s3.looks, s10.looks, s3.office, s10.office);
     vacantProblems.push(...par.bad);
