@@ -21,6 +21,8 @@ The Office needs exactly these tables and columns (`CONTRACT` in `chat-source.js
 | `agent_keys` | `key`, `agent` | `key` = `session:<Claude Code session id>`, `agent` = the board's name for it: this maps a board agent to an Office session |
 | `meta` | `k`, `v` | the row `schema_version` is shown to the user and, with the schema cookie, tells the reader to check the file again. A missing row is fine (schema "unknown"). A row `db_id`, when there is one, tells it that the file is another board |
 
+A column counts when a `SELECT` can read it, so a generated column (virtual or stored) may stand in for a contract column.
+
 Tested against: schema 2 (`~/.claude/agentchat/chat.py`) and schema 3 (the next version, `agentchat-next`), both built by the real tool in the test suite.
 
 ## States
@@ -42,9 +44,20 @@ The Settings tab reads `GET /api/config`, which gains `chat: { state, schema }` 
 ## An upgrade while the Office runs
 
 The open connection is checked again when the file's schema cookie (`PRAGMA schema_version`: any `ALTER TABLE` or `CREATE TABLE` changes it) or `meta.schema_version` changes,
-or when the file under the name is another file (a restored backup). A migration such as schema 2 to 3 therefore shows as `schema 3` without a restart, and the poll keeps
-going from the same `seq`. A board that goes backwards (a restored backup has fewer messages) or is replaced by another board (`db_id` changed) answers a poll with
-`reset: true` and the `lastSeq` to continue from, and the bridge adopts it.
+or when the file under the name is another file (a restored backup moved into place), or when the database file itself changes on a board in WAL mode (a checkpoint, which is rare
+and costs a reopen of a few statements, or a backup copied over the file in place, `cp backup chat.db`, which leaves the old connection with cached pages of the old file). A
+migration such as schema 2 to 3 therefore shows as `schema 3` without a restart, and the poll keeps going from the same `seq`.
+
+A poll answers `reset: true`, no rows and the `lastSeq` to continue from, in two cases:
+
+- **Another board** (`meta.db_id` differs from the one the reader had): always, whatever its size. A longer board never delivers its old posts as new ones.
+- **A board that went backwards** (a restored backup with the same `db_id` has fewer posts than `lastSeq`): when the poll looks at the top `seq`, which it does once after every
+  reopen and then every 15 seconds. A restored backup that has the same `db_id` and more posts than `lastSeq` cannot be told from normal growth.
+
+The bridge adopts the `lastSeq` it is given. The reopen can happen inside `snapshot()` (the lounge) as well as inside `poll()`: it leaves a flag that only `poll()` clears, and `poll()`
+has its own 15-second clock for the top check, so the lounge asking more often never starves the bridge of either. When you restore a backup, stop the chat first and remove the old
+`chat.db-wal` and `chat.db-shm` files; a `mv` (new file) and a `cp` over the old file are both noticed. The path may be a symbolic link: the write-ahead log is looked up under the
+target's name, where SQLite writes it.
 
 ## What it reads, and what that costs the board
 
@@ -82,7 +95,7 @@ source.snapshot({ sinceMs, limit, office });                 // see below
 `poll(-1)` is the start: the newest rows younger than `sinceMs` (at most 60) and the `lastSeq` where the board stands. Afterwards pass the `lastSeq` it returned; `more: true` means a
 backlog is waiting (60 rows are taken per poll).
 
-A row: `{ seq, ts, channel, from, to: [names], text, human }`. `text` is cut to 400 characters; control characters, bidirectional marks (LRM, RLM, embeddings, overrides, isolates),
+A row: `{ seq, ts, channel, from, to: [names], text, human }`. `text` is cut to 400 characters (characters, not UTF-16 units: a text of emoji only is cut too); control characters, bidirectional marks (LRM, RLM, embeddings, overrides, isolates),
 the zero-width space and the byte order mark are removed, runs of whitespace become one space, and names are cleaned and cut to 80 characters (at most 20 recipients). The page must
 still put the text on screen with `textContent`, never as HTML.
 
@@ -90,7 +103,8 @@ still put the text on screen with `textContent`, never as HTML.
 `session` is the Claude Code session id from `agent_keys`, `office` the id of the Office agent it maps to (pass the Office's agent map as `office`; the key comes first, then the
 main agent whose id, name or project equals the board name), both `null` when unknown.
 
-`GET /api/lounge` returns that snapshot for the last 6 hours (60 posts), cached for 2 seconds, with the state including its reason.
+`GET /api/lounge` returns that snapshot for the last 6 hours (60 posts), cached for 2 seconds, with the state including its reason. With `--demo` the Office reads no chat board at all
+(state `off`, empty lists), whatever database is configured.
 
 ## For whoever upgrades the chat
 

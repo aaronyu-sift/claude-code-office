@@ -8,8 +8,10 @@
 //  - CONTRACT-ONLY. It uses the tables and columns of CONTRACT and nothing else. Extra tables, extra columns, an index, a full-text table or a
 //    vector file next to the database are ignored. A missing contract column or table, or a file that cannot be read, gives the state
 //    "unsupported" with a one-line reason; a missing file gives "off". Nothing here throws into the server loop.
-//  - UPGRADE-SAFE. The database is reopened and checked again when its schema cookie or meta.schema_version changes, or when the file is replaced
-//    (another inode), so a migration that runs while the Office runs is picked up without a restart.
+//  - UPGRADE-SAFE. The database is reopened and checked again when its schema cookie or meta.schema_version changes, when the file is replaced
+//    (another inode) or, on a WAL board, when the database file itself changes (a backup copied over it in place), so a migration or a restore
+//    that happens while the Office runs is picked up without a restart. poll() answers reset when the board is another one (meta.db_id) or went
+//    backwards.
 //  - CHEAP. poll() reads by the primary key (seq > last, at most POLL_MAX_ROWS rows, never a scan, never a sort on an unindexed column), runs at
 //    most once per POLL_MIN_MS, and runs no SQL at all while the file (database and -wal) is unchanged: it compares two stat() results, and
 //    only every CHECK_EVERY_MS does it look at the database anyway, as a safety net.
@@ -71,7 +73,9 @@ function clean(v, n) {
   let s = typeof v === 'string' ? v : String(v);
   s = s.replace(SPACEY, ' ').replace(STRIP, '').replace(/\s{2,}/g, ' ').trim();
   if (s.length <= n) return s;                       // fewer UTF-16 units means fewer characters
-  const chars = Array.from(s.slice(0, n * 2));       // whole characters: a cut never splits a surrogate pair
+  // Whole characters: a cut never splits a surrogate pair. 2n+2 units hold at least n+1 characters when the text is longer than that (a character is
+  // at most 2 units), so a text of astral characters only (emoji) is cut too; a shorter text is counted exactly.
+  const chars = Array.from(s.slice(0, n * 2 + 2));
   return chars.length > n ? chars.slice(0, n - 1).join('') + '…' : s;
 }
 
@@ -130,7 +134,8 @@ function inspect(db) {
   let statements = 0;                // how many queries this check ran (counted in stats.statements)
   for (const [table, cols] of Object.entries(CONTRACT)) {
     statements++;
-    const names = new Set(db.prepare(`PRAGMA table_info(${table})`).all().map(c => String(c.name).toLowerCase()));
+    // table_xinfo, not table_info: the latter hides generated columns, which a SELECT reads like any other
+    const names = new Set(db.prepare(`PRAGMA table_xinfo(${table})`).all().map(c => String(c.name).toLowerCase()));
     if (!names.size) { problems.push(`table ${table} is missing`); continue; }
     have[table] = true;
     const miss = cols.filter(c => !names.has(c));
@@ -194,16 +199,21 @@ function findOfficeAgent(office, name, sids) {
 function createChatSource(dbPath, { log = console.error, now: clock = Date.now, busyMs = BUSY_MS } = {}) {
   const file = dbPath ? String(dbPath) : null;
   const base = file ? path.basename(file) : '';
+  let realFile = file;          // the path with symbolic links resolved (at the last open): SQLite names the -wal file after it, not after the link
   let db = null;
   let stmts = null;
   let cur = { state: 'off', schema: null, reason: file ? '' : 'no chat database configured' };
   let shapeCookie = '', shapeVersion = '', identity = '';   // what the open connection was checked against
   let openIno = null;
-  let shapeSig = '';            // file signature at the last open or shape check
+  let shapeSig = '', shapeMain = '', shapeWal = '-';   // file signature (whole, database part, log part) at the last open or shape check
   let liveSig = null;           // the signature taken right after the last open
-  let checkedAt = -Infinity;
+  let checkedAt = -Infinity;    // the last slow shape check (ready()); poll() keeps its own clock for the board check, see topCheckAt
   let retryAt = 0;
-  let replacedFlag = false;     // the last open found another board (meta.db_id changed)
+  // Two flags that outlive the call that sets them: a reopen can happen inside snapshot() or poll(), whichever comes first, and poll() must still
+  // hear about it. Both are cleared by poll() only.
+  let needTop = true;           // the connection was (re)opened: poll() looks at the top seq once, in case the board went backwards
+  let resetPending = false;     // the last open found another board (meta.db_id changed): the next poll answers reset
+  let topCheckAt = -Infinity;   // the last time poll() looked at the top seq (its own safety-net clock, apart from the snapshot's)
   let started = false;          // has the state been worked out at least once
   let closed = false;
   let lastPollAt = -Infinity;
@@ -237,38 +247,37 @@ function createChatSource(dbPath, { log = console.error, now: clock = Date.now, 
     db = null;
   }
 
-  // identity, size and modification time of the database and of its write-ahead log: two stat calls, no SQL
+  // identity, size and modification time of the database and of its write-ahead log: two stat calls, no SQL. The log is looked up under the
+  // resolved name (realFile): with a symbolic link as the path SQLite writes <target>-wal, and <link>-wal never exists.
   function sigOf() {
-    const parts = [];
-    let ino = null;
-    for (const f of [file, file + '-wal']) {
-      let st = null;
-      try { st = fs.statSync(f, { bigint: true, throwIfNoEntry: false }); } catch { st = null; }
-      if (f === file) { if (!st) return null; ino = String(st.ino); }
-      parts.push(st ? `${st.ino}:${st.size}:${st.mtimeNs}` : '-');
-    }
-    return { key: parts.join('|'), ino };
+    const stat = f => { try { return fs.statSync(f, { bigint: true, throwIfNoEntry: false }) || null; } catch { return null; } };
+    const st = stat(file);
+    if (!st) return null;
+    const w = stat(realFile + '-wal');
+    const main = `${st.ino}:${st.size}:${st.mtimeNs}`, wal = w ? `${w.ino}:${w.size}:${w.mtimeNs}` : '-';
+    return { key: main + '|' + wal, ino: String(st.ino), main, wal };
   }
+  const remember = sig => { shapeSig = sig.key; shapeMain = sig.main; shapeWal = sig.wal; };
 
   // Open the file and check it against the contract. Sets the state. Returns true when it can be read.
   // Opening a WAL database can create its (empty) -wal and -shm files, so the signature is taken again afterwards: that one is the baseline.
   function attempt(t, sig) {
     const ok = open1(t, sig);
     liveSig = file ? sigOf() : null;
-    if (liveSig) { shapeSig = liveSig.key; if (ok) openIno = liveSig.ino; }
+    if (liveSig) { remember(liveSig); if (ok) openIno = liveSig.ino; }
     return ok;
   }
 
   function open1(t, sig) {
     closeDb();
-    replacedFlag = false;
     if (!file) { set('off', null, 'no chat database configured'); retryAt = Infinity; return false; }
     if (!sig) { set('off', null, 'database file not found: ' + base); retryAt = t + POLL_MIN_MS; return false; }
     if (!DatabaseSync) { set('unsupported', null, 'node:sqlite is not available in this Node (22.13 or newer is needed)'); retryAt = Infinity; return false; }
     stats.opens++;
-    shapeSig = sig.key;
+    remember(sig);
     let info;
     try {
+      try { realFile = fs.realpathSync.native(file); } catch { realFile = file; }
       db = openReadOnly(file, busyMs);
       info = inspect(db);
       stats.statements += info.statements;
@@ -297,7 +306,8 @@ function createChatSource(dbPath, { log = console.error, now: clock = Date.now, 
       return false;
     }
     if (cur.state === 'ok' && cur.schema !== info.schema) stats.reopens++;
-    replacedFlag = identity !== '' && info.identity !== '' && info.identity !== identity;
+    if (identity !== '' && info.identity !== '' && info.identity !== identity) resetPending = true;     // another board under the same name
+    needTop = true;
     shapeCookie = info.cookie; shapeVersion = info.version; identity = info.identity;
     openIno = sig.ino; checkedAt = t; retryAt = 0;
     set('ok', info.schema, '');
@@ -319,25 +329,29 @@ function createChatSource(dbPath, { log = console.error, now: clock = Date.now, 
     }
   }
 
-  // Make the connection ready for a read at time t; `sig` is the file signature taken just now.
-  // `checked` says the database was looked at (opened, or its shape verified); `replaced` says it is another board now.
+  // Make the connection ready for a read at time t; `sig` is the file signature taken just now. Returns { ok, sig }. When it had to reopen, it
+  // sets needTop (and resetPending for another board), which poll() acts on whoever made the reopen.
   function ready(t, sig) {
     started = true;
-    const no = () => ({ ok: false, checked: false, replaced: false, sig });
+    const no = () => ({ ok: false, sig });
     if (!file || closed) return no();
     if (!sig) {                                                // the file is gone, or was never there
       if (db || t >= retryAt || cur.state !== 'off') attempt(t, null);
       return no();
     }
-    const reopen = () => { const ok = attempt(t, sig); return { ok, checked: true, replaced: replacedFlag, sig: liveSig || sig }; };
+    const reopen = () => { const ok = attempt(t, sig); return { ok, sig: liveSig || sig }; };
     if (!db) return t < retryAt && sig.key === shapeSig ? no() : reopen();
     if (sig.ino !== openIno) return reopen();                  // another file under that name
+    // The database file itself changed. A board in WAL mode only changes it at a checkpoint (rare, and a reopen costs a few statements), or when
+    // somebody copied another file over it in place: that leaves this connection with pages of the old file in its cache, and only a new
+    // connection sees the new one. (A board in rollback-journal mode rewrites the file at every commit and SQLite notices that itself.)
+    if (sig.main !== shapeMain && (sig.wal !== '-' || shapeWal !== '-')) return reopen();
     const due = t - checkedAt >= CHECK_EVERY_MS;
-    if (sig.key === shapeSig && !due) return { ok: true, checked: false, replaced: false, sig };
+    if (sig.key === shapeSig && !due) return { ok: true, sig };
     if (!stillRight(due)) return reopen();
-    shapeSig = sig.key;
+    remember(sig);
     if (due) checkedAt = t;
-    return { ok: true, checked: due, replaced: false, sig };
+    return { ok: true, sig };
   }
 
   // a database error in the middle of a read: a busy file is retried, anything else drops the connection and says why
@@ -391,25 +405,32 @@ function createChatSource(dbPath, { log = console.error, now: clock = Date.now, 
       const r = ready(t, file ? sigOf() : null);
       if (!r.ok) return out;
       const sig = r.sig;
-      if (!first && !pending && !r.checked && sig.key === lastSig && lastSeq === gateSeq) { stats.idle++; return out; }   // same file, same place: nothing can be new
+      // the board is looked at from its top once after every open and then every CHECK_EVERY_MS, on this clock only (snapshot() has its own)
+      const check = needTop || t - topCheckAt >= CHECK_EVERY_MS;
+      if (!first && !pending && !check && sig.key === lastSig && lastSeq === gateSeq) { stats.idle++; return out; }   // same file, same place: nothing can be new
       const sinceMs = Number.isFinite(opts.sinceMs) ? opts.sinceMs : 0;
       let raw;
       if (first) {
         raw = all('newest', POLL_MAX_ROWS);                                             // newest first
         out.lastSeq = raw.length ? Math.max(0, Number(raw[0].seq) || 0) : 0;
         out.rows = raw.map(mapRow).filter(m => m && m.ts >= sinceMs).reverse();
-        pending = false;
+        pending = false; resetPending = false; needTop = false; topCheckAt = t;
+      } else if (resetPending) {                                                        // another board: its rows do not continue ours, whatever their number
+        const top = get('top');
+        out.reset = true; out.lastSeq = top ? Number(top.seq) || 0 : 0;
+        pending = false; resetPending = false; needTop = false; topCheckAt = t;
       } else {
         raw = all('rows', lastSeq);
         for (const m of raw) { const s = Number(m.seq); if (Number.isFinite(s) && s > out.lastSeq) out.lastSeq = s; }
         out.rows = raw.map(mapRow).filter(Boolean);
         out.more = raw.length >= POLL_MAX_ROWS;
         pending = out.more;
-        if (!raw.length && (r.replaced || r.checked)) {                                 // nothing new: did the board go backwards (a restored backup)?
+        if (!raw.length && check) {                                                     // nothing new: did the board go backwards (a restored backup)?
           const top = get('top');
           const topSeq = top ? Number(top.seq) || 0 : 0;
-          if (r.replaced || topSeq < lastSeq) { out.reset = true; out.lastSeq = topSeq; }
+          if (topSeq < lastSeq) { out.reset = true; out.lastSeq = topSeq; }
         }
+        if (raw.length || check) { needTop = false; topCheckAt = t; }                   // rows past lastSeq: the board is not behind us
       }
       lastSig = sig.key;
       gateSeq = out.lastSeq;

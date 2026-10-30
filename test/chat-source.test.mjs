@@ -3,7 +3,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
-import { copyFileSync, existsSync, readFileSync, renameSync, rmSync, statSync, writeFileSync, mkdirSync } from 'node:fs';
+import { copyFileSync, existsSync, mkdirSync, readFileSync, renameSync, rmSync, statSync, symlinkSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import {
@@ -19,6 +19,8 @@ const hash = f => createHash('sha256').update(readFileSync(f)).digest('hex');
 // none exist; that is not a write to the board, so the log counts only when it has content.
 const fingerprint = f => ({ sha: hash(f), mtime: statSync(f).mtimeMs, size: statSync(f).size, walBytes: existsSync(f + '-wal') ? statSync(f + '-wal').size : 0 });
 const goodDb = (extra = []) => handmade([...GOOD_DDL, ...extra]);
+const walDb = (extra = []) => handmade(['PRAGMA journal_mode = WAL', ...GOOD_DDL, ...extra]);          // a board in WAL mode, like the real chat
+const withId = (id, wal = false) => (wal ? walDb : goodDb)([`INSERT INTO meta VALUES('db_id','${id}')`]);   // a board with an identity
 const fill = (file, rows) => {
   const d = writer(file);
   const ins = d.prepare('INSERT INTO messages(ts_ms, channel, author, human, to_list, body) VALUES (?,?,?,?,?,?)');
@@ -39,6 +41,27 @@ test('clean: control characters and bidirectional marks go, whitespace collapses
   assert.ok(cut.endsWith('…') && cut.isWellFormed(), 'a cut never splits a surrogate pair');
   assert.equal(clean('x'.repeat(400), TEXT_MAX), 'x'.repeat(400), 'exactly the limit stays whole');
   assert.equal(clean('x'.repeat(401), TEXT_MAX), 'x'.repeat(399) + '…');
+});
+
+test('clean: a text made only of astral characters (emoji) is cut like any other, and the cut agrees with a character count everywhere', () => {
+  const emoji = '\u{1F600}';
+  for (const n of [401, 402, 500, 801, 802, 803, 1000, 20000]) {
+    const c = clean(emoji.repeat(n), TEXT_MAX);
+    assert.equal(Array.from(c).length, TEXT_MAX, `${n} emoji`);
+    assert.ok(c.endsWith('…') && c.isWellFormed());
+  }
+  assert.equal(clean(emoji.repeat(400), TEXT_MAX), emoji.repeat(400), 'exactly the limit stays whole');
+  assert.equal(Array.from(clean(emoji.repeat(20000), 80)).length, 80, 'a name too');
+  // against a plain reference on mixed text, around every boundary
+  const ref = (str, n) => { const ch = Array.from(str); return ch.length > n ? ch.slice(0, n - 1).join('') + '…' : str; };
+  for (const n of [1, 2, 5, 20, 80]) {
+    for (let len = 0; len <= 3 * n + 4; len++) {
+      for (const unit of [emoji, 'a', 'ab' + emoji, '\u00e9' + emoji + emoji]) {
+        const text = unit.repeat(len);
+        assert.equal(clean(text, n), ref(text, n), `n=${n} len=${len} unit=${JSON.stringify(unit)}`);
+      }
+    }
+  }
 });
 
 test('contract: the named constant is what the docs promise', () => {
@@ -218,6 +241,141 @@ test('the board file is replaced by an older copy (a restored backup): the poll 
   s2.close();
 });
 
+// another board under the same name: its rows do not continue ours, so the answer is a reset to its top, whatever its size
+for (const via of ['poll', 'snapshot']) {
+  test(`another board under the same name (meta.db_id differs) answers reset at its top, shorter, as long, longer or empty (reopened by the ${via})`, () => {
+    for (const rows of [0, 1, 3, 13, 200]) {
+      const a = withId('board-a');
+      fill(a, [{ body: 'a1' }, { body: 'a2' }, { body: 'a3' }]);
+      const b = withId('board-b');
+      fill(b, Array.from({ length: rows }, (_, i) => ({ body: 'b' + (i + 1) })));
+      const clk = clock();
+      const s = open(a, clk);
+      assert.equal(s.poll(-1, {}).lastSeq, 3);
+      renameSync(b, a);
+      clk.tick(POLL_MIN_MS);
+      if (via === 'snapshot') assert.equal(s.snapshot({ sinceMs: 0 }).state.state, 'ok');       // the lounge reopens the file first
+      const r = s.poll(3);
+      assert.deepEqual([r.reset, r.lastSeq, r.rows.length, r.more], [true, rows, 0, false], `a board of ${rows} posts`);
+      // it carries on from there, once
+      fill(a, [{ body: 'next' }]);
+      clk.tick(POLL_MIN_MS);
+      const r2 = s.poll(r.lastSeq);
+      assert.deepEqual([r2.reset, r2.rows.map(m => m.text), r2.lastSeq], [false, ['next'], rows + 1]);
+      clk.tick(POLL_MIN_MS);
+      assert.deepEqual([s.poll(r2.lastSeq).reset, s.poll(r2.lastSeq).rows.length], [false, 0]);
+      s.close();
+    }
+  });
+}
+
+test('a real board of the live tool is replaced by another real board with more posts: reset at the new top, no replay of its rows', { skip: missing('v2') }, () => {
+  const a = makeBoard('v2');
+  const b = makeBoard('v2');
+  insertRows(b.db, Array.from({ length: 10 }, (_, i) => ({ body: 'board B post ' + i, author: 'zed' })));
+  const idOf = f => { const d = new DatabaseSync(f, { readOnly: true }); try { return d.prepare("SELECT v FROM meta WHERE k = 'db_id'").get()?.v; } finally { d.close(); } };
+  assert.ok(idOf(a.db) && idOf(b.db) && idOf(a.db) !== idOf(b.db), 'the real tool gives every board an identity');
+  const clk = clock();
+  const s = open(a.db, clk);
+  assert.equal(s.poll(-1, {}).lastSeq, 3);
+  for (const x of ['-wal', '-shm']) rmSync(a.db + x, { force: true });
+  renameSync(b.db, a.db);
+  clk.tick(POLL_MIN_MS);
+  const r = s.poll(3);
+  assert.deepEqual([r.reset, r.lastSeq, r.rows.length], [true, 13, 0]);
+  s.close();
+});
+
+// A restore done by copying over the file in place (cp, the same inode): only a new connection sees the new file.
+const restoreInPlace = (file, backup) => {
+  const ino = statSync(file).ino;
+  writeFileSync(file, backup);
+  assert.equal(statSync(file).ino, ino, 'the same inode: this is a copy over the file, not a rename');
+};
+
+test('a backup copied over a real board in place (same inode, as cp does) is noticed: reset to the backup, then the new posts arrive', { skip: missing('v2') }, () => {
+  const b = makeBoard('v2');
+  const backup = readFileSync(b.db);                 // three posts; no connection is open, so the file is complete
+  b.post('alpha', 'general', 'four');
+  b.post('alpha', 'general', 'five');
+  const clk = clock();
+  const s = open(b.db, clk);
+  assert.equal(s.poll(-1, {}).lastSeq, 5);
+  const w = writer(b.db);
+  w.exec('PRAGMA wal_checkpoint(TRUNCATE)');         // everything is in the main file, the log is empty
+  w.close();
+  clk.tick(POLL_MIN_MS);
+  assert.deepEqual([s.poll(5).reset, s.poll(5).throttled], [false, true]);
+  restoreInPlace(b.db, backup);
+  clk.tick(POLL_MIN_MS);
+  const r = s.poll(5);
+  assert.deepEqual([r.reset, r.lastSeq, r.rows.length], [true, 3, 0]);
+  b.post('beta', 'general', 'after the restore');
+  clk.tick(POLL_MIN_MS);
+  assert.deepEqual(s.poll(3).rows.map(m => [m.seq, m.text]), [[4, 'after the restore']]);
+  s.close();
+});
+
+// The safety net must not be starved by the lounge: snapshot() and poll() are called by different parts of the server, in either order,
+// and a reopen done by one of them has to reach the other.
+for (const [name, mk, firstSnapshot] of [
+  ['WAL board, poll only', walDb, null], ['WAL board, snapshot then poll', walDb, true], ['WAL board, poll then snapshot', walDb, false],
+  ['journal board, poll only', goodDb, null], ['journal board, snapshot then poll', goodDb, true], ['journal board, poll then snapshot', goodDb, false],
+]) {
+  test(`an older copy restored in place while the lounge also asks (${name}): one reset within 20 s, then the 5 new posts, none lost`, () => {
+    const file = mk();
+    fill(file, Array.from({ length: 34 }, (_, i) => ({ body: 'old ' + (i + 1), ts: 1000 + i })));
+    const backup = readFileSync(file);
+    fill(file, Array.from({ length: 40 }, (_, i) => ({ body: 'newer ' + (i + 35), ts: 2000 + i })));
+    const clk = clock();
+    const s = open(file, clk);
+    let last = s.poll(-1, {}).lastSeq;
+    assert.equal(last, 74);
+    restoreInPlace(file, backup);
+    const resets = [], got = [];
+    for (let sec = 1; sec <= 40; sec++) {
+      clk.tick(1000);
+      if (firstSnapshot === true) s.snapshot({ sinceMs: 0, limit: 60 });
+      const r = s.poll(last);
+      if (firstSnapshot === false) s.snapshot({ sinceMs: 0, limit: 60 });
+      if (r.reset) resets.push(sec);
+      last = r.lastSeq;
+      got.push(...r.rows.map(m => m.text));
+      if (sec === 25) fill(file, Array.from({ length: 5 }, (_, i) => ({ body: 'after ' + i, ts: 3000 + i })));      // the board lives on after the restore
+    }
+    assert.equal(resets.length, 1, 'exactly one reset');
+    assert.ok(resets[0] <= 20, 'noticed within 20 s, not never: ' + resets[0]);
+    assert.deepEqual(got, Array.from({ length: 5 }, (_, i) => 'after ' + i), 'the five new posts, once each');
+    assert.equal(last, 39);
+    s.close();
+  });
+}
+
+test('the board is a symbolic link (--chat-db ~/chat.db): a post that is only in the write-ahead log arrives at the next poll, not after the safety net', () => {
+  const real = walDb();
+  fill(real, [{ body: 'one' }]);
+  const link = join(scratch(), 'link.db');
+  symlinkSync(real, link);
+  for (const [path, label] of [[real, 'direct'], [link, 'through the link']]) {
+    const clk = clock();
+    const s = open(path, clk);
+    let last = s.poll(-1, {}).lastSeq;
+    const n = s.stats.polls;
+    const w = writer(real);
+    w.exec('PRAGMA wal_autocheckpoint = 0');          // the commit stays in the log: the main file does not change
+    w.prepare('INSERT INTO messages(ts_ms, channel, author, human, to_list, body) VALUES (?,?,?,?,?,?)').run(5000, 'general', 'a', 0, '', 'only in the log ' + label);
+    const mainBefore = statSync(real).mtimeMs;
+    clk.tick(POLL_MIN_MS);
+    const r = s.poll(last);
+    assert.deepEqual(r.rows.map(m => m.text), ['only in the log ' + label], label + ': delivered 2 s after the commit');
+    assert.equal(statSync(real).mtimeMs, mainBefore, 'the post was only in the log');
+    last = r.lastSeq;
+    w.close();
+    s.close();
+    assert.ok(s.stats.polls > n);
+  }
+});
+
 // ---------------------------------------------------------------- states
 
 test('states: no path is off; a missing file is off and becomes ok when the file appears', () => {
@@ -332,6 +490,19 @@ test('a missing contract: seq may be indexed by a secondary index instead of bei
     'CREATE TABLE messages(seq INTEGER, ts_ms INTEGER, channel TEXT, author TEXT, human INTEGER, to_list TEXT, body TEXT)', 'CREATE INDEX messages_seq ON messages(seq)']);
   const s = open(file, clock());
   assert.equal(s.state().state, 'ok');
+  s.close();
+});
+
+test('contract columns that are generated columns (virtual or stored) are columns: the board is ok and reads', () => {
+  const file = handmade([...GOOD_DDL.filter(s => !s.includes('CREATE TABLE messages')),
+    "CREATE TABLE messages(seq INTEGER PRIMARY KEY, ts_s INTEGER NOT NULL, ts_ms INTEGER GENERATED ALWAYS AS (ts_s * 1000) STORED, channel TEXT NOT NULL, author TEXT NOT NULL, via TEXT NOT NULL, " +
+    "human INTEGER GENERATED ALWAYS AS (via = 'human') VIRTUAL, to_list TEXT NOT NULL DEFAULT '', body TEXT NOT NULL)",
+    "INSERT INTO messages(ts_s, channel, author, via, body) VALUES (7, 'general', 'ann', 'human', 'from the person')",
+    "INSERT INTO messages(ts_s, channel, author, via, body) VALUES (8, 'general', 'bob', 'agent', 'from an agent')"]);
+  assert.deepEqual(checkDatabase(file), { state: 'ok', schema: 7, reason: '', problems: [] });
+  const s = open(file, clock());
+  assert.deepEqual(s.state(), { state: 'ok', schema: 7, reason: '' });
+  assert.deepEqual(s.poll(-1, {}).rows.map(m => [m.from, m.ts, m.human]), [['ann', 7000, true], ['bob', 8000, false]]);
   s.close();
 });
 
@@ -555,6 +726,25 @@ test('control characters, bidi marks and odd names in the data never reach the o
   assert.deepEqual(m.to.slice(0, 3), ['bob', 'carol', 'n0']);
   assert.equal(m.text, 'abc dcba line two three four x');
   for (const v of [m.from, m.channel, m.text, ...m.to]) assert.ok(!/[\u0000-\u001f\u007f-\u009f\u200b\u200e\u200f\u202a-\u202e\u2066-\u2069\ufeff]/.test(v));
+  s.close();
+});
+
+test('names and text made of emoji only are capped too: a board of huge emoji posts gives small answers', () => {
+  const emoji = '\u{1F600}';
+  const file = goodDb(["ALTER TABLE agents ADD COLUMN extra TEXT"]);
+  const d = writer(file);
+  const ins = d.prepare('INSERT INTO messages(ts_ms, channel, author, human, to_list, body) VALUES (?,?,?,?,?,?)');
+  for (let i = 0; i < 5; i++) ins.run(1000 + i, emoji.repeat(20000), emoji.repeat(20000), 0, Array.from({ length: 30 }, () => emoji.repeat(500)).join(','), emoji.repeat(2000));
+  d.prepare('INSERT INTO agents(name, kind, last_seen_ms) VALUES (?,?,?)').run(emoji.repeat(20000), emoji.repeat(20000), Date.now());
+  d.close();
+  const s = open(file, clock());
+  const m = s.poll(-1, {}).rows[0];
+  assert.deepEqual([Array.from(m.text).length, Array.from(m.from).length, Array.from(m.channel).length], [400, 80, 80]);
+  assert.ok(m.to.length >= 1 && m.to.length <= 20 && m.to.every(n => Array.from(n).length <= 80), 'recipients: at most 20, each cut to 80 characters');
+  const snap = s.snapshot({ sinceMs: 0 });
+  assert.ok(JSON.stringify(snap).length < 12000, 'the whole snapshot is small: ' + JSON.stringify(snap).length);
+  assert.ok(snap.agents.every(a => Array.from(a.name).length <= 80 && Array.from(a.kind).length <= 20));
+  assert.ok(snap.channels.every(c => Array.from(c.name).length <= 80));
   s.close();
 });
 
