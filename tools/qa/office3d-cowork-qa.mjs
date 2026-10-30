@@ -12,9 +12,12 @@
 //                           cushion), nobody shares a seat, the busiest room has people on seats of every kind its plan has
 //   3d-cowork-folder        four chats of one folder get four different looks (four styles, four work arrangements)
 //   3d-cowork-slot          the look and the furniture are the slot's: a slot read vacant, with a chat and vacant again is the same room (the plan's hash, its triangles, its look);
-//                           its light is 0, then 1 once a chat has taken it (never back down on the way), and 0 again once the chat has left (never back up): vacant == occupied furniture, the lights
-//                           the only difference. The page waits for the end state and never times the ease: that is test/ofis-decor-light.test.mjs (a clock it controls: strictly between 0 and
-//                           1 on the way, 200 ms, ease-out coming on, ease-in going off, a step with reduced motion), which --mutations runs against an instant switch and a switch that never moves
+//                           its light follows the people (public/js/ofis-presence.js): exactly 0 (and the switch thrown to 0) while it is vacant and while a chat has taken it but its chief is
+//                           not through the door yet, then it eases to 1 from the moment the chief is inside (never back down), stays exactly 1 while the chief walks out of the vacant
+//                           office after its chat has closed, and eases to 0 once the chief is out of the door (never back up): vacant == occupied furniture, the lights the only difference.
+//                           The page never times the ease: that is test/ofis-decor-light.test.mjs (a clock it controls: strictly between 0 and 1 on the way, 200 ms, ease-out coming on,
+//                           ease-in going off, a step with reduced motion), which --mutations runs against an instant switch and a switch that never moves; the rule itself is
+//                           test/ofis-presence.test.mjs, and tools/qa/office3d-walk-qa.mjs 3d-walk-lights reads it against every person of the scene
 //
 // --mutations breaks the code in a copy of the repo, one line at a time, and runs the check that guards that line: every one must FAIL there.
 import { cpSync, mkdtempSync, readFileSync, writeFileSync, mkdirSync, rmSync, renameSync, readdirSync, existsSync } from 'node:fs';
@@ -255,17 +258,24 @@ async function runSlot(ctx) {
     const read = () => page.evaluate(o3('({ looks: o.looks(), rooms: s.rooms.length, err: v.dataset.hata || null })'));
     const settle = async (n, more = () => true) => { for (let t = 0; t < 100; t++) { const st = await read().catch(() => null); if (st && st.rooms === n && more(st)) { await sleep(700); return read(); } await sleep(300); } return read(); };
     const at = (st, slot) => st.looks.find(l => l.slot === slot);
-    // The light of a room eases over 200 ms from the first frame after the rebuild that draws it, and on a loaded machine that frame comes late (the first render after a rebuild blocked
-    // for 0.5 to 1 s in software GL): so this check never reads the light at a moment, and never times the ease. It waits until every light has reached the end its room asks for (an
-    // office with a chat 1, a vacant one 0), then reads. The ease itself (strictly between 0 and 1 on the way, 200 ms, ease-out coming on, ease-in going off) is proven with a clock the
-    // test controls in test/ofis-decor-light.test.mjs; here only the direction (never back) and the end state are asserted.
-    const settleLights = async () => {
+    // The light of a room eases over 200 ms from the first frame after the change, and on a loaded machine that frame comes late (the first render after a rebuild blocked for 0.5 to 1 s
+    // in software GL): so this check never times the ease. It waits until every light has reached the end its room asks for (an office with a chat whose chief is inside 1, a vacant one
+    // 0), then reads. The ease itself (strictly between 0 and 1 on the way, 200 ms, ease-out coming on, ease-in going off) is proven with a clock the test controls in
+    // test/ofis-decor-light.test.mjs; here the direction (never back), the end state and WHEN the light moves are asserted, against the chief of the chat, read in the same tick as the
+    // light (the pass of the rule and the walkers run in one frame, so a tick between two frames sees a light that agrees with the chief's place).
+    const settleLights = async (ok = l => l.lit === (l.vacant ? 0 : 1), tries = 150) => {
       let st = null;
-      for (let t = 0; t < 150; t++) { st = await read().catch(() => null); if (st && st.looks.every(l => l.lit === (l.vacant ? 0 : 1))) return st; await sleep(100); }
+      for (let t = 0; t < tries; t++) { st = await read().catch(() => null); if (st && st.looks.every(ok)) return st; await sleep(100); }
       return st || read();
     };
-    // a sampler in the page that writes the light of slot 3 every 12 ms (a new one replaces the one before)
-    const sample = () => page.evaluate(o3(`(() => { const id = window.__litRun = (window.__litRun || 0) + 1; window.__lit = []; const t0 = performance.now(), tick = () => { if (id !== window.__litRun) return; window.__lit.push([Math.round(performance.now() - t0), o.lit(3)]); if (performance.now() - t0 < 60000) setTimeout(tick, 12); }; tick(); return 1; })()`));
+    // a sampler in the page that writes, every 25 ms, the light of slot 3, the switch's target and where the chief of the chat of slot 3 is against the box of that office: inside it (0.1 m
+    // from every wall), outside it (0.1 m beyond a wall), or between the two (a new one replaces the one before)
+    const sample = chat => page.evaluate(o3(`(() => { const id = window.__litRun = (window.__litRun || 0) + 1; window.__lit = []; const t0 = performance.now(), tick = () => {
+      if (id !== window.__litRun) return;
+      const r = o.office().slots.find(q => q.slot === 3), f = o.figures().find(q => q.id === ${JSON.stringify(chat)});
+      const at = f && r ? (f.x > r.X + 0.1 && f.x < r.X + r.W - 0.1 && f.z > r.Z + 0.1 && f.z < r.Z + r.D - 0.1 ? 'in' : f.x < r.X - 0.1 || f.x > r.X + r.W + 0.1 || f.z < r.Z - 0.1 || f.z > r.Z + r.D + 0.1 ? 'out' : 'edge') : 'none';
+      window.__lit.push([Math.round(performance.now() - t0), o.lit(3), o.litTarget(3), at, f ? f.mode : null]);
+      if (performance.now() - t0 < 170000) setTimeout(tick, 25); }; tick(); return 1; })()`));
     const p = [];
     const s3 = await settle(3, st => st.looks.length >= 11).then(() => settleLights());
     const v1 = at(s3, 3), v0 = at(s3, 0);
@@ -275,11 +285,14 @@ async function runSlot(ctx) {
     const wrong = s3.looks.filter(l => (l.vacant ? l.lit !== 0 : l.lit !== 1));
     if (wrong.length) p.push(`${wrong.length} offices have the wrong light at 3 chats (slot ${wrong[0].slot}: light ${wrong[0].lit}, ${wrong[0].vacant ? 'vacant' : 'with a chat'})`);
 
-    // a chat takes slot 3: sample its light in the page from the moment the session file appears
-    await sample();
+    // a chat takes slot 3: sample its light in the page from the moment the session file appears. The office is furnished and signed from the first frame and stays dark: the chief of
+    // the chat is at the entrance and walks the hall (15 to 28 s in software GL); the light comes on when the chief is through the door
+    await sample(fx.agents[3].id);
     renameSync(join(dirs.dir, 'stash', fx.pids[3] + '.json'), join(dirs.dir, 'sessions', fx.pids[3] + '.json'));
     await settle(4, st => (at(st, 3) && !at(st, 3).vacant));
-    const s4 = await settleLights();
+    const dark4 = at(await read(), 3);
+    if (!dark4 || dark4.vacant || dark4.lit !== 0) p.push(`slot 3 with a chat whose chief has not come yet has its light at ${dark4 && dark4.lit} (want 0: the office is dark until the chief is through the door)`);
+    const s4 = await settleLights(l => (l.slot === 3 ? l.lit === 1 : l.lit === (l.vacant ? 0 : 1)), 1200);
     await sleep(300);
     const up = await page.evaluate('window.__lit');
     const o1 = at(s4, 3);
@@ -290,21 +303,29 @@ async function runSlot(ctx) {
       for (const k of ['style', 'theme', 'work', 'soft']) if (a[k] !== b[k]) p.push(`${label}: its ${k} changed (${a[k]} -> ${b[k]})`);
     };
     same(v1, o1, 'a chat takes slot 3');
-    if (!o1 || o1.vacant || o1.lit !== 1) p.push(`slot 3 with a chat has its light at ${o1 && o1.lit} (want 1)`);
-    // the light came on: from 0, never back down, ending at 1 (its eased shape and time are the unit test's)
+    if (!o1 || o1.vacant || o1.lit !== 1) p.push(`slot 3 with a chat has its light at ${o1 && o1.lit} (want 1 once its chief is inside)`);
+    // the light came on: exactly 0 and thrown to 0 until the chief is through the door, then from 0, never back down, ending at 1 (its eased shape and time are the unit test's)
     const lv = up.map(x => x[1]);
+    const firstIn = up.findIndex(x => x[3] === 'in'), outside = up.slice(0, Math.max(0, firstIn)).filter(x => x[3] === 'out');
+    if (firstIn < 1) p.push(`the chief of slot 3 was never read inside its office (${up.length} readings)`);
+    else {
+      const early = outside.filter(x => x[1] !== 0 || x[2] !== 0);
+      if (outside.length < 20) p.push(`only ${outside.length} readings of the chief outside the office before it came in (nothing to judge "dark until the door" by)`);
+      if (early.length) p.push(`the light of slot 3 was ${early[0][1]} (switch thrown to ${early[0][2]}) while its chief was still outside the door, ${early.length} of ${outside.length} readings`);
+      if (up[firstIn][2] !== 1) p.push(`the switch of slot 3 was not thrown on when the chief was first read inside (target ${up[firstIn][2]})`);
+    }
     let down = 0; for (let i = 1; i < lv.length; i++) if (lv[i] < lv[i - 1] - 1e-9) down++;
     if (lv[0] !== 0 || lv[lv.length - 1] !== 1) p.push(`the light of slot 3 went ${lv[0]} -> ${lv[lv.length - 1]} (want 0 -> 1)`);
     if (down) p.push(`the light of slot 3 went down ${down} times while it came on`);
 
-    // the chat leaves: its office is vacant again, the same room, the light goes down
+    // the chat leaves: its office is vacant again, the same room; the chief stands up and walks out, the light stays exactly 1 while the chief is inside and goes down once it is out of the door
     const agent = fx.agents[3];
-    await sample();
+    await sample(agent.id);
     fx.closeSession(agent.id);
     await settle(3, st => (at(st, 3) && at(st, 3).vacant));
-    const s3b = await settleLights();
+    const s3b = await settleLights(undefined, 1200);
     await sleep(300);
-    const down2 = await page.evaluate('window.__lit').then(l => l.map(x => x[1]));
+    const down2s = await page.evaluate('window.__lit'), down2 = down2s.map(x => x[1]);
     const v2 = at(s3b, 3);
     same(o1, v2, 'the chat leaves slot 3');
     same(v1, v2, 'slot 3 vacant before and after its chat');
@@ -312,10 +333,16 @@ async function runSlot(ctx) {
     let up2 = 0; for (let i = 1; i < down2.length; i++) if (down2[i] > down2[i - 1] + 1e-9) up2++;
     if (down2[0] !== 1 || down2[down2.length - 1] !== 0) p.push(`the light of slot 3 went ${down2[0]} -> ${down2[down2.length - 1]} when its chat left (want 1 -> 0)`);
     if (up2) p.push(`the light of slot 3 went up ${up2} times while it went off`);
+    const inside2 = down2s.filter(x => x[3] === 'in'), firstOut = down2s.findIndex(x => x[3] === 'out'), walked = inside2.filter(x => x[4] === 'walk');
+    if (walked.length < 5) p.push(`only ${walked.length} readings of the chief walking out inside the vacant office (nothing to judge "lit while the chief is inside" by)`);
+    const dimmed = inside2.filter(x => x[1] !== 1 || x[2] !== 1);
+    if (dimmed.length) p.push(`the light of slot 3 was ${dimmed[0][1]} (switch thrown to ${dimmed[0][2]}) while the chief of the closed chat was still inside it, ${dimmed.length} of ${inside2.length} readings`);
+    if (firstOut < 0) p.push('the chief of the closed chat was never read outside the office');
+    else if (down2s.slice(firstOut + 1).some(x => x[3] === 'out' && x[2] !== 0)) p.push('the switch of slot 3 was still on after the chief was out of the door');
     const errs = errorsOf(page);
     if (errs.length) p.push(`console errors: ${errs[0].slice(0, 120)}`);
     res.push(make('3d-cowork-slot', S.ready.ok && p.length === 0,
-      `slot 3 read vacant, with a chat, vacant again: the same furniture (${v1 && v1.items} items, hash ${v1 && v1.sig}, ${v1 && Math.round(v1.tris)} triangles) and look (${v1 && v1.style}, ${v1 && v1.work}, ${v1 && v1.soft}) each time; its light 0 -> 1 when the chat comes (${lv.length} readings, never back down, settled at 1) and 1 -> 0 when it leaves (${down2.length} readings, never back up, settled at 0); at 3 chats every vacant office is dark and every office with a chat is lit`
+      `slot 3 read vacant, with a chat, vacant again: the same furniture (${v1 && v1.items} items, hash ${v1 && v1.sig}, ${v1 && Math.round(v1.tris)} triangles) and look (${v1 && v1.style}, ${v1 && v1.work}, ${v1 && v1.soft}) each time; its light stayed 0 while the chief of its chat was outside the door (${outside.length} readings), came on 0 -> 1 once the chief was inside (${lv.length} readings, never back down, settled at 1), stayed 1 for ${inside2.length} readings of the chief inside the vacant office after the chat left and went 1 -> 0 (${down2.length} readings, never back up, settled at 0); at 3 chats every vacant office is dark and every office with a chat is lit`
       + (p.length ? '; PROBLEMS: ' + p.slice(0, 4).join(' | ') + (p.length > 4 ? ` (and ${p.length - 4} more)` : '') : '')));
   } finally { await S.done(); }
   return res;
@@ -334,10 +361,12 @@ const MUTATIONS = [
   { name: 'every seat is as high as the old office chair', file: 'public/js/ofis.js', from: '(c.seat && c.seat.hip) || PK_SEAT', to: 'PK_SEAT', group: 'seats', fails: '3d-cowork-seats' },
   { name: 'the look follows the chat\'s folder, not the slot', file: 'public/js/ofis.js', from: 'const look = world.looks.get(it.slot);', to: 'const look = world.looks.get(it.vacant ? it.slot : hash(store.agents.get(it.id).project) % world.looks.size);', group: 'seats', fails: '3d-cowork-folder' },
   { name: 'the look follows the chat, not the slot: a chat taking a slot changes its room', file: 'public/js/ofis.js', from: 'const look = world.looks.get(it.slot);', to: 'const look = world.looks.get(it.vacant ? it.slot : (it.slot + 1) % world.looks.size);', group: 'slot', fails: '3d-cowork-slot' },
-  { name: 'a vacant office keeps its lights on', file: 'public/js/ofis.js', from: 'for (const it of items) decor.setLit(it.slot, !it.vacant, instant);', to: 'for (const it of items) decor.setLit(it.slot, true, instant);', group: 'slot', fails: '3d-cowork-slot' },
+  { name: 'a vacant office keeps its lights on', file: 'public/js/ofis-presence.js', from: 'out.set(r.slot, inside || (r.owner !== null && st.entered));', to: 'out.set(r.slot, true);', group: 'slot', fails: '3d-cowork-slot' },
   { name: 'the lights switch at once: setLit throws the switch without an ease', file: 'public/js/ofis-decor.js', from: 'switches.set(slot, on, performance.now(), instant || follower.reduced);', to: 'switches.set(slot, on, performance.now(), true);', group: 'unit', fails: 'unit-ofis-decor-light' },
   { name: 'the lights never move: the frame does not step the switches', file: 'public/js/ofis-decor.js', from: 'const moved = switches.step(performance.now());', to: 'const moved = false;', group: 'unit', fails: 'unit-ofis-decor-light' },
-  { name: 'the lights stay off when a chat takes the office', file: 'public/js/ofis.js', from: 'for (const it of items) decor.setLit(it.slot, !it.vacant, instant);', to: 'for (const it of items) decor.setLit(it.slot, false, instant);', group: 'slot', fails: '3d-cowork-slot' },
+  { name: 'the lights stay off when a chat takes the office', file: 'public/js/ofis-presence.js', from: 'out.set(r.slot, inside || (r.owner !== null && st.entered));', to: 'out.set(r.slot, false);', group: 'slot', fails: '3d-cowork-slot' },
+  { name: 'the lights come on when a chat takes the office, before its chief is through the door', file: 'public/js/ofis-presence.js', from: 'out.set(r.slot, inside || (r.owner !== null && st.entered));', to: 'out.set(r.slot, inside || r.owner !== null);', group: 'slot', fails: '3d-cowork-slot' },
+  { name: 'the lights go off the moment the chat closes, with its chief still walking out', file: 'public/js/ofis-presence.js', from: 'out.set(r.slot, inside || (r.owner !== null && st.entered));', to: 'out.set(r.slot, r.owner !== null && (inside || st.entered));', group: 'slot', fails: '3d-cowork-slot' },
 ];
 
 async function runMutations() {

@@ -6,7 +6,7 @@
 //   const decor = createDecor({ atmosphere })
 //   decor.beginBuild()                                    at the start of every rebuild of the building
 //   decor.furnish({ B, kit, X, Z, W, D, plan, style, theme, color, rng, roomId, slot, screens })     one office, into its Batch (screens(desc) gets every monitor and laptop screen)
-//   decor.setLit(slot, on, instant)                       the light of a slot's room: on while a chat is in it (a vacant office is furnished the same, with the lights off)
+//   decor.setLit(slot, on, instant)                       the light of a slot's room: on while somebody is in it (ofis-presence.js decides; a vacant office is furnished the same, with the lights off)
 //   decor.finish(group)                                   the three instanced meshes of the building: window panes, bulbs and flames, glows and pools of light
 //   decor.update(T, dt)                                   each frame: the lights come on at dusk, flicker a little, the panes follow the sky
 //   decor.floorMaterial(pattern)                          the material of a style's floor (a pattern texture times the floor's vertex colours)
@@ -373,9 +373,11 @@ export function createDecor({ atmosphere, aniso = 4 } = {}) {
       build.rooms.set(roomId, { style: st.id, slot, windows: plan.windows.length, lights: plan.lights.length, items: drawn.length, sig: h.toString(16), tris: B.i.length / 3 - tris0, models: [...new Set(plan.items.map(i => i.m).filter(Boolean))].sort(), arrangement: plan.look ? plan.look.work + '+' + plan.look.soft : null });
     },
 
-    // the light of a slot's room: on while a chat is in it, off while nobody is (ofis.js lightsFor). The number eases over SWITCH_MS (ofis-light.js createSwitches)
+    // the light of a slot's room: on while somebody is in it, off while nobody is (ofis.js lightsFor, the rule of ofis-presence.js). The number eases over SWITCH_MS (ofis-light.js
+    // createSwitches); throwing the switch it is already at (every frame, by lightsFor) changes nothing and restarts no ease
     setLit(slot, on, instant = false) { switches.set(slot, on, performance.now(), instant || follower.reduced); },
     litOf: slot => switches.get(slot),
+    targetOf: slot => switches.target(slot),                         // 1 or 0: where the switch of the slot is going (the number litOf eases to), for the QA
     get switches() { return switches; },
 
     // the three instanced meshes of the building (panes, bulbs and flames, glows and pools): one draw call each

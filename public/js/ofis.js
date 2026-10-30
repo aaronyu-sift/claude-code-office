@@ -27,6 +27,7 @@ import {
 } from './ofis-layout.js';
 import { boardName, boardProject, boardBadges, fitName } from './board-text.js';
 import { createLounge } from './ofis-lounge.js';
+import { roomLights } from './ofis-presence.js';
 
 // Models (ofis-assets.js has loaded them before this module runs): a piece that did not load is missing from PK and the procedural shape
 // below is drawn in its place. POLISH is the procedural polish: occlusion baked into the room batch, a noise floor, tone mapping, contact
@@ -456,7 +457,10 @@ export function createOfis(root, ctx, opts = {}) {
   // ?arrive=calm: a page load, a scene switch or a rebuilt building sends everybody who is already in the data in at the normal pace (ofis-arrive.js hurries a big queue so that
   // all are in their seat within about 10 seconds)
   const CALM_LOAD = /[?&]arrive=calm(?:&|$)/.test(typeof location !== 'undefined' ? location.search : '');
-  const REC = { on: false, ev: [], dt: 0 };   // verification only (root.__ofis.rec): every figure's creation, removal and place on every frame (dt: the frame's step, 0 outside a frame)
+  // verification only (root.__ofis.rec): every figure's creation, removal and place on every frame (dt: the frame's step, 0 outside a frame; n: the number of the frame), and the light of
+  // every office after every frame (`lights`: the same frame number, the wall clock, and per office [slot, the number now, the number it is going to, the chat that has the office])
+  const REC = { on: false, ev: [], lights: [], dt: 0, n: 0 };
+  const lightMem = new Map(), lightOut = new Map(), lightPeople = [];       // lightsFor: the memory of the rule (ofis-presence.js), its answer and the figures it reads, all reused every frame
   let shakeAmp = 0;              // camera shake strength in screen pixels (api.shake); decays every frame
   let activeTool = null;         // exclusive interaction mode of a local add-on (api.setTool); kept across builds
   const toolFns = [];            // api.onToolChange listeners, per build like extraFrame
@@ -650,7 +654,10 @@ export function createOfis(root, ctx, opts = {}) {
     if (P.lounge) { buildPlaza(B, P.lounge, { bed: false }); const b0 = B.i.length / 3; lounge.build({ g, B, c: P.lounge, rng: rng(7) }); world.loungeBatchTris = B.i.length / 3 - b0; } else lounge.clear();
     buildHalls(B, g, items, areas);
     addVacantSigns(g);
-    lightsFor(items, instantNext);
+    // the boxes the light of every office is read against (ofis-presence.js): an office's inside, and the chat that has it. The rule reads the people where they stand now, so a
+    // rebuild gives the same answer as the frame before it
+    world.lightRooms = [...world.rooms.values(), ...world.vacant].map(r => ({ slot: r.slot, owner: r.vacant ? null : r.id, x0: r.X, x1: r.X + r.W, z0: r.Z, z1: r.Z + r.D }));
+    lightsFor(instantNext);
     decor.finish(g);
 
     if (POLISH) {
@@ -705,10 +712,24 @@ export function createOfis(root, ctx, opts = {}) {
     rebuildMs = performance.now() - t0;
   }
 
-  // The lights of the offices: on in the office of a chat, off in a vacant one (feedback kind of docs/motion.md: the switch is a short ease, decor.setLit; the first time a slot is seen it is
-  // at its state at once). The ONE place that decides it, so that when a chat's light should come on at the door crossing (the walkers' entrance) this is the function to call from there.
-  function lightsFor(items, instant) {
-    for (const it of items) decor.setLit(it.slot, !it.vacant, instant);
+  // The lights of the offices follow the people (ofis-presence.js has the rule, with its reasons): an office is lit while somebody is inside its box, and one that a chat has taken stays
+  // dark until a person of that chat has come through the door, then stays lit for as long as the chat has it; a vacant office is lit only while somebody is still inside it (the people
+  // of the chat that has just closed, walking out). The ONE place that decides it, called at every rebuild of the building and once per frame after the walkers have moved: with the same
+  // answer, because it reads where the figures stand and nothing else (a rebuild keeps every figure where it is, and the memory of the rule is kept across rebuilds). A switch that is
+  // thrown to where it already is changes nothing (no ease restarts), so asking every frame is free; the first time a slot is seen it is at its state at once (decor.setLit), so a page
+  // that opens with chats in the data has every office dark until the first chief has come through its door. The people of the lounge are not in `chars` and stand in no office.
+  function lightsFor(instant = false) {
+    const rooms = world.lightRooms;
+    if (!rooms) return;
+    let n = 0;
+    for (const c of chars.values()) {
+      if (c.force || c.delay > 0) continue;                         // a person of the lounge, or one that still waits at the entrance (not in the scene yet)
+      const p = c.root.position, o = lightPeople[n] || (lightPeople[n] = { x: 0, z: 0, chat: null });
+      o.x = p.x; o.z = p.z; o.chat = c.roomId;
+      n++;
+    }
+    roomLights(lightMem, rooms, lightPeople, lightOut, n);
+    for (const [slot, on] of lightOut) decor.setLit(slot, on, instant);
   }
 
   // Union of the building and the local lots: camera framing, pan limits and the shadow camera follow it.
@@ -784,7 +805,10 @@ export function createOfis(root, ctx, opts = {}) {
         return { slot: r.slot, id: r.id, vacant: r.vacant, style: l.style, theme: r.look.theme, work: l.work, soft: l.soft, sig: d && d.sig, tris: d && d.tris, items: d && d.items, models: d && d.models, lit: decor.litOf(r.slot) };
       });
     },
-    lit(slot) { return decor.litOf(slot); },                                  // the light of a slot's room now, 0..1 (it eases when a chat takes the slot or leaves)
+    lit(slot) { return decor.litOf(slot); },                                  // the light of a slot's room now, 0..1 (it eases on when the first person of its chat is through the door, and off when the last has left)
+    litTarget(slot) { return decor.targetOf(slot); },                         // where that number is going: 1 or 0, thrown the moment the rule says so (the number follows over SWITCH_MS)
+    // what one pass of the rule costs (the QA measures it, the app never calls it): the mean of `n` calls of lightsFor, in milliseconds, and how many figures and offices it read
+    timeLights(n = 2000) { const t0 = performance.now(); for (let i = 0; i < n; i++) lightsFor(); return { ms: (performance.now() - t0) / n, figures: chars.size, rooms: (world.lightRooms || []).length }; },
     // the arrangement of one office: the seats (kind, place, facing, stand point), the walks the people take to them (what pathFor gives) and the furniture they must keep clear of
     arrange(id) {
       const r = world.rooms.get(id) || (world.vacant || []).find(v => v.id === id);
@@ -1955,7 +1979,7 @@ export function createOfis(root, ctx, opts = {}) {
 
   // verification only: a figure's life, as root.__ofis.rec reads it
   function note(kind, c) {
-    if (REC.on) REC.ev.push({ k: kind, id: c.id, main: c.main, t: performance.now(), dt: REC.dt, x: c.root.position.x, z: c.root.position.z, mode: c.mode, after: c.after, vis: c.root.visible, sit: +c.sit.toFixed(2), pace: c.pace, delay: +c.delay.toFixed(3), hy: +c.hip.position.y.toFixed(4), stand: c.standT > 0, turn: c.turnT > 0, doneAt: c.doneAt });
+    if (REC.on) REC.ev.push({ k: kind, id: c.id, main: c.main, t: performance.now(), n: REC.n, dt: REC.dt, x: c.root.position.x, z: c.root.position.z, mode: c.mode, after: c.after, vis: c.root.visible, sit: +c.sit.toFixed(2), pace: c.pace, delay: +c.delay.toFixed(3), hy: +c.hip.position.y.toFixed(4), stand: c.standT > 0, turn: c.turnT > 0, doneAt: c.doneAt });
   }
 
   // A figure leaves the scene only here, and only at the end of a walk out of the building (animChar), or when it never came in (it was still waiting at the entrance).
@@ -2479,14 +2503,17 @@ export function createOfis(root, ctx, opts = {}) {
       for (const c of [...chars.values()]) if (!c.main && c.mode === 'seated' && c.after !== 'gone' && c.doneAt && nowMs - c.doneAt > DONE_SIT_MS) leaveRoom(c);
     }
     REC.dt = dt;
+    if (REC.on) REC.n++;
     for (const c of [...chars.values()]) animChar(c, dt, T);
     if (REC.on) for (const c of chars.values()) note('frame', c);
     REC.dt = 0;
+    lightsFor();                                          // after the walkers have moved: the light of an office follows who is inside it now
     for (const fn of extraFrame) { try { fn(T, dt); } catch { /* decoration frame callback */ } }
     stepScreens(T);
     stepRooms(dt, T);
     lounge.step(dt, T);
     decor.update(T, dt);
+    if (REC.on && world.lightRooms) REC.lights.push({ n: REC.n, t: performance.now(), dt, rooms: world.lightRooms.map(r => [r.slot, +decor.litOf(r.slot).toFixed(4), decor.targetOf(r.slot), r.owner]) });
     doorWalkers.length = 0;
     env.frame(T, dt);
     for (const [id, L] of signs) {
@@ -2864,7 +2891,7 @@ export function createOfis(root, ctx, opts = {}) {
     },
     // replay a seated sub-agent's walk in from the entrance, as a newcomer walks (tools/qa/office3d-cowork-qa.mjs follows people through a room with it)
     replayEnter(id) { const c = chars.get(id), room = c && world.rooms.get(c.roomId); if (!c || c.main || !room || c.slot < 0) return false; enter(c, room); return true; },
-    rec: { start() { REC.ev.length = 0; REC.on = true; }, take() { return REC.ev.splice(0); }, stop() { REC.on = false; REC.ev.length = 0; } },
+    rec: { start() { REC.ev.length = 0; REC.lights.length = 0; REC.n = 0; REC.on = true; }, take() { return REC.ev.splice(0); }, takeLights() { return REC.lights.splice(0); }, stop() { REC.on = false; REC.ev.length = 0; REC.lights.length = 0; } },
     get pace() { return Object.fromEntries([...chars.values()].map(c => [c.id, c.pace])); },
   };
 
