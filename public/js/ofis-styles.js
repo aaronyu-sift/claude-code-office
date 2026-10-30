@@ -180,6 +180,40 @@ export const STYLES = {
   },
 };
 
+// What a style adds to an arrangement of furniture (ofis-arrange.js dress): `props` are placed one by one where they fit (at: against the west wall, in a corner, beside the soft part,
+// against any wall or anywhere; a prop that fits nowhere is left out), `with` rides on the prop (a lamp on a side table), `accents` stand on the soft part's table. The wall pieces
+// (windows, clock, pictures, boards, sconces, the string of bulbs) are the `items` above that stand on a wall.
+const P = (m, at, o = {}) => ({ m, at, ...o });
+const T = (m, o = {}) => ({ m, ...o });
+const KITCHEN = { k: 'cluster', kind: 'kitchen', at: 'wallW', x: 0.45, fp: [0.75, 1.7], h: 1.0 };
+export const DRESSING = {
+  study: {
+    props: [{ k: 'shelf', at: 'wallW', x: 0.21 }, P('sideTableDrawers', 'wallW', { with: [{ m: 'lampRoundTable', y: 0.65, s: 1.4, lamp: true }] }), P('pottedPlant', 'corner', { s: 1.9 }), P('lampRoundFloor', 'soft', { lamp: true }), P('pottedPlant', 'any', { s: 1.5 })],
+    accents: [{ k: 'candle', n: 2, spread: 0.3 }, T('books', { s: 1.8, ry: 0.4, dz: 0.18 })],
+  },
+  lab: {
+    props: [{ k: 'rack', at: 'wallW', x: 0.4 }, { k: 'printer', at: 'wallW', x: 0.38 }, P('pottedPlant', 'corner', { s: 1.7 }), P('lampSquareFloor', 'soft', { lamp: true, tone: 'cool' }), P('plantSmall2', 'any', { s: 2.0 }), P('speaker', 'soft', { s: 1.7 }), P('speaker', 'soft', { s: 1.7 })],
+    accents: [],
+  },
+  garden: {
+    props: [{ k: 'plantwall', at: 'wallW', x: 0.22 }, P('pottedPlant', 'corner', { s: 2.0 }), P('pottedPlant', 'any', { s: 1.6 }), P('pottedPlant', 'corner', { s: 1.7 }), P('lampRoundFloor', 'soft', { lamp: true }), P('plantSmall3', 'soft', { s: 1.8 })],
+    accents: [{ k: 'candle', n: 3, spread: 0.3 }, T('plantSmall2', { s: 1.6, dz: 0.2 })],
+  },
+  library: {
+    props: [{ k: 'shelf', at: 'wallW', x: 0.21 }, { k: 'shelf', at: 'wallW', x: 0.21 }, { k: 'shelf', at: 'wallW', x: 0.21 }, P('bookcaseOpenLow', 'wall', { s: 1.9 }), P('pottedPlant', 'corner', { s: 1.6 }), P('lampSquareFloor', 'soft', { lamp: true })],
+    accents: [T('books', { s: 1.8, ry: 0.2, dz: -0.15 }), { k: 'candle', n: 1, spread: 0, dz: 0.2 }],
+  },
+  studio: {
+    props: [P('bookcaseOpenLow', 'wallW', { s: 1.9, with: [{ m: 'plantSmall3', y: 0.76, s: 1.6 }] }), P('pottedPlant', 'corner', { s: 2.2 }), P('lampRoundFloor', 'soft', { lamp: true, s: 1.0 }), P('sideTable', 'soft', { s: 1.3, with: [{ m: 'lampRoundTable', y: 0.5, s: 1.2, lamp: true }] })],
+    accents: [T('plantSmall3', { s: 1.6 })],
+  },
+  cafe: {
+    props: [KITCHEN, P('coatRackStanding', 'corner', { s: 1.5 }), P('pottedPlant', 'corner', { s: 1.6 }), P('lampSquareFloor', 'soft', { lamp: true })],
+    accents: [{ k: 'candle', n: 1, spread: 0 }],
+  },
+};
+for (const id of STYLE_IDS) Object.assign(STYLES[id], DRESSING[id]);
+
 // ------------------------------------------------------------ the pack models: their size (x, y, z in the file's own units; test/ofis-styles.test.mjs reads them back from the files)
 
 export const SCALE = 1.7;                       // the scale of the furniture in the scene: a desk is 1.2 m long, a sofa 1.7 m
@@ -188,12 +222,16 @@ export const MODEL_SIZE = {
   loungeSofa: [0.98, 0.46, 0.41], loungeSofaLong: [0.98, 0.46, 0.82], loungeChair: [0.49, 0.46, 0.41], loungeChairRelax: [0.49, 0.63, 0.67],
   loungeDesignSofa: [1.12, 0.40, 0.41], stoolBar: [0.27, 0.43, 0.23], benchCushion: [0.40, 0.46, 0.20],
   tableCoffee: [0.66, 0.23, 0.40], tableCoffeeGlass: [0.66, 0.23, 0.40], tableRound: [0.69, 0.37, 0.80], table: [0.84, 0.33, 0.45], sideTable: [0.53, 0.38, 0.22],
-  sideTableDrawers: [0.53, 0.38, 0.39], bookcaseOpenLow: [0.40, 0.40, 0.25], coatRackStanding: [0.27, 0.77, 0.27],
-  kitchenCoffeeMachine: [0.27, 0.30, 0.33], kitchenFridgeSmall: [0.43, 0.60, 0.32], kitchenCabinet: [0.43, 0.45, 0.48],
+  sideTableDrawers: [0.534, 0.384, 0.222], bookcaseOpenLow: [0.40, 0.40, 0.25], coatRackStanding: [0.27, 0.77, 0.27],
+  kitchenCoffeeMachine: [0.24, 0.303, 0.304], kitchenFridgeSmall: [0.43, 0.6, 0.292], kitchenCabinet: [0.43, 0.45, 0.45],
   speaker: [0.15, 0.64, 0.15], laptop: [0.60, 0.37, 0.55],
-  pottedPlant: [0.25, 0.54, 0.29], plantSmall2: [0.19, 0.28, 0.19], plantSmall3: [0.17, 0.29, 0.20],
+  pottedPlant: [0.212, 0.595, 0.241], plantSmall2: [0.19, 0.28, 0.19], plantSmall3: [0.17, 0.29, 0.20],
+  desk: [0.734, 0.384, 0.392], screen: [0.393, 0.294, 0.104], keyboard: [0.282, 0.028, 0.118], mouse: [0.05, 0.024, 0.085],
   books: [0.15, 0.10, 0.09], pillow: [0.23, 0.22, 0.09], rugRound: [0.92, 0.01, 0.92], rugRectangle: [1.57, 0.01, 0.92], rugRounded: [1.57, 0.01, 0.92], rugSquare: [0.90, 0.01, 0.92],
 };
+
+// the height of the part of a seat model a person sits on, in the file's own units (times the model's scale it is where the hip rests, plus the pad of the figure)
+export const SEAT_TOP = { loungeChair: 0.23, loungeChairRelax: 0.23, loungeSofa: 0.23, loungeSofaLong: 0.23, loungeDesignSofa: 0.23, benchCushion: 0.24, stoolBar: 0.435 };
 
 // ------------------------------------------------------------ which style a project gets
 

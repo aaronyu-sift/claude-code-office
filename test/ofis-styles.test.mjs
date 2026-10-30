@@ -45,9 +45,10 @@ test('styles: every model a style names is a file of the manifest, and its size 
   for (const k of Object.keys(MODEL_SIZE)) {
     const { json } = readGlb(readFileSync(join(PUBLIC, PROPS[k])));
     const mn = [1e9, 1e9, 1e9], mx = [-1e9, -1e9, -1e9];
-    for (const mesh of json.meshes) for (const p of mesh.primitives) {
-      const a = json.accessors[p.attributes.POSITION];
-      for (let i = 0; i < 3; i++) { mn[i] = Math.min(mn[i], a.min[i]); mx[i] = Math.max(mx[i], a.max[i]); }
+    // the scene graph as the page draws it: a node that carries a mesh moves it by its translation (the desk's drawer is a second node; the rest of the kit has none)
+    for (const node of json.nodes) if (node.mesh != null) for (const p of json.meshes[node.mesh].primitives) {
+      const a = json.accessors[p.attributes.POSITION], t = node.translation || [0, 0, 0];
+      for (let i = 0; i < 3; i++) { mn[i] = Math.min(mn[i], a.min[i] + t[i]); mx[i] = Math.max(mx[i], a.max[i] + t[i]); }
     }
     [0, 1, 2].forEach(i => assert.ok(Math.abs(mx[i] - mn[i] - MODEL_SIZE[k][i]) < 0.011, `${k}: axis ${i} is ${(mx[i] - mn[i]).toFixed(2)} in the file, ${MODEL_SIZE[k][i]} in MODEL_SIZE`));
   }
