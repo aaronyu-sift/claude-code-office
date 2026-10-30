@@ -7,7 +7,7 @@ import {
   STYLE_IDS, STYLES, MODEL_SIZE, SCALE, SIGN_X, WIN_Y, DOOR_BACK_W, assignStyles, neighbourSlots, neighbourMap, planRoom, zonesOf, loungeOf, footprint, rectOf, hit, wallBoxes,
   floorBlocksWindow, paletteSpec, wallColour, floorColour, mixHex, styleAt, lightsOf, CHIEF_LAMP,
 } from '../public/js/ofis-styles.js';
-import { CELL_W, COLS, CHEF_W, COL_W, MAX_CLS, BASE_CLS, ROOM_D, perRowFor, MIN_ROOMS } from '../public/js/ofis-layout.js';
+import { CELL_W, COLS, CHEF_W, COL_W, MAX_CLS, BASE_CLS, ROOM_D, MIN_ROOMS, buildingPlan, baysForOffices } from '../public/js/ofis-layout.js';
 import { PROPS, PALETTES } from '../public/js/ofis-rig.js';
 import { hash } from '../public/js/util.js';
 import { readGlb } from '../tools/models/strip-glb.mjs';
@@ -107,12 +107,12 @@ test('assign: the styles are spread out; ten projects use every style', () => {
 });
 
 test('assign: offices next to each other never share a style, however many chats there are', () => {
-  const perRow = perRowFor(MIN_ROOMS);
-  for (const n of [7, 8, 9, 10, 15, 20, 30]) {
+  for (const n of [7, 8, 9, 10, 15, 20, 30, 45]) {
+    const cells = buildingPlan(baysForOffices(n + 1)).cells;
     for (let seed = 0; seed < 10; seed++) {
       const list = Array.from({ length: n }, (_, i) => ({ project: `p${seed}-${i}`, slot: i }));
-      const got = assignStyles(list.map(l => l.project), new Map(), neighbourMap(list, perRow));
-      for (const l of list) for (const s of neighbourSlots(l.slot, perRow)) {
+      const got = assignStyles(list.map(l => l.project), new Map(), neighbourMap(list, cells));
+      for (const l of list) for (const s of neighbourSlots(l.slot, cells)) {
         const o = list.find(x => x.slot === s);
         if (o) assert.notEqual(got.get(l.project), got.get(o.project), `${n} chats, set ${seed}: slots ${l.slot} and ${s} share a style`);
       }
@@ -120,14 +120,32 @@ test('assign: offices next to each other never share a style, however many chats
   }
 });
 
-test('neighbours: left and right in the row, and across the hall (rows are paired)', () => {
-  assert.deepEqual(neighbourSlots(0, 5).sort((a, b) => a - b), [1, 5]);
-  assert.deepEqual(neighbourSlots(7, 5).sort((a, b) => a - b), [2, 6, 8]);
-  assert.deepEqual(neighbourSlots(14, 5).sort((a, b) => a - b), [13, 19], 'the last office of a row has no one on its right');
-  assert.deepEqual(neighbourSlots(10, 5).sort((a, b) => a - b), [11, 15], 'row 2 is paired with row 3');
-  const m = neighbourMap([{ project: 'a', slot: 0 }, { project: 'b', slot: 1 }, { project: 'c', slot: 5 }, { project: 'd', slot: 3 }], 5);
+test('neighbours: across the hall, along the hall and across the lawn between rows; symmetric, never more than five, in every size of the building', () => {
+  for (let bays = 1; bays <= 40; bays++) {
+    const cells = buildingPlan(bays).cells;
+    for (const c of cells) {
+      const ns = neighbourSlots(c.slot, cells);
+      assert.ok(ns.length <= 5, `${bays} bays, slot ${c.slot}: ${ns.length} neighbours`);
+      assert.ok(!ns.includes(c.slot), 'not its own neighbour');
+      for (const s of ns) assert.ok(neighbourSlots(s, cells).includes(c.slot), `${bays} bays: ${c.slot} lists ${s} but not the other way round`);
+      const partner = cells.find(o => o.bay === c.bay && o.slot !== c.slot);
+      if (partner) assert.ok(ns.includes(partner.slot), `${bays} bays: the office across the hall is a neighbour`);
+    }
+  }
+});
+
+test('neighbours in the X: the bar\'s offices touch their bay mate, the next bay along the hall, and the arm offices that face them', () => {
+  const cells = buildingPlan(6).cells, by = (bay, side) => cells.find(c => c.bay === bay && c.side === side);
+  const n = c => new Set(neighbourSlots(c.slot, cells));
+  const bar0 = by(0, 'back'), bar1 = by(1, 'back'), barFront0 = by(0, 'front'), northArm = by(2, 'front'), southArm = by(3, 'back');
+  assert.ok(n(bar0).has(barFront0.slot), 'across the hall');
+  assert.ok(n(bar0).has(bar1.slot), 'along the hall');
+  assert.ok(n(bar1).has(northArm.slot), 'the north arm\'s front office faces the bar\'s back offices');
+  assert.ok(n(barFront0).size >= 1);
+  assert.ok(southArm && n(southArm).size >= 1, 'the south arm is next to the bar too');
+  const m = neighbourMap([{ project: 'a', slot: bar0.slot }, { project: 'b', slot: barFront0.slot }, { project: 'c', slot: bar1.slot }, { project: 'd', slot: 99 }], cells);
   assert.deepEqual(m.get('a').sort(), ['b', 'c']);
-  assert.deepEqual(m.get('d'), [], 'an office whose neighbours are vacant has none');
+  assert.deepEqual(m.get('d'), [], 'an office that is not in the plan has no neighbours');
 });
 
 // ---------------------------------------------------------------- the plan of a room

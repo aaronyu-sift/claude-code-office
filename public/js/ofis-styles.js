@@ -4,7 +4,7 @@
 //   STYLES / STYLE_IDS               study, lab, garden, library, studio, cafe: floor, wall tint, palette of the pack models, furniture and lights
 //   assignStyles(projects, pinned)   the style of every project: a pure function of the set of projects (all different while there are six or fewer, then
 //                                    the least used, never next to the same style when a neighbour map is given); a project that has a style keeps it
-//   neighbourSlots(slot, perRow)     the offices next to an office (same row, and across the hall)
+//   neighbourSlots(slot, cells)      the offices next to an office in the building plan (across the hall, along it, across the lawn between two rows)
 //   planRoom(styleId, ctx)           { items, windows, lights, zones, lounge }: the items of the room in room coordinates (x east, z south; the walls are x = 0
 //                                    and z = 0), ctx = { cls, door, W, D, rowsZ }; nothing in it stands on a desk, a chair, a walking lane or another item
 //   floorColour / wallColour / paletteSpec   the colours a style gives a room (project theme + style)
@@ -201,7 +201,7 @@ const N = STYLE_IDS.length;
 // styles: Map project -> style index. `pinned` (project -> index) is kept as it is: a chat does not change its room's style while the page is open.
 // New projects, in the order of their hash (so the result depends on the set of projects and not on who arrived first), take the style their hash
 // points at, or the next one that is free: with six projects or fewer no two share a style. With more, a style is reused where it is used least and,
-// when `neighbours` (project -> projects next to it) is given, where no neighbour has it. A greedy pass over offices that have at most three
+// when `neighbours` (project -> projects next to it) is given, where no neighbour has it. A greedy pass over offices that have at most five
 // neighbours always finds a style a neighbour does not have, so two offices next to each other differ whatever the number of chats.
 export function assignStyles(projects, pinned = new Map(), neighbours = null) {
   const out = new Map();
@@ -226,19 +226,26 @@ export function assignStyles(projects, pinned = new Map(), neighbours = null) {
   }
   return out;
 }
-// the offices next to an office: the ones left and right of it in its row, and the one across the hall (rows are paired: 0 with 1, 2 with 3, ...)
-export function neighbourSlots(slot, perRow) {
-  const row = Math.floor(slot / perRow), col = slot % perRow, out = [];
-  if (col > 0) out.push(slot - 1);
-  if (col < perRow - 1) out.push(slot + 1);
-  out.push((row ^ 1) * perRow + col);
+// The offices next to an office in the building plan (ofis-layout.js buildingPlan: cells with slot, bay, side, row and col): the other office of its bay
+// (across the hall), the offices of the same side in the bays next to it along the same hall, and the offices that face it across the lawn between two
+// rows of the building (the front offices of one row and the back offices of the row south of it, where their columns overlap). That is at most five.
+export function neighbourSlots(slot, cells) {
+  const me = cells.find(c => c.slot === slot);
+  if (!me) return [];
+  const out = [];
+  for (const c of cells) {
+    if (c.slot === slot) continue;
+    if (c.bay === me.bay) out.push(c.slot);
+    else if (c.row === me.row && c.side === me.side && Math.abs(c.col - me.col) <= 1.0001) out.push(c.slot);
+    else if (Math.abs(c.col - me.col) < 1 && ((c.row === me.row + 1 && me.side === 'front' && c.side === 'back') || (c.row === me.row - 1 && me.side === 'back' && c.side === 'front'))) out.push(c.slot);
+  }
   return out;
 }
 // the planned offices as a list of { project, slot }: every project's neighbours (the projects of the offices next to its own)
-export function neighbourMap(list, perRow) {
+export function neighbourMap(list, cells) {
   const bySlot = new Map(list.map(it => [it.slot, it.project]));
   const out = new Map();
-  for (const it of list) out.set(it.project, neighbourSlots(it.slot, perRow).map(s => bySlot.get(s)).filter(p => p != null && p !== it.project));
+  for (const it of list) out.set(it.project, neighbourSlots(it.slot, cells).map(s => bySlot.get(s)).filter(p => p != null && p !== it.project));
   return out;
 }
 

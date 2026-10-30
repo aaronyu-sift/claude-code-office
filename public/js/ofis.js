@@ -20,8 +20,8 @@ import * as PL from './ofis-polish.js';
 import { makePalette, PALETTES, chooseOutfit, poseBones } from './ofis-rig.js';
 import { isShelved } from './pixel/shelf.js';
 import {
-  WALL_T, ROOM_D, CHEF_W, COL_W, FRONT_M, GAP, HALL_D, HALL_OPEN_D, HALL_GAP, COLS, CAP, roomW,
-  MIN_ROWS, VACANT_CLS, minRoomsFrom, buildingPlan, classFor, nextClass, createSlots,
+  WALL_T, ROOM_D, CHEF_W, COL_W, FRONT_M, GAP, HALL_D, HALL_GAP, PLINTH_M, COLS, CAP, roomW,
+  VACANT_CLS, minRoomsFrom, buildingPlan, classFor, nextClass, createSlots,
 } from './ofis-layout.js';
 import { boardName, boardProject, boardBadges, fitName } from './board-text.js';
 import { projectOn, onProjectChange } from './board-setting.js';
@@ -469,7 +469,7 @@ export function createOfis(root, ctx, opts = {}) {
     onShelfFirst: () => { if (visible && autoFit) fit(); },
   });
 
-  function assignThemes(list) {
+  function assignThemes(list, cells) {
     const live = [];
     for (const it of list) {
       const a = store.agents.get(it.id);
@@ -486,7 +486,7 @@ export function createOfis(root, ctx, opts = {}) {
     }
     // the same for the room style: the project's own pick (a hash), a free one when it is taken, and never the style of the office next to it (ofis-styles.js assignStyles)
     const named = list.map(it => { const a = store.agents.get(it.id); return { project: (a && a.project) || it.id, slot: it.slot }; });
-    for (const [p, i] of assignStyles(live, styleOf, neighbourMap(named, slots.perRow))) styleOf.set(p, i);
+    for (const [p, i] of assignStyles(live, styleOf, neighbourMap(named, cells))) styleOf.set(p, i);
   }
 
   // ---------------------------------------------------------- label layer
@@ -586,13 +586,10 @@ export function createOfis(root, ctx, opts = {}) {
     extraFigs.length = 0;
     extraMats.splice(0).forEach(m => m.dispose());
 
-    // optional local extra areas: 'last' = start of the last row of the smallest building (bottom-left front corner), 'first' = start of the first row (opens onto the hall)
+    // optional local extra areas: 'first' = left end of the bar's hall on the back row's side, 'last' = on the front row's side (they open onto the hall)
     const ex = extras ? extras.areas : [];
     const aFirst = ex.find(x => x.row === 'first'), aLast = ex.find(x => x.row === 'last');
-    const leads = {};
-    if (aFirst) leads[0] = aFirst.w + GAP;
-    if (aLast) leads[MIN_ROWS - 1] = aLast.w + GAP;
-    const P = buildingPlan(plan.rows, slots.perRow, leads);
+    const P = buildingPlan(plan.bays, { first: aFirst ? aFirst.w : 0, last: aLast ? aLast.w : 0 });
     const bySlot = new Map(list.map(it => [it.slot, it]));
     // every office is a fixed cell: a room is as wide as its cell, the desks of its class fill the left of it and the rest is a lounge
     const items = P.cells.map(c => {
@@ -604,25 +601,31 @@ export function createOfis(root, ctx, opts = {}) {
     world.entryX = world.width + 0.45;
     world.depth = P.depth;
     const areas = world.areaList = [];
-    if (aLast) areas.push({ ...aLast, x: 0, z: P.rows[MIN_ROWS - 1].z, door: P.rows[MIN_ROWS - 1].door, hall: P.rows[MIN_ROWS - 1].hall });
-    if (aFirst) areas.push({ ...aFirst, x: 0, z: P.rows[0].z, door: P.rows[0].door, hall: P.rows[0].hall });
-    assignThemes(list);
+    for (const [key, ar] of [['last', aLast], ['first', aFirst]]) {
+      const a = ar && P.areas.find(x => x.key === key);
+      if (a) areas.push({ ...ar, x: a.x, z: a.z, door: a.door, hall: a.hall });
+    }
+    assignThemes(list, P.cells);
     const B = new Batch();
     const T = WALL_T;
 
-    // floor slab (corridors) and the building's plinth
-    const m0 = 0.7;
-    const bx0 = -T - m0, bz0 = -T - m0, bx1 = world.width + T + m0, bz1 = P.depth + T + m0;
-    const slabGeo = new THREE.PlaneGeometry(bx1 - bx0, bz1 - bz0).rotateX(-Math.PI / 2);
-    const uv = slabGeo.attributes.uv;
-    for (let i = 0; i < uv.count; i++) uv.setXY(i, uv.getX(i) * (bx1 - bx0) / 1.2, uv.getY(i) * (bz1 - bz0) / 1.2);
-    const slab = new THREE.Mesh(slabGeo, MAT.slab);
-    slab.position.set((bx0 + bx1) / 2, 0, (bz0 + bz1) / 2);
-    slab.receiveShadow = true;
-    slab.userData.own = true;
-    g.add(slab);
-    B.box((bx0 + bx1) / 2, -0.23, (bz0 + bz1) / 2, bx1 - bx0, 0.46, bz1 - bz0, '#4a5163');
-    B.box((bx0 + bx1) / 2, -0.012, (bz0 + bz1) / 2, bx1 - bx0 + 0.06, 0.02, bz1 - bz0 + 0.06, '#b9b1a1');
+    // floor slab (corridors) and the building's plinth: one paved rectangle per row of the building (the arms of the X stand on their own), the stone
+    // pattern anchored to the world so that it runs on from one rectangle to the next
+    world.footprint = P.plinth;
+    world.baseBounds = { ...P.bounds };
+    for (const r of P.plinth) {
+      const w = r.x1 - r.x0, d = r.z1 - r.z0, cx = (r.x0 + r.x1) / 2, cz = (r.z0 + r.z1) / 2;
+      const slabGeo = new THREE.PlaneGeometry(w, d).rotateX(-Math.PI / 2);
+      const uv = slabGeo.attributes.uv, pos = slabGeo.attributes.position;
+      for (let i = 0; i < uv.count; i++) uv.setXY(i, (pos.getX(i) + cx) / 1.2, (pos.getZ(i) + cz) / 1.2);
+      const slab = new THREE.Mesh(slabGeo, MAT.slab);
+      slab.position.set(cx, 0, cz);
+      slab.receiveShadow = true;
+      slab.userData.own = true;
+      g.add(slab);
+      B.box(cx, -0.23, cz, w, 0.46, d, '#4a5163');
+      B.box(cx, -0.012, cz, w + 0.06, 0.02, d + 0.06, '#b9b1a1');
+    }
 
     items.forEach(it => {
       const n0 = B.i.length / 3, f0 = floorJobs.length;
@@ -634,7 +637,9 @@ export function createOfis(root, ctx, opts = {}) {
       if (prev) room.doorOpen = prev.doorOpen;
       world.rooms.set(it.id, room);
     });
-    world.plan = { rows: P.rowCount, perRow: P.perRow, size: P.cells.length };
+    world.plan = { bays: P.bays, size: P.size };
+    world.lounge = P.lounge;
+    if (P.lounge) buildPlaza(B, P.lounge);
     buildHalls(B, g, items, areas);
     addVacantSigns(g);
     decor.finish(g);
@@ -663,7 +668,6 @@ export function createOfis(root, ctx, opts = {}) {
     stat.userData.own = true;
     g.add(stat);
 
-    world.baseBounds = { x0: bx0, x1: bx1, z0: bz0, z1: bz1 };
     world.lots = [];
     world.fitExtra = [];
     if (extras && items.length) runExtras(g, areas);
@@ -725,7 +729,9 @@ export function createOfis(root, ctx, opts = {}) {
     if (sun.shadow.map && sun.shadow.map.width !== sun.shadow.mapSize.x) { sun.shadow.map.dispose(); sun.shadow.map = null; }
     computeLimits();
     // only a different building refits an automatic view: a chat or a sub-agent coming and going inside the same building leaves the camera alone
-    const key = [b.x0, b.x1, b.z0, b.z1, (world.lots || []).length, (world.fitExtra || []).length].map(v => +v.toFixed(2)).join();
+    // (the box the fit frames, which is that of the footprint: a bay added inside the plan's box can change it)
+    const pb = projBounds();
+    const key = [b.x0, b.x1, b.z0, b.z1, pb.a0, pb.a1, pb.b0, pb.b1, (world.lots || []).length, (world.fitExtra || []).length].map(v => +v.toFixed(2)).join();
     const changed = key !== fitKey;
     fitKey = key;
     if (autoFit && changed) { fits++; fit(); }
@@ -752,8 +758,12 @@ export function createOfis(root, ctx, opts = {}) {
     // every office of the building, vacant ones included, in slot order: the stable layout's state (tools/qa/office3d-qa.mjs)
     office() {
       const all = [...world.rooms.values(), ...(world.vacant || [])].sort((a, b) => a.slot - b.slot);
-      return { ...world.plan, minRooms: MIN_ROOMS_NOW, halls: (world.halls || []).map(h => ({ z0: h.z0, z1: h.z1, lane: h.lane, open: h.open })), slots: all.map(r => ({ slot: r.slot, id: r.vacant ? null : r.id, vacant: r.vacant, tris: r.tris, cls: r.cls, cap: r.cap, X: r.X, Z: r.Z, W: r.W, D: r.D, door: r.door, hall: r.hall })) };
+      return { ...world.plan, minRooms: MIN_ROOMS_NOW, entryX: world.entryX, bounds: world.bounds, stubs: world.stubs || [], lounge: world.lounge ? { X: world.lounge.X, Z: world.lounge.Z, W: world.lounge.W, D: world.lounge.D, door: world.lounge.door, hall: world.lounge.hall } : null,
+        halls: (world.halls || []).map(h => ({ z0: h.z0, z1: h.z1, lane: h.lane, open: h.open, x0: h.x0, x1: h.x1, row: h.row })),
+        slots: all.map(r => ({ slot: r.slot, id: r.vacant ? null : r.id, vacant: r.vacant, tris: r.tris, cls: r.cls, cap: r.cap, X: r.X, Z: r.Z, W: r.W, D: r.D, door: r.door, hall: r.hall })) };
     },
+    // the paved rectangles under the building, one per row of it (what the fit frames; tools/qa/office3d-map.mjs measures how much of the window they cover)
+    footprint() { return (world.footprint || []).map(r => ({ x0: r.x0, x1: r.x1, z0: r.z0, z1: r.z1 })); },
   };
 
   // Room shell: carpet, back walls (full height), front walls (low cutaway) and the door facing the hall.
@@ -1105,38 +1115,53 @@ export function createOfis(root, ctx, opts = {}) {
 
   // ---------------------------------------------------------- hall / lobby
 
+  // The hub of the X is a cell without a chat slot, reserved for a lounge that is furnished later (ofis-layout.js). Until then it is an open plaza:
+  // stone paving that runs on from the hall, a low curb on its street side, a row of planters and a round bed with a shrub. All of it is in the one batch.
+  function buildPlaza(B, c) {
+    const { X, Z, W, D } = c, cx = X + W / 2, cz = Z + D / 2;
+    B.box(cx, 0.006, cz, W, 0.012, D, '#d6d0c2');
+    B.box(cx, 0.03, Z + D - 0.12, W, 0.06, 0.24, '#b9b1a1');
+    for (let k = 0; k < 4; k++) {
+      const x = X + W * (0.13 + k * 0.248), z = Z + D - 0.75;
+      B.put(GEO.pot, x, 0.24, z, 0.4, 0.48, 0.4, '#d9d2c4');
+      B.put(GEO.ico, x, 0.72, z, 0.56, 0.62, 0.56, '#4f9f55', x);
+      B.put(GEO.ico, x - 0.04, 1.0, z + 0.04, 0.38, 0.42, 0.38, '#66b35d', x * 2);
+    }
+    B.put(GEO.cyl, cx, 0.1, cz - 0.4, 2.6, 0.2, 2.6, '#b9b1a1');
+    B.put(GEO.cyl, cx, 0.19, cz - 0.4, 2.3, 0.06, 2.3, '#7a5a40');
+    B.put(GEO.ico, cx, 0.85, cz - 0.4, 1.5, 1.3, 1.5, '#4f9f55', cx);
+    B.put(GEO.ico, cx + 0.2, 1.35, cz - 0.3, 0.9, 0.8, 0.9, '#66b35d', cx * 3);
+  }
+
   function buildHalls(B, g, items, areas) {
-    const Wb = world.width, T = WALL_T, H = WALL_H;
+    const T = WALL_T, H = WALL_H;
     world.lobby = null;
+    world.stubs = [];                                        // the paved paths from the arms' halls to the street (verification: tools/qa/office3d-qa.mjs walks them)
     const endWall = '#e8dcc5', endCap = '#5b4636', endWain = '#b98a5c';
     world.halls.forEach((h, hi) => {
-      const lobby = hi === 0;                                // the reception stays in the first hall: a row appended later never moves it
+      const lobby = hi === 0;                                // the reception stays in the first hall (the bar of the X): a bay added later never moves it
       const z0 = h.z0, z1 = h.z1, hd = z1 - z0;
+      const hx0 = h.x0, Wb = h.x1;                            // this hall runs from hx0 to Wb (the right end of its row, where it is entered)
       // floor: light stone tiles
-      const fw = Wb + 0.3;
+      const fw = Wb - hx0 + 0.3;
       const fg = new THREE.PlaneGeometry(fw, hd).rotateX(-Math.PI / 2);
       const fuv = fg.attributes.uv;
       for (let i = 0; i < fuv.count; i++) fuv.setXY(i, fuv.getX(i) * fw / 1.1, fuv.getY(i) * hd / 1.1);
       const floor = new THREE.Mesh(fg, MAT.hall);
-      floor.position.set(fw / 2, 0.01, z0 + hd / 2);
+      floor.position.set(hx0 + fw / 2, 0.01, z0 + hd / 2);
       floor.receiveShadow = true;
       floor.userData.own = true;
       g.add(floor);
       // runner rug (runs left from the entrance)
-      const rx0 = 0.5, rx1 = Wb + 0.3;
+      const rx0 = hx0 + 0.5, rx1 = Wb + 0.3;
       B.box((rx0 + rx1) / 2, 0.016, h.lane, rx1 - rx0, 0.012, 1.08, '#c9a24e');
       B.box((rx0 + rx1) / 2, 0.02, h.lane, rx1 - rx0 - 0.08, 0.012, 0.94, '#4f7f93');
       // left end wall
       const ez0 = z0 - HALL_GAP, ez1 = z1 + T;
-      B.box(-T / 2, H / 2, (ez0 + ez1) / 2, T, H, ez1 - ez0, endWall);
-      B.box(-T / 2, H + 0.025, (ez0 + ez1) / 2, T + 0.03, 0.05, ez1 - ez0 + 0.03, endCap);
-      B.box(0.012, 0.43, (z0 + z1) / 2, 0.024, 0.86, hd, endWain);
-      B.box(0.022, 0.875, (z0 + z1) / 2, 0.044, 0.045, hd, '#f3ead9');
-      // the open hall is the building's front facade: low wall
-      if (h.open) {
-        B.box((Wb - T) / 2, LOW_H / 2, z1 + T / 2, Wb + T, LOW_H, T, endWall);
-        B.box((Wb - T) / 2, LOW_H + 0.02, z1 + T / 2, Wb + T + 0.03, 0.04, T + 0.03, endCap);
-      }
+      B.box(hx0 - T / 2, H / 2, (ez0 + ez1) / 2, T, H, ez1 - ez0, endWall);
+      B.box(hx0 - T / 2, H + 0.025, (ez0 + ez1) / 2, T + 0.03, 0.05, ez1 - ez0 + 0.03, endCap);
+      B.box(hx0 + 0.012, 0.43, (z0 + z1) / 2, 0.024, 0.86, hd, endWain);
+      B.box(hx0 + 0.022, 0.875, (z0 + z1) / 2, 0.044, 0.045, hd, '#f3ead9');
       // entrance (right end): doormat and two planters
       B.box(Wb + 0.3, 0.02, h.lane, 0.55, 0.02, 1.3, '#3b3f48');
       for (const dz of [-1.05, 1.05]) {
@@ -1146,12 +1171,20 @@ export function createOfis(root, ctx, opts = {}) {
         B.put(GEO.ico, Wb - 0.1, 0.72, pz, 0.56, 0.62, 0.56, '#4f9f55', pz);
         B.put(GEO.ico, Wb - 0.14, 1.0, pz + 0.04, 0.38, 0.42, 0.38, '#66b35d', pz * 2);
       }
+      // every hall is entered from the street side: a row shorter than the building (an arm of the X) has a paved path across the lawn from its
+      // plinth to the street's sidewalk (which starts at the plinth's right edge, ofis-env.js), the same stone and width as that sidewalk
+      const px0 = h.x1 + WALL_T + PLINTH_M - 0.05, px1 = world.baseBounds.x1 - 0.05;
+      if (px1 - px0 > 0.1) {
+        const half = hi === world.halls.length - 1 ? 1.35 : 0.95;                  // the last entrance is the wide one in the environment
+        B.box((px0 + px1) / 2, -0.012 - 0.09, h.lane, px1 - px0, 0.18, 2 * half, '#d4d7dc');
+        world.stubs.push({ hall: hi, x0: px0, x1: px1, z0: h.lane - half, z1: h.lane + half });
+      }
 
       // furniture along the back edge: keep the doors that open onto the hall clear
       const busy = [];
       for (const it of items) if (it.hall === hi && it.door === 'front') busy.push([it.X + it.W - 1.0 - 0.85, it.X + it.W - 1.0 + 0.85]);
       for (const ar of areas) if (ar.hall === hi && ar.door === 'front') busy.push([ar.x + ar.w - 1.0 - 0.85, ar.x + ar.w - 1.0 + 0.85]);
-      let cur = 0.35;
+      let cur = hx0 + 0.35;
       const place = w => {
         let x = cur;
         for (let guard = 0; guard < 50; guard++) {
@@ -1206,7 +1239,7 @@ export function createOfis(root, ctx, opts = {}) {
         // live summary board on the left end wall
         const sz0 = z0 + 0.35, sz1 = h.open ? z1 - 0.35 : z1 - 1.55;
         const sw = Math.min(4.2, sz1 - sz0), sh = 1.1, scz = sz0 + sw / 2, sy = 1.48;
-        B.box(0.035, sy, scz, 0.05, sh + 0.14, sw + 0.14, '#1d222c');
+        B.box(hx0 + 0.035, sy, scz, 0.05, sh + 0.14, sw + 0.14, '#1d222c');
         const cv = document.createElement('canvas');
         cv.height = 300; cv.width = Math.round(300 * sw / sh);
         const tex = new THREE.CanvasTexture(cv);
@@ -1215,7 +1248,7 @@ export function createOfis(root, ctx, opts = {}) {
         const m = new THREE.MeshBasicMaterial({ map: tex });
         const scr = new THREE.Mesh(new THREE.PlaneGeometry(sw, sh), m);
         scr.rotation.y = Math.PI / 2;
-        scr.position.set(0.064, sy, scz);
+        scr.position.set(hx0 + 0.064, sy, scz);
         scr.userData.own = true;
         scr.userData.dispose = () => { m.dispose(); tex.dispose(); };
         g.add(scr);
@@ -1441,9 +1474,10 @@ export function createOfis(root, ctx, opts = {}) {
    *     The card that opens beside a clicked agent (ofis-ui.js) is anchored to it and follows it through pan, zoom and walking.
    * api.seatOf(figure) → { x, z, aisleX, room } for a seated agent: its seat and the walking line in front of the desk
    *     (world coordinates), or null (not an agent, or walking in or out).
-   * api.layout() → { width, depth, entryX, halls: [{ z0, z1, lane }], rooms: [{ id, x0, x1, z0, z1, door, doorX, hall }] }:
-   *     the building interior is x ∈ [0, width], z ∈ [0, depth]. Halls run along x; lane is their walking line and each
-   *     hall is entered from outside at x = entryX. rooms lists the office rooms and the walled local areas; each one has
+   * api.layout() → { width, depth, entryX, halls: [{ z0, z1, lane, x0, x1 }], rooms: [{ id, x0, x1, z0, z1, door, doorX, hall }] }:
+   *     the building is an X of rows (ofis-layout.js): its interior lies in x ≤ width, z ≤ depth, and its rows are not all as long as the
+   *     building, so read each hall's own length (x0 to x1; x0 is 0 for the bar). Halls run along x; lane is their walking line and each
+   *     hall is entered from outside at x = entryX (a paved path joins the shorter ones to it). rooms lists the office rooms and the walled local areas; each one has
    *     its door at x = doorX on the hall side (z0 for door 'back', z1 for 'front'), opening onto halls[hall].
    * api.openDoorsNear(x, z): call it every frame while something walks through a door; the doors near that point open
    *     as they do for the agents.
@@ -1651,7 +1685,7 @@ export function createOfis(root, ctx, opts = {}) {
         for (const a of world.areaList || []) {
           if (a.walled) rooms.push({ id: a.id, x0: a.x, x1: a.x + a.w, z0: a.z, z1: a.z + ROOM_D, door: a.door, doorX: a.x + a.w - 1.0, hall: a.hall });
         }
-        const halls = (world.halls || []).map(h => ({ z0: h.z0, z1: h.z1, lane: h.lane }));
+        const halls = (world.halls || []).map(h => ({ z0: h.z0, z1: h.z1, lane: h.lane, x0: h.x0, x1: h.x1 }));
         return { width: world.width || 0, depth: world.depth || 0, entryX: world.entryX || 0, halls, rooms };
       },
       openDoorsNear(x, z) { doorWalkers.push(Number(x) || 0, Number(z) || 0); },
@@ -2094,7 +2128,7 @@ export function createOfis(root, ctx, opts = {}) {
       out.push({ id: m.id, cls: st.cls, slot: plan.slotOf.get(m.id) });
     }
     for (const id of roomState.keys()) if (!mains.some(m => m.id === id)) roomState.delete(id);
-    const sig = plan.rows + '|' + out.map(o => o.id + ':' + o.slot + ':' + o.cls).join('|');
+    const sig = plan.bays + '|' + out.map(o => o.id + ':' + o.slot + ':' + o.cls).join('|');
     if (sig !== world.sig || !world.group) {
       world.sig = sig;
       rebuild(out, plan);
@@ -2388,7 +2422,9 @@ export function createOfis(root, ctx, opts = {}) {
     const b = world.bounds;
     if (!b) return null;
     let a0 = Infinity, a1 = -Infinity, b0 = Infinity, b1 = -Infinity;
-    for (const x of [b.x0, b.x1]) for (const z of [b.z0, b.z1]) for (const y of [-0.5, WALL_H + 0.7]) {
+    // the footprint: the paved rectangles under the building (one per row of it) and the local lots, not the box around all of them: the corners
+    // between the arms of the X are empty and stay out of the frame
+    for (const r of [...(world.footprint || [b]), ...(world.lots || [])]) for (const x of [r.x0, r.x1]) for (const z of [r.z0, r.z1]) for (const y of [-0.5, WALL_H + 0.7]) {
       _v.set(x, y, z);
       const pa = _v.dot(R), pb = _v.dot(U);
       a0 = Math.min(a0, pa); a1 = Math.max(a1, pa); b0 = Math.min(b0, pb); b1 = Math.max(b1, pb);
