@@ -110,14 +110,15 @@ export function vnoise(x, z, s) {
   return a + (b - a) * u + (c - a) * v + (a - b - c + d) * u * v;
 }
 
-/** a room floor: vertex colours = base colour * (soft mottling) * (occlusion from furniture and walls) */
-export function floorMesh(X, Z, W, D, hex, occ, y = 0.012, cell = 0.3) {
+/** a room floor: vertex colours = base colour * (soft mottling) * (occlusion from furniture and walls); uv in tiles of `tile` metres for a style's floor pattern (ofis-decor.js) */
+export function floorMesh(X, Z, W, D, hex, occ, y = 0.012, cell = 0.3, tile = 1.2) {
   const nx = Math.max(2, Math.round(W / cell)), nz = Math.max(2, Math.round(D / cell));
-  const pos = new Float32Array((nx + 1) * (nz + 1) * 3), col = new Float32Array((nx + 1) * (nz + 1) * 3), nor = new Float32Array((nx + 1) * (nz + 1) * 3);
+  const pos = new Float32Array((nx + 1) * (nz + 1) * 3), col = new Float32Array((nx + 1) * (nz + 1) * 3), nor = new Float32Array((nx + 1) * (nz + 1) * 3), uv = new Float32Array((nx + 1) * (nz + 1) * 2);
   const base = new THREE.Color(hex), c = new THREE.Color();
   for (let j = 0; j <= nz; j++) for (let i = 0; i <= nx; i++) {
     const k = (j * (nx + 1) + i) * 3, x = X + (i / nx) * W, z = Z + (j / nz) * D;
     pos[k] = x; pos[k + 1] = y; pos[k + 2] = z; nor[k + 1] = 1;
+    uv[(j * (nx + 1) + i) * 2] = x / tile; uv[(j * (nx + 1) + i) * 2 + 1] = z / tile;
     const m = 1 + (vnoise(x * 0.45, z * 0.45, 5) - 0.5) * 0.10 + (vnoise(x * 1.9, z * 1.9, 6) - 0.5) * 0.035;
     c.copy(base).multiplyScalar(m);
     if (occ) { const ao = aoAt(occ, x, y, z, 0, 1, 0); c.multiplyScalar(Math.max(0.62, 1 - 0.55 * (1 - ao) * 1.3)); }
@@ -132,6 +133,7 @@ export function floorMesh(X, Z, W, D, hex, occ, y = 0.012, cell = 0.3) {
   g.setAttribute('position', new THREE.BufferAttribute(pos, 3));
   g.setAttribute('normal', new THREE.BufferAttribute(nor, 3));
   g.setAttribute('color', new THREE.BufferAttribute(col, 3));
+  g.setAttribute('uv', new THREE.BufferAttribute(uv, 2));
   g.setIndex(idx);
   return g;
 }

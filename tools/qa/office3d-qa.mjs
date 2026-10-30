@@ -34,8 +34,11 @@ const only = val('only'), shotsDir = val('shots');
 // 204k triangles, 172 draw calls, a rebuild of 130 to 188 ms on a machine with a load of 30 (it was 218k, 185 calls, about 150 ms), so the limits
 // are the measurement plus 5 percent for the triangles (they do not vary between runs) and 10 percent for the calls. The time is the slowest
 // reading plus 15 percent: 9 of the 10 offices are full ones, so this building is not faster to build than before, and a loaded machine adds noise
-// (the time of the building as it is used is guarded by 3d-vacant). The models may weigh 1.3 MB (they weigh 1.15 MB).
-const BUDGET = { calls: 190, tris: 215000, rebuildMs: 220, modelBytes: 1.3e6 };
+// (the time of the building as it is used is guarded by 3d-vacant). The models may weigh 1.5 MB. They weighed 1.13 MB in 29 files; the room styles
+// (public/js/ofis-styles.js, the rooms' life: 3d-room-life in office3d-life-qa.mjs) use 33 more Furniture Kit models (lamps, sofas, tables, rugs, a
+// coffee corner, books), 0.31 MB on the wire, so the 62 files weigh 1.44 MB; the limit is that plus 4 percent. The same building then measures 197k
+// triangles (it was 204k: an office is cheaper now), 175 draw calls (it was 172: the living part is 3 instanced meshes) and a rebuild of 142 ms at best.
+const BUDGET = { calls: 190, tris: 215000, rebuildMs: 220, modelBytes: 1.5e6 };
 // 3d-vacant is the building as it is used: 3 chats in the 10 offices, 7 of them vacant. The targets for it were 165k triangles and 100 ms. A vacant
 // office is a shell with a few bare desks, a plant and a sofa (about 1.1k triangles, one batch, no meshes of its own, one shared sign for all of
 // them): the scene takes 115k triangles and 63 draw calls, a rebuild takes 67 to 86 ms on a machine with a load of 30. The limits are the

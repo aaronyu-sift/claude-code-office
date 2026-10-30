@@ -22,6 +22,7 @@ QA check `21-motion` measures the real animations in Chrome (`3d-motion` in `too
 | Walker | an agent walking between desks | constant speed along the path with a short speed-up and slow-down at the ends, walk cycle paced by the speed | no feet sliding |
 | Indicator | the working dot, the thinking dots, the waiting balloon and lamp, the light beam | looping sine of the clock, two tempos, never more than 3 flashes a second | slow 2400 ms (a state that continues), quick 1200 ms (it wants a look) |
 | Ambient scenery | candles, street lights, monitor glow, steam, drifting leaves, snow, fireflies | follows the clock, never a spring, never started by a click; each instance has its own phase and they do not share a period on purpose; a flicker is stepped random (8 to 10 steps a second) or a plain sine | small amplitude: under 8 percent brightness, under 6 px |
+| Room light (3D scene) | a lamp, a candle, string bulbs, a wall light and a screen in an office, and the pane of its windows | the ambient scenery rule: a candle is stepped random (9 steps a second), every other source a sine with a period of its own (2.3 to 4.2 s) and a phase of its own per source; none with reduced motion, where the light stays steady; how bright it is follows the night at the cycle's constant rate (`CYCLE.turn`), never a spring | candle plus or minus 7 percent, a lamp 2.5 percent, a bulb or an LED 3.5 percent; a lamp is dim and has no glow by day, a candle is out |
 | Cycle | day and night, seasons, weather | follows the clock, linear, no easing; a change made by hand moves the light at a constant rate, never in a step | slow: `CYCLE.turn` 4000 ms for a full change of the light |
 
 Why each choice: a click has no momentum, so a surface that it opens does not overshoot; the same goes for the camera, which would make the whole map wobble. A small control may
@@ -88,11 +89,12 @@ millisecond value is the time the spring needs to settle to within 0.3 percent.
 - Indicator: done. The working dot uses the slow tempo and the thinking dots and the waiting balloon the quick one (CSS); in the pixel scene the light beam is slow and the waiting
   figure's bob is quick; in the 3D scene the beam is slow and the lamp's blink is quick.
 - Ambient scenery in the pixel scene (monitor glow, steam, snow, petals, fireflies, sway) already follows the clock with a phase of its own per instance, as the rule asks.
+- Room light in the 3D scene (`ofis-light.js`, drawn by `ofis-decor.js`): the lamps, candles, string bulbs, wall lights and screens of the offices with a chat flicker by the Room light row, the glow and the pool of light come up with the night at the cycle's rate and the window panes go from the sky to a warm light with it; the colour of every source is set on one instanced mesh, so a frame costs no extra draw call (`3d-room-life` in `tools/qa/office3d-life-qa.mjs` reads the flicker in the page: under 15 percent of the mean, moving at 22:00, steady with `prefers-reduced-motion`).
 - Cycle in the 3D scene: the light of the day and night (lit windows, lamps, the sun's and the sky's strength and colour) and the weather's share of it move toward what the clock and the
   settings ask for at a constant rate (`ofis-env.js` `stepLight`, the pure `approach` in `office-atmosphere.js`, pace `CYCLE.turn`); a time chosen in the popover is a slow change, not a step.
   The weather overlay's particles are ambient scenery (clock-driven, a phase per particle, at most 10 frames a second); with reduced motion the weather is off.
 - Waiting for the new art style and assets (the 3D scene, plan item S17): the camera on the `follow` spring, the construction animation on the `build` spring, eased growth of a room,
-  a check that walkers keep a constant speed with a short ramp and a walk cycle paced by it, and the flicker of candles and street lights (stepped random, one shared helper).
+  a check that walkers keep a constant speed with a short ramp and a walk cycle paced by it, and the flicker of the street lights (stepped random, the helper of the room lights, `ofis-light.js`).
 - Open: WCAG 2.2.2 asks for a way to pause, stop or hide a loop that starts by itself and lasts more than five seconds. The reduced-motion setting is the only stop today; there is
   no control in the page.
 
