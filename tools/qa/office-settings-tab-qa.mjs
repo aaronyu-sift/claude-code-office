@@ -167,18 +167,25 @@ if (want('open')) {
     if (!sq) notes.push('no node:sqlite in this Node: the bridge answer was not checked');
     else {
       const cdir = mkdtempSync(join(tmpdir(), 'cco-st-chat-'));
-      let a = null, b = null;
+      let a = null, b = null, c = null;
       try {
+        // a board with every table and column of the chat source's contract (docs/chat-source.md), and one that lacks most of it
         const dbFile = join(cdir, 'chat.db'), db = new sq.DatabaseSync(dbFile);
-        db.exec('CREATE TABLE messages (seq INTEGER PRIMARY KEY, ts_ms INTEGER, channel TEXT, author TEXT, to_list TEXT, body TEXT); CREATE TABLE agent_keys (key TEXT, agent TEXT)');
+        db.exec('CREATE TABLE messages (seq INTEGER PRIMARY KEY, ts_ms INTEGER, channel TEXT, author TEXT, to_list TEXT, body TEXT, human INTEGER); CREATE TABLE agents (name TEXT, kind TEXT, last_seen_ms INTEGER); CREATE TABLE agent_keys (key TEXT, agent TEXT); CREATE TABLE meta (k TEXT PRIMARY KEY, v TEXT); INSERT INTO meta VALUES (\'schema_version\', \'2\')');
         db.close();
+        const thin = join(cdir, 'thin.db'), db2 = new sq.DatabaseSync(thin);
+        db2.exec('CREATE TABLE messages (seq INTEGER PRIMARY KEY, ts_ms INTEGER, channel TEXT, author TEXT, to_list TEXT, body TEXT); CREATE TABLE agent_keys (key TEXT, agent TEXT)');
+        db2.close();
         a = await startServer(cdir, { CCO_CHAT_DB: dbFile });
         b = await startServer(cdir, { CCO_CHAT_DB: join(cdir, 'missing', 'chat.db') });
-        const on = await (await fetch(`http://127.0.0.1:${a.port}/api/config`)).json(), off = await (await fetch(`http://127.0.0.1:${b.port}/api/config`)).json();
-        if (!(on.chat && on.chat.state === 'on')) bad.push(`a server reading a chat database says ${JSON.stringify(on.chat)}, not on`);
+        c = await startServer(cdir, { CCO_CHAT_DB: thin });
+        const get = async s => (await (await fetch(`http://127.0.0.1:${s.port}/api/config`)).json()).chat;
+        const on = { chat: await get(a) }, off = { chat: await get(b) }, thinCfg = { chat: await get(c) };
+        if (!(on.chat && on.chat.state === 'ok')) bad.push(`a server reading a chat database says ${JSON.stringify(on.chat)}, not ok`);
         if (!(off.chat && off.chat.state === 'off')) bad.push(`a server whose chat database cannot be read says ${JSON.stringify(off.chat)}, not off`);
-        notes.push(`/api/config with a chat database: ${JSON.stringify(on.chat)}; with an unreadable one: ${JSON.stringify(off.chat)}`);
-      } finally { if (a) a.stop(); if (b) b.stop(); rmSync(cdir, { recursive: true, force: true }); }
+        if (!(thinCfg.chat && thinCfg.chat.state === 'unsupported')) bad.push(`a server whose chat database lacks columns says ${JSON.stringify(thinCfg.chat)}, not unsupported`);
+        notes.push(`/api/config with a chat database: ${JSON.stringify(on.chat)}; with a missing one: ${JSON.stringify(off.chat)}; with one lacking columns: ${JSON.stringify(thinCfg.chat)}`);
+      } finally { if (a) a.stop(); if (b) b.stop(); if (c) c.stop(); rmSync(cdir, { recursive: true, force: true }); }
     }
     await S.shot('settings-open.png');
     // reduced motion: the page fades in 150 ms and nothing else moves
@@ -527,8 +534,8 @@ const MUTATIONS = [
   { name: 'the page does not fade in', file: 'public/js/settings-tab.js', from: "if (typeof page.animate === 'function') page.animate(", to: "if (false) page.animate(", fails: ['open'] },
   { name: 'the fade is as long under reduced motion', file: 'public/js/settings-tab.js', from: 'duration: reduced() ? DUR.hover : DUR.fast', to: 'duration: DUR.fast', fails: ['open'] },
   { name: 'the board line shows when the server says nothing', file: 'public/js/settings-tab.js', from: '    r.hidden = !state;\n', to: '    r.hidden = false;\n', fails: ['open'] },
-  { name: 'the server says nothing about the message board', file: 'server.js', from: ", chat: { state: chatState() } });", to: ' });', fails: ['open'] },
-  { name: 'the server says the message board is off while it reads the chat database', file: 'server.js', from: "const chatState = () => (CHAT ? (typeof CHAT.status === 'function' ? CHAT.status() : 'on') : 'off');", to: "const chatState = () => 'off';", fails: ['open'] },
+  { name: 'the server says nothing about the message board', file: 'server.js', from: ", chat: chatInfo() });", to: ' });', fails: ['open'] },
+  { name: 'the server says the message board is off while it reads the chat database', file: 'server.js', from: 'return { state: s.state, schema: s.schema };', to: "return { state: 'off', schema: null };", fails: ['open'] },
   { name: 'the camera row shows in the 3D scene', file: 'public/js/office-settings.js', from: "export const tabRowsOf = office => ['scene', ...rowsOf(office)];", to: "export const tabRowsOf = office => TAB_ROWS;", fails: ['open'] },
   { name: 'the tab does not follow a change made in the popover', file: 'public/js/settings-tab.js', from: 'hub.on(refresh);', to: '', fails: ['store'] },
   { name: 'the popover does not follow a change made in the tab', file: 'public/js/settings-panel.js', from: 'hub.on(refresh);', to: '', fails: ['store'] },
