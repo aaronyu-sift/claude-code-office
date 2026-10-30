@@ -5,7 +5,7 @@
 //
 //   createOfficeSettings({ storage, overrides })   get(key) | get(), set(key, value), from(), on(key, fn)
 //   officeQuery(search)                            the overrides of an address: ?time ?season ?weather ?hemisphere ?shelf, and ?hour= as an older name of ?time=
-//   urlAfterChange(search, key, value)             the address after a change made with the controls, when the address named that setting (else null)
+//   urlAfterChange(search, key, value)             the address after a change made with the controls, when the address named that setting (else null); ?lounge=demo stays named
 //   rowsOf(office)                                 the rows of the popover a scene supports
 import { merge, load as loadSettings, save as saveSettings, clean, fromQuery, KEYS } from './pixel/settings.js';
 import { fmtClock } from './pixel/time.js';
@@ -30,6 +30,7 @@ export function urlAfterChange(search, key, value) {
   const q = new URLSearchParams(search || '');
   if (key === 'time' && q.has('hour') && !q.has('time')) { q.delete('hour'); q.set('time', value); return '?' + q; }
   if (!q.has(key)) return null;
+  if (key === 'lounge' && /(^|[\s,+])demo($|[\s,+])/i.test(q.get(key))) value = 'demo,' + value;       // the demo source is not part of the setting: it stays
   q.set(key, value);
   return '?' + q;
 }

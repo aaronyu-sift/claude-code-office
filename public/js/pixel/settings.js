@@ -7,6 +7,8 @@
 //   hemisphere: north (default) | south
 //   shelf:      how many asleep and closed chats the shelf shows at first, a whole number from 3 to 200 (default 10; the visitor can ask for more)
 //   project:    'off' (default) | 'on': whether a room's board also shows the project folder, small in its bottom-right corner (the chat name is the big text)
+//   lounge:     'text' (default) | 'names' | 'off': the lounge on the plaza of the 3D map (lounge-model.js): the text of the posts on its wall, only who talks to whom and where, or a plain pavilion
+//               (the address also takes ?lounge=demo, the demo source, which is not a setting: it can come with a mode, ?lounge=demo,names)
 // The camera view (isometric or front) has its own, older key and is handled by the view itself.
 import { parseClock, fmtClock } from './time.js';
 import { parseSeason, parseHemisphere } from './season.js';
@@ -14,7 +16,7 @@ import { parseWeather } from './weather.js';
 import { DEFAULT_CAP, MIN_CAP, MAX_CAP } from './shelf.js';
 
 export const KEY = 'ajan-ofisi.settings';
-export const DEFAULTS = Object.freeze({ time: 'auto', season: 'auto', weather: 'off', hemisphere: 'north', shelf: DEFAULT_CAP, project: 'off' });
+export const DEFAULTS = Object.freeze({ time: 'auto', season: 'auto', weather: 'off', hemisphere: 'north', shelf: DEFAULT_CAP, project: 'off', lounge: 'text' });
 export const KEYS = Object.keys(DEFAULTS);
 
 // a valid value for a key, or null
@@ -25,6 +27,7 @@ const CLEAN = {
   hemisphere: v => parseHemisphere(v),
   shelf: v => { const n = typeof v === 'number' ? v : typeof v === 'string' && /^\s*\d+\s*$/.test(v) ? +v : NaN; return Number.isInteger(n) && n >= MIN_CAP && n <= MAX_CAP ? n : null; },
   project: v => { const t = typeof v === 'string' ? v.trim().toLowerCase() : ''; return t === 'on' || t === 'off' ? t : null; },
+  lounge: v => (typeof v === 'string' ? v.toLowerCase().split(/[\s,+]+/).find(w => w === 'text' || w === 'names' || w === 'off') || null : null),     // the words may be joined: 'demo,names' is the demo source (not a setting) in the mode names
 };
 export const clean = (key, value) => (CLEAN[key] ? CLEAN[key](value) : null);
 
