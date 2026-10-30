@@ -15,7 +15,7 @@ export const DECOR_FILES = [
 ];
 export const DECOR_PLANTS = ['pottedPlant', 'plantSmall2', 'plantSmall3'];
 export const PROPS = {
-  desk: F + 'desk.glb', chair: F + 'chairDesk.glb', screen: F + 'computerScreen.glb', keyboard: F + 'computerKeyboard.glb',
+  desk: F + 'desk.glb', screen: F + 'computerScreen.glb', keyboard: F + 'computerKeyboard.glb',
   mouse: F + 'computerMouse.glb', shelf: F + 'bookcaseClosedWide.glb', plant: F + 'plantSmall1.glb',
   // the room styles (ofis-styles.js, ofis-decor.js): lamps, seats, tables, rugs, kitchen, a screen and more plants from the same Furniture Kit
   ...Object.fromEntries(DECOR_FILES.map(k => [k, F + k + '.glb'])),
@@ -124,7 +124,7 @@ export function makePalette(spec = {}) {
 
 // the scene's own colours for each pack model (material names are the pack's: see the GLB files)
 export const PALETTES = {
-  furniture: { byName: { wood: '#c8935c', metal: '#8b929f', metalMedium: '#4a505d', metalDark: '#2a2f3a', carpet: '#505869' } },
+  furniture: { byName: { wood: '#c8935c', metal: '#8b929f', metalMedium: '#4a505d', metalDark: '#2a2f3a' } },   // (the office chair's cushion was the only 'carpet' here: the seats are the style's now)
   potDesk: { byName: { wood: '#e9e4da', plant: '#58ab58' } },
   potFloor: { byName: { wood: '#c8704a', plant: '#5fb25b' } },
   tree: { byName: { leafsGreen: '#5daa55', leafsDark: '#3f8c58', woodBark: '#8a5d3b', woodBarkDark: '#7a5236', grass: '#5aa653', _defaultMat: '#7a5236' } },
@@ -138,7 +138,7 @@ export const PALETTES = {
 };
 // which palette goes with which model, so a test can check the material names
 export const PALETTE_OF = {
-  desk: 'furniture', chair: 'furniture', screen: 'furniture', keyboard: 'furniture', mouse: 'furniture', shelf: 'furniture', plant: ['potDesk', 'potFloor'],
+  desk: 'furniture', screen: 'furniture', keyboard: 'furniture', mouse: 'furniture', shelf: 'furniture', plant: ['potDesk', 'potFloor'],
   treeA: 'tree', treeA2: 'tree', treeB: 'tree', treeB2: 'tree', bushA: 'tree', bushA2: 'tree', rock1: 'rock', rock2: 'rock', rock3: 'rock', rock4: 'rock',
   ...Object.fromEntries(DECOR_FILES.map(k => [k, k === 'pottedPlant' ? 'pottedFloor' : k === 'plantSmall2' || k === 'plantSmall3' ? ['potDesk', 'potFloor'] : 'decor'])),
 };
@@ -177,3 +177,16 @@ export function poseBones(j) {
     legR: [j.legR.x, 0, 0],
   };
 }
+
+// ------------------------------------------------------------ how a figure sits, by the kind of seat
+
+// The same rig sits in every kind of seat (ofis-arrange.js: a lounge chair at a table is a 'desk' seat, a sofa, a bench or a lounge chair away from the tables is 'lounge', a bar stool is
+// 'stool'). The hip's height is the seat's own (the seat model's top plus the pad of the figure, `hip` of a seat); what differs by kind is how the body sits: `lean` turns the upper body
+// (radians, positive forward: a person at a desk leans a little to the screen, on a sofa back into it, on a stool a little forward over the table) and `legs` is the angle of the
+// thighs (-1.5 is horizontal, forward; on a high stool the legs hang).
+export const SEAT_POSE = {
+  desk: { lean: 0.02, legs: -1.5 },
+  lounge: { lean: -0.24, legs: -1.42 },
+  stool: { lean: 0.07, legs: -0.95 },
+};
+export const seatPose = kind => SEAT_POSE[kind] || SEAT_POSE.desk;

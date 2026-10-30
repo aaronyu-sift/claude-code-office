@@ -1,11 +1,12 @@
-// What makes an occupied office of the 3D scene its own: draws the plan of ofis-styles.js into the room's static batch (windows, furniture, lamps, candles, a whiteboard in
-// the project's colour, a wall of plants, a server rack ...) and runs the light of its lamps and windows. The decisions (which style, what stands where) are in ofis-styles.js,
-// the numbers of the light in ofis-light.js; this file only draws.
+// What makes an office of the 3D scene its own: draws the plan of ofis-arrange.js into the room's static batch (tables and seats, laptops and monitors, windows, lamps, candles, a
+// whiteboard in the project's colour, a wall of plants, a server rack ...) and runs the light of its lamps and windows. A vacant office is drawn from the same plan as an occupied
+// one: the furniture is a property of the slot, and the lights are the only difference (off). The decisions (which arrangement and style, what stands where) are in ofis-arrange.js
+// and ofis-styles.js, the numbers of the light in ofis-light.js; this file only draws.
 //
 //   const decor = createDecor({ atmosphere })
 //   decor.beginBuild()                                    at the start of every rebuild of the building
-//   decor.furnish({ B, kit, X, Z, W, D, plan, style, theme, color, rng, top, roomId })     one occupied office, into its Batch
-//   decor.furnishVacant({ B, X, Z, W })                   a vacant office: one window with a dark pane (nobody is there, the light is off)
+//   decor.furnish({ B, kit, X, Z, W, D, plan, style, theme, color, rng, roomId, slot, screens })     one office, into its Batch (screens(desc) gets every monitor and laptop screen)
+//   decor.setLit(slot, on, instant)                       the light of a slot's room: on while a chat is in it (a vacant office is furnished the same, with the lights off)
 //   decor.finish(group)                                   the three instanced meshes of the building: window panes, bulbs and flames, glows and pools of light
 //   decor.update(T, dt)                                   each frame: the lights come on at dusk, flicker a little, the panes follow the sky
 //   decor.floorMaterial(pattern)                          the material of a style's floor (a pattern texture times the floor's vertex colours)
@@ -14,8 +15,9 @@
 // rooms (three more draw calls for the whole building) and the shaders do not change when a room is added or selected.
 import * as THREE from 'three';
 import { makePalette } from './ofis-rig.js';
-import { STYLES, MODEL_SIZE, SCALE, paletteSpec, footprint, TONES, DOOR_BACK_W } from './ofis-styles.js';
-import { levels, flicker, paneColour, createFollower } from './ofis-light.js';
+import { STYLES, MODEL_SIZE, SCALE, paletteSpec, footprint, TONES } from './ofis-styles.js';
+import { levels, flicker, paneColour, createFollower, createSwitches } from './ofis-light.js';
+import { rot } from './ofis-geom.js';
 import { CYCLE } from './motion.js';
 
 const VIEW = new THREE.Vector3(1, 0.9, 1).normalize();              // the camera's direction (ofis.js VIEW): glow sprites face it
@@ -87,6 +89,7 @@ function glowTexture() {
 
 export function createDecor({ atmosphere, aniso = 4 } = {}) {
   const follower = createFollower({ atmosphere, turnMs: CYCLE.turn });
+  const switches = createSwitches();                                 // the light of every slot's room (0..1), kept across rebuilds of the building
   const palettes = new Map(), floorMats = new Map(), floorTex = new Map();
   const toneColour = {};
   for (const [k, hex] of Object.entries(TONES)) toneColour[k] = new THREE.Color(hex);
@@ -129,7 +132,7 @@ export function createDecor({ atmosphere, aniso = 4 } = {}) {
 
     // one occupied office. ctx: { B (the Batch), kit ({ GEO, PAL, PK, AS, POSTERS, BOOKS, POLISH, shade }), X, Z, W, D, plan, style, theme, color (the chat's colour), rng, top (chief desk height), roomId }
     furnish(ctx) {
-      const { B, kit, X, Z, plan, style: st, color, rng: r, roomId } = ctx;
+      const { B, kit, X, Z, plan, style: st, color, rng: r, roomId, slot, screens } = ctx;
       const { GEO, PAL, PK, AS, POSTERS, BOOKS, shade } = kit;
       const b = (x, y, z, w, h, d, col, ry) => B.box(X + x, y, Z + z, w, h, d, col, ry);
       const pt = (geo, x, y, z, sx, sy, sz, col, ry, rx, rz) => B.put(geo, X + x, y, Z + z, sx, sy, sz, col, ry, rx, rz);
@@ -142,7 +145,7 @@ export function createDecor({ atmosphere, aniso = 4 } = {}) {
       };
       // a pack model, or a box of its size when the file is not there
       const model = it => {
-        const s = it.s ?? SCALE, { pal, pk } = palFor(it), y = it.k === 'rug' ? 0.022 : it.y;
+        const s = it.s ?? SCALE, { pal, pk } = palFor(it), y = it.k === 'rug' ? 0.022 : it.y || 0;
         if (B.model(it.m, X + it.x, y, Z + it.z, { ry: it.ry || 0, s, pal, pk })) return;
         const [w, d] = footprint(it), h = MODEL_SIZE[it.m][1] * s;
         if (it.k === 'rug') b(it.x, 0.018, it.z, w, 0.012, d, st.pack.fabric);
@@ -154,11 +157,67 @@ export function createDecor({ atmosphere, aniso = 4 } = {}) {
       };
       // a box of a wall piece: a = along the wall, y, t = out of the wall, along / h / thick = its sizes; wall 'n' (z = 0) or 'w' (x = 0)
       const wbox = (wall, a, y, t, along, h, thick, col) => (wall === 'n' ? b(a, y, t, along, h, thick, col) : b(t, y, a, thick, h, along, col));
-      const pane = (wall, a, y, w, h, extra = {}) => build.panes.push({ x: X + (wall === 'n' ? a : 0.03), y, z: Z + (wall === 'n' ? 0.03 : a), ry: wall === 'n' ? 0 : Math.PI / 2, w, h, wall, room: roomId, style: st.id, ...extra });
+      const pane = (wall, a, y, w, h, extra = {}) => build.panes.push({ x: X + (wall === 'n' ? a : 0.03), y, z: Z + (wall === 'n' ? 0.03 : a), ry: wall === 'n' ? 0 : Math.PI / 2, w, h, wall, room: roomId, slot, style: st.id, ...extra });
+      const rb = (x, y, z, w, h, d, rr, col, ry) => B.rbox(X + x, y, Z + z, w, h, d, rr, col, ry);
+      const tris0 = B.i.length / 3;
 
       for (const it of plan.items) {
         switch (it.k) {
           case 'm': case 'lamp': case 'rug': model(it); break;
+          case 'table': {                                            // a table the pack has no model for: a rounded slab on legs of its own kind (ofis-arrange.js)
+            const col = st.pack.wood, leg = shade(st.pack.metal, -0.28), top = it.h, ry = it.ry || 0, under = shade(col, -0.3);
+            const at = (lx, lz) => { const [dx, dz] = rot(lx, lz, ry); return [it.x + dx, it.z + dz]; };
+            if (it.shape === 'ell') {
+              pt(GEO.cyl, it.x, top - 0.025, it.z, it.w, 0.05, it.d, col, ry);
+              pt(GEO.cyl, it.x, top - 0.06, it.z, it.w - 0.08, 0.025, it.d - 0.08, under, ry);
+              for (const sg of [-1, 1]) {
+                const [px, pz] = at(sg * it.w * 0.2, 0);
+                pt(GEO.cyl, px, (top - 0.08) / 2, pz, 0.14, top - 0.08, 0.14, leg);
+                pt(GEO.cyl, px, 0.02, pz, 0.62, 0.04, 0.5, leg, ry);
+              }
+            } else {
+              rb(it.x, top - 0.025, it.z, it.w, 0.05, it.d, 0.02, col, ry);
+              b(it.x, top - 0.062, it.z, it.w - 0.08, 0.025, it.d - 0.08, under, ry);
+              if (it.legs === 'bar') {                              // two posts on a foot rail
+                for (const sg of [-1, 1]) { const [px, pz] = at(sg * (it.w / 2 - 0.45), 0); pt(GEO.cyl, px, (top - 0.05) / 2, pz, 0.1, top - 0.05, 0.1, leg); pt(GEO.cyl, px, 0.02, pz, 0.5, 0.04, 0.5, leg); }
+                b(it.x, 0.22, it.z + 0, it.w - 0.9, 0.035, 0.035, shade(leg, 0.2), ry);
+              } else {                                              // trestle: an end panel on each side and a stretcher
+                for (const sg of [-1, 1]) { const [px, pz] = at(sg * (it.w / 2 - 0.12), 0); b(px, (top - 0.05) / 2, pz, 0.055, top - 0.05, it.d - 0.16, leg, ry); }
+                b(it.x, top * 0.35, it.z, it.w - 0.3, 0.04, 0.05, leg, ry);
+              }
+            }
+            break;
+          }
+          case 'set': {                                              // a laptop, or a monitor with its keyboard and mouse, in front of a seat; `seat` is its seat's id (undefined: nobody uses that seat)
+            const ry = it.ry, fx = Math.sin(ry), fz = Math.cos(ry), seat = it.seat, kind = seat === 'chef' ? 'chef' : 'slot', idx = seat === 'chef' ? 0 : (seat == null ? -1 : seat);
+            const rq = ry - Math.PI / 2, nx = Math.cos(rq), nz = -Math.sin(rq);          // the screen's normal, toward the person
+            if (it.kind === 'laptop') {
+              const s = it.s;
+              model({ k: 'm', m: 'laptop', x: it.x, z: it.z, y: it.y, ry, s, role: 'fabric' });
+              if (screens) screens({ x: X + it.x - 0.075 * s * fx + nx * 0.006, y: it.y + 0.0875 * s, z: Z + it.z - 0.075 * s * fz + nz * 0.006, ry: rq, rx: -0.42, w: 0.2 * s, h: 0.115 * s, kind, slot: idx });
+            } else {
+              const sc = it.w / 0.379, top = it.y;
+              if (B.model('screen', X + it.x, top, Z + it.z, { ry, s: sc })) {
+                if (screens) screens({ x: X + it.x + nx * (0.016 * sc + 0.004), y: top + 0.1715 * sc, z: Z + it.z + nz * (0.016 * sc + 0.004), ry: rq, rx: -0.1, w: 0.355 * sc, h: 0.21 * sc, kind, slot: idx });
+              } else {
+                b(it.x, top + 0.02, it.z, 0.2, 0.02, 0.24, st.pack.metal, ry);
+                b(it.x - nx * 0.02, top + 0.13, it.z - nz * 0.02, 0.04, 0.22, 0.05, st.pack.metal, ry);
+                b(it.x, top + 0.31, it.z, 0.05, 0.38, it.w, '#2a2f3a', ry);
+                if (screens) screens({ x: X + it.x + nx * 0.027, y: top + 0.31, z: Z + it.z + nz * 0.027, ry: rq, w: it.w - 0.06, h: 0.32, kind, slot: idx });
+              }
+              const kx = it.x + fx * 0.3, kz = it.z + fz * 0.3;
+              if (B.model('keyboard', X + kx, top, Z + kz, { ry, s: 1.4 })) B.model('mouse', X + kx + Math.cos(ry) * 0.27 + fx * 0.02, top, Z + kz - Math.sin(ry) * 0.27 + fz * 0.02, { ry, s: 1.4 });
+              else b(kx, top + 0.012, kz, 0.4, 0.022, 0.15, '#e8ebf0', ry);
+            }
+            break;
+          }
+          case 'cluster': {                                          // the coffee corner: a fridge, and a cabinet with a coffee machine on it, along the west wall
+            const ry = Math.PI / 2;
+            model({ k: 'm', m: 'kitchenFridgeSmall', x: 0.3, z: it.z - 0.42, y: 0, ry, s: 1.6, role: 'fabric' });
+            model({ k: 'm', m: 'kitchenCabinet', x: 0.42, z: it.z + 0.5, y: 0, ry, s: 1.6, role: 'fabric' });
+            model({ k: 'm', m: 'kitchenCoffeeMachine', x: 0.42, z: it.z + 0.5, y: 0.72, ry, s: 1.5, role: 'fabric' });
+            break;
+          }
           case 'candle': {
             for (let i = 0; i < it.n; i++) {
               const off = it.n === 1 ? 0 : -it.spread / 2 + i * it.spread / (it.n - 1);
@@ -299,20 +358,18 @@ export function createDecor({ atmosphere, aniso = 4 } = {}) {
         }
       }
       // the light sources of the plan, in the building's coordinates
-      for (const l of plan.lights) build.lights.push({ ...l, x: X + l.x, z: Z + l.z, room: roomId, style: st.id });
-      build.rooms.set(roomId, { style: st.id, windows: plan.windows.length, lights: plan.lights.length });
+      for (const l of plan.lights) build.lights.push({ ...l, x: X + l.x, z: Z + l.z, room: roomId, slot, style: st.id });
+      // verification only: what this office drew (the plan's items by kind, model and place, a hash of them, the triangles it added): a vacant office and the same slot occupied must match
+      const drawn = plan.items.map(it => [it.k, it.m || it.shape || it.kind || '', +(it.x || 0).toFixed(2), +(it.z || 0).toFixed(2), +(it.ry || 0).toFixed(2), it.seat == null ? '' : it.seat].join(':'));
+      let h = 0x811c9dc5;
+      for (const ch of drawn.join('|')) h = Math.imul(h ^ ch.charCodeAt(0), 0x01000193) >>> 0;
+      build.rooms.set(roomId, { style: st.id, slot, windows: plan.windows.length, lights: plan.lights.length, items: drawn.length, sig: h.toString(16), tris: B.i.length / 3 - tris0, arrangement: plan.look ? plan.look.work + '+' + plan.look.soft : null });
     },
 
-    // a vacant office: a window with a dark pane, no light (nobody is there)
-    furnishVacant({ B, X, Z, W, door }) {
-      const c = Math.min(W - 2.2, 8.4), w = 1.1, h = 0.95, y0 = 1.0, fr = '#e9ecef';
-      const b = (x, y, z, ww, hh, d, col) => B.box(X + x, y, Z + z, ww, hh, d, col);
-      if (door === 'back' && c + w / 2 > W - 1 - DOOR_BACK_W / 2 - 0.1) return;
-      b(c, y0 + h - 0.035, 0.045, w, 0.07, 0.09, fr); b(c, y0 + 0.035, 0.045, w, 0.07, 0.09, fr);
-      b(c - w / 2 + 0.035, y0 + h / 2, 0.045, 0.07, h, 0.09, fr); b(c + w / 2 - 0.035, y0 + h / 2, 0.045, 0.07, h, 0.09, fr);
-      b(c, y0 + h / 2, 0.05, 0.035, h - 0.14, 0.05, fr);
-      build.panes.push({ x: X + c, y: y0 + h / 2, z: Z + 0.03, ry: 0, w: w - 0.1, h: h - 0.1, wall: 'n', room: 'vacant', style: 'vacant', kind: 'dark' });
-    },
+    // the light of a slot's room: on while a chat is in it, off while nobody is (ofis.js lightsFor). The number eases over SWITCH_MS (ofis-light.js createSwitches)
+    setLit(slot, on, instant = false) { switches.set(slot, on, performance.now(), instant || follower.reduced); },
+    litOf: slot => switches.get(slot),
+    get switches() { return switches; },
 
     // the three instanced meshes of the building (panes, bulbs and flames, glows and pools): one draw call each
     finish(g) {
@@ -377,21 +434,24 @@ export function createDecor({ atmosphere, aniso = 4 } = {}) {
       this.update(performance.now() / 1000, 0, true);
     },
 
-    // each frame (T seconds): follow the sky and the night, set the colour of every bulb, glow, pool and pane; only what changed goes to the GPU
+    // each frame (T seconds): follow the sky and the night and the switch of every room, set the colour of every bulb, glow, pool and pane; only what changed goes to the GPU
     update(T, dt, force = false) {
       if (!live) return;
       if (dt) follower.step(dt);
+      const moved = switches.step(performance.now());
       const v = follower.v, k = v[0], reduced = follower.reduced;
-      const paneKey = v.map(x => x.toFixed(3)).join();
+      const paneKey = v.map(x => x.toFixed(3)).join() + '|' + switches.key();
+      const lit = slot => switches.get(slot);
       if (live.panes && (force || paneKey !== live.paneKey)) {
         live.paneKey = paneKey;
         const cache = new Map();
         live.paneList.forEach((p, i) => {
-          if (p.kind === 'dark') _c.setRGB(0.10, 0.13, 0.19, THREE.SRGBColorSpace).multiplyScalar(1 - 0.35 * k);
-          else if (p.kind === 'screen') { const lv = levels('screen', k), t = toneColour[p.tone || 'cyan']; _c.copy(t).multiplyScalar(lv.bulb * 0.85); }
+          const pw = lit(p.slot);
+          if (p.kind === 'screen') { const lv = levels('screen', k), t = toneColour[p.tone || 'cyan']; _c.copy(t).multiplyScalar(lv.bulb * 0.85 * pw); }
           else {
-            let c = cache.get(p.style);
-            if (!c) cache.set(p.style, c = paneColour(v, STYLES[p.style] && STYLES[p.style].sky));
+            const ck = p.style + ':' + pw.toFixed(3);
+            let c = cache.get(ck);
+            if (!c) cache.set(ck, c = paneColour(v, STYLES[p.style] && STYLES[p.style].sky, pw));
             _c.setRGB(c[0], c[1], c[2], THREE.SRGBColorSpace);
           }
           live.panes.setColorAt(i, _c);
@@ -400,22 +460,23 @@ export function createDecor({ atmosphere, aniso = 4 } = {}) {
       }
       if (live.bulbs) {
         live.bulbOf.forEach((l, i) => {
-          const lv = levels(l.kind, k), f = flicker(T, { kind: l.kind, phase: l.phase, reduced });
-          _c.copy(toneColour[l.tone] || toneColour.warm).multiplyScalar(lv.bulb * f);
+          const pw = lit(l.slot), lv = levels(l.kind, k), f = pw > 0 ? flicker(T, { kind: l.kind, phase: l.phase, reduced }) : 1;
+          _c.copy(toneColour[l.tone] || toneColour.warm).multiplyScalar(lv.bulb * f * pw);
           live.bulbs.setColorAt(i, _c);
         });
         live.bulbs.instanceColor.needsUpdate = true;
       }
       if (live.glows) {
         live.quads.forEach(({ l, kind }, i) => {
-          const lv = levels(l.kind, k), f = flicker(T, { kind: l.kind, phase: l.phase, reduced });
+          const pw = lit(l.slot), lv = levels(l.kind, k), f = pw > 0 ? flicker(T, { kind: l.kind, phase: l.phase, reduced }) : 1;
           const amount = kind === 'glow' ? lv.glow * GLOW_GAIN : lv.pool * POOL_GAIN * (l.floorY < 0.1 ? 1 : 0.6);
-          _c.copy(toneColour[l.tone] || toneColour.warm).multiplyScalar(amount * f);
+          _c.copy(toneColour[l.tone] || toneColour.warm).multiplyScalar(amount * f * pw);
           live.glows.setColorAt(i, _c);
         });
         live.glows.instanceColor.needsUpdate = true;
       }
       live.lastK = k;
+      return moved;
     },
 
     // verification only: what the building shows right now
@@ -424,6 +485,8 @@ export function createDecor({ atmosphere, aniso = 4 } = {}) {
       const k = follower.k;
       return {
         k: +k.toFixed(3), reduced: follower.reduced,
+        lit: Object.fromEntries([...new Set(live.lights.map(l => l.slot))].map(sl => [sl, +switches.get(sl).toFixed(3)])),
+        litTarget: Object.fromEntries([...new Set(live.lights.map(l => l.slot))].map(sl => [sl, switches.target(sl)])),
         panes: live.paneList.length, windows: live.paneList.filter(p => p.kind === 'window').length, screens: live.paneList.filter(p => p.kind === 'screen').length,
         lights: live.lights.length, bulbs: live.bulbs ? live.bulbs.count : 0, glows: live.glows ? live.glows.count : 0,
         rooms: build ? Object.fromEntries([...build.rooms]) : {},
