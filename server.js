@@ -57,7 +57,8 @@ function configure(o) {
   COLORS_FILE = o.projectColorsFile ? path.resolve(expandHome(o.projectColorsFile)) : null;
   INLINE_COLORS = o.projectColors || {};
   CSWAP_URL = o.cswapUrl || null;
-  const chatDb = o.chatDb || process.env.CCO_CHAT_DB;
+  // --demo shows fictional data and promises not to read ~/.claude: it reads no chat board either, whatever --chat-db, CCO_CHAT_DB or a config file say
+  const chatDb = o.demo ? null : (o.chatDb || process.env.CCO_CHAT_DB);
   if (CHAT_SOURCE) CHAT_SOURCE.close();
   CHAT_SOURCE = createChatSource(chatDb ? path.resolve(expandHome(chatDb)) : null);
   CHAT = chatDb ? createChatBridge(CHAT_SOURCE) : null;
@@ -923,7 +924,7 @@ function cli(argv) {
 
   --port <n>          Port to listen on (default 7321)
   --open              Open the browser after start
-  --demo              Fictional demo data; does not read ~/.claude
+  --demo              Fictional demo data; does not read ~/.claude or a chat board
   --claude-dir <dir>  Claude config dir (default ~/.claude or $CLAUDE_CONFIG_DIR)
   --data-dir <dir>    Where the cost cache is kept (default ~/.claude-code-office)
   --chat-db <file>    agentchat SQLite database to show (read-only; or set CCO_CHAT_DB)

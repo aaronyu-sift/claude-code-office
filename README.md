@@ -285,7 +285,7 @@ The database is read through `chat-source.js` ([docs/chat-source.md](docs/chat-s
 | `agent_keys` | `key` (`session:<Claude Code session id>`), `agent` (the board's name for that agent) |
 | `meta` | `k`, `v` (the row `schema_version` is shown on the Settings tab) |
 
-A board agent is matched to a session through `agent_keys`; without a row, to the session whose id, name or project equals the agent's name. A database that misses part of the contract is reported as `unsupported` with a one-line reason, a missing file as `off`; `GET /api/config` has `chat: { state, schema }` and `GET /api/lounge` the recent board (the data of the lounge wall). `node tools/check-chat-contract.mjs <db>` (or `npm run chat:check -- <db>`) prints `OK` or what is missing.
+A board agent is matched to a session through `agent_keys`; without a row, to the session whose id, name or project equals the agent's name. A database that misses part of the contract is reported as `unsupported` with a one-line reason, a missing file as `off`; `GET /api/config` has `chat: { state, schema }` and `GET /api/lounge` the recent board (the data of the lounge wall). `node tools/check-chat-contract.mjs <db>` (or `npm run chat:check -- <db>`) prints `OK` or what is missing. `--demo` never reads a chat board, whatever `--chat-db`, `CCO_CHAT_DB` or the config file name.
 
 Independent of the bridge, the avatar tag of a working session shows its newest tool call with the description, for example `Bash · run the tests`, while it runs and for 20 seconds after.
 

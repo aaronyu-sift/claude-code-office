@@ -12,8 +12,9 @@ const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 
 // one office per scenario: createOffice reconfigures the module, so the scenarios run one after the other
-async function withOffice(chatDb, fn) {
-  const office = createOffice({ demo: true, chatDb, loadConfigFiles: false, dataDir: scratch() });
+// (the handler is used without start(), so no cost worker or scanner runs; `demo` is only the option the server reads)
+async function withOffice(chatDb, fn, { demo = false } = {}) {
+  const office = createOffice({ demo, chatDb, loadConfigFiles: false, dataDir: scratch() });
   const srv = http.createServer((req, res) => office.handler(req, res));
   await new Promise(r => srv.listen(0, '127.0.0.1', r));
   const get = path => new Promise((resolve, reject) => http.get(`http://127.0.0.1:${srv.address().port}${path}`, res => {
@@ -72,6 +73,30 @@ test('api: a board that breaks the contract is unsupported, with the reason in /
     assert.match(j.state.reason, /table agent_keys is missing/);
     assert.deepEqual([j.messages, j.channels, j.agents], [[], [], []]);
   });
+});
+
+test('api: --demo reads no chat board: with a database configured, /api/lounge is off and empty and /api/config says off', { skip: missing('v2') }, async () => {
+  const b = makeBoard('v2');
+  await withOffice(b.db, async get => {
+    const cfg = (await get('/api/config')).json();
+    assert.equal(cfg.demo, true);
+    assert.deepEqual(cfg.chat, { state: 'off', schema: null });
+    const j = (await get('/api/lounge')).json();
+    assert.equal(j.state.state, 'off');
+    assert.deepEqual([j.messages, j.channels, j.agents], [[], [], []]);
+    assert.ok(!(await get('/api/lounge')).body.includes('lounge'), 'none of the real posts is in the answer');
+  }, { demo: true });
+  // the environment variable and a database named in a config file are stopped the same way
+  process.env.CCO_CHAT_DB = b.db;
+  try {
+    await withOffice(undefined, async get => {
+      assert.deepEqual((await get('/api/config')).json().chat, { state: 'off', schema: null });
+      assert.deepEqual((await get('/api/lounge')).json().messages, []);
+    }, { demo: true });
+    await withOffice(undefined, async get => {
+      assert.equal((await get('/api/config')).json().chat.state, 'ok', 'the same board without --demo is read');
+    });
+  } finally { delete process.env.CCO_CHAT_DB; }
 });
 
 test('api: a missing file is off', async () => {
