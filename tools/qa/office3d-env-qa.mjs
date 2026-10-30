@@ -106,7 +106,7 @@ async function runSettings(ctx) {
       slider: fixedBtn && same(s1b.rows, ['time', 'time-slider', 'season', 'hemisphere', 'weather', 'shelf']) && s1b.timeMode === 'fixed',
       applied: s2.season === 'winter' && s2.weather === 'rain' && s2.hemi === 'south' && s2.shelf === '20' && s2.sliderOut === '22:00' && same(stored(s2.stored), E) && s2.url === '?scene=3d',
       reload: s3.wrapShown && same(stored(s3.stored), E) && s3o.season === 'winter' && s3o.weather === 'rain' && s3o.hemi === 'south' && s3o.shelf === '20' && s3o.timeMode === 'fixed' && s3o.sliderOut === '22:00' && same(s3o.rows, s1b.rows),
-      pixel: pixel && same(pixel.settings, E) && Object.values(pixel.from).every(v => v === 'stored'),
+      pixel: pixel && Object.keys(E).every(k => pixel.settings[k] === E[k] && pixel.from[k] === 'stored'),                       // the keys this check set; the pixel scene has more (`project`)
       url: same(stored(s4.stored), E) && s4o.season === 'spring' && s4o.weather === 'fog' && s4o.hemi === 'north' && s4o.shelf === '7' && s4o.timeMode === 'fixed' && s4o.sliderOut === '03:00'
         && /season=spring/.test(s4o.note) && /time=03:00/.test(s4o.note.replace(/\u2060/g, '')) && /shelf=7/.test(s4o.note.replace(/\u2060/g, '')),
       hour: s5o.timeMode === 'fixed' && s5o.sliderOut === '21:30' && /time=21:30/.test(s5o.note.replace(/\u2060/g, '')) && same(stored(s5.stored), E),
