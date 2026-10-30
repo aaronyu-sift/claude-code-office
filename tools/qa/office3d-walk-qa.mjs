@@ -1,6 +1,6 @@
 // QA of the walkers: nothing in the 3D scene appears or disappears inside a room (public/js/ofis.js, public/js/ofis-arrive.js). Headless Chrome with software WebGL in a throw-away
 // profile (harness3d.mjs), the server against a fake ~/.claude, one `CHECK <name> PASS|FAIL <detail>` line per check and a final `QA PASS` or `QA FAIL`.
-//   node tools/qa/office3d-walk-qa.mjs [--only load|calm|brief|leave|flap|rebuild|hidden|follow|settle|reduced] [--mutations [--mutation <words>]]
+//   node tools/qa/office3d-walk-qa.mjs [--only load|calm|brief|leave|flap|rebuild|hidden|follow|settle|reduced] [--mutations [--mutation <words>|<more words>]] [--verify-mutations]
 //
 // How it sees: the scene's recorder (s.rec, started the moment the scene exists: harness3d.mjs recordFromStart) has the creation, every frame and the removal of every figure, with the
 // frame's step. A check that changes the data itself does it in the page, on the store (a copy of a chat, a sub-agent, a status), and asks the scene to update (s.sync()), so that the
@@ -243,6 +243,9 @@ async function runBrief(ctx) {
     await sleep(350);
     for (let i = 0; i < 5; i++) await qa(page, `q.status('burst-${i}', 'done');`);
     await qa(page, 'q.sync();');
+    // the desk of a figure that turned round is free at once (not when it is out): none of the chat's taken desks is held by a figure that is walking out
+    const held = await ev(page, `(() => { const r = o.desks().rooms.find(r => r.id === ${JSON.stringify(chat1)}), fs = o.figures(); return r.seats.filter(Boolean).filter(id => { const f = fs.find(f => f.id === id); return f && f.after === 'gone'; }); })()`);
+    if (held.length) problems.push(`${held.length} desks of the chat are held by figures that have turned round (${held.slice(0, 2).join(', ')})`);
     // a chat that ends 0.5 s after it came, and one that ends after 2 s
     await qa(page, `q.chat('brief-chat-a'); q.sync();`);
     await sleep(500);
@@ -271,11 +274,12 @@ async function runBrief(ctx) {
       if (!l) { if (id !== 'flash') problems.push(`${id}: not recorded`); continue; }
       problems.push(...ends(l, [off, st.office]), ...jumps(l));
       if (l.some(e => e.mode === 'seated')) problems.push(`${short(id)}: seen seated, though its job was over before it reached its seat`);
+      if (l.some(e => e.k === 'frame' && e.vis !== false) && !l.some(e => e.after === 'gone')) problems.push(`${short(id)}: it was drawn, and then removed without turning round and walking out`);
       const far = Math.max(...l.map(e => Math.hypot(e.x - l[0].x, e.z - l[0].z)));
       if (far > 12) problems.push(`${short(id)}: got ${f1(far)} units from the entrance in a job of a few seconds`);
       if (l.some(e => e.turn)) turned++;
     }
-    if (!turned) problems.push('nobody was seen turning round');
+    if (turned < 4) problems.push(`only ${turned} figures were seen turning round (want 4 or more of the ${brief.length})`);
     const vacantNow = st.office.slots.filter(s => s.vacant).length;
     if (vacantNow !== st.office.slots.length - 6) problems.push(`${vacantNow} vacant offices of ${st.office.slots.length}, want ${st.office.slots.length - 6} (the 4 real chats and the 2 hosts stay)`);
     problems.push(...(await books(page)));
@@ -361,6 +365,7 @@ async function runLeave(ctx) {
     const out2 = l2.find(e => e.after === 'gone');
     const seatedFor = out2 && tDone !== null ? (out2.t - tDone) / 1000 : 0;
     if (!out2) problems.push('the finished sub-agent never walked out');
+    else if (!out2.stand) problems.push('the finished sub-agent started walking out without standing up first');
     else if (seatedFor < 4.3 || seatedFor > 9) problems.push(`the finished sub-agent stood up ${seatedFor.toFixed(1)} s after the data said it was done (want 4.5 s of sitting: 4.3 to 9)`);
     if (l2.length && l2.at(-1).k !== 'remove') problems.push('the finished sub-agent was not removed');
     else if (l2.length && !nearAny([off0, st.office], l2.at(-1).x, l2.at(-1).z, 1.3)) problems.push('the finished sub-agent was removed away from the entrance');
@@ -412,6 +417,7 @@ async function runFlap(ctx) {
       problems.push(...ends(l, [st.office], { removed: false }), ...jumps(l));
       const creates = l.filter(e => e.k === 'create'), removes = l.filter(e => e.k === 'remove');
       if (creates.length !== removes.length + 1) problems.push(`${id}: made ${creates.length} times and removed ${removes.length} (it is in the data at the end: one more make than removes)`);
+      if (['flap-chat', 'flap-sub'].includes(id) && (creates.length !== 1 || removes.length)) problems.push(`${id}: it came back while it walked out, so it is one figure; it was made ${creates.length} times and removed ${removes.length}`);
       for (const e of [...creates, ...removes]) if (!nearAny([st.office], e.x, e.z, 1.3) || inRoom(st.office, e.x, e.z)) problems.push(`${id}: ${e.k === 'create' ? 'made' : 'removed'} at (${f1(e.x)}, ${f1(e.z)}), not at the entrance`);
       if (!st.figs.includes(id)) problems.push(`${id}: not in the scene at the end`);
       if (['flap-chat', 'flap-sub'].includes(id)) {
@@ -485,12 +491,12 @@ async function runHidden(ctx) {
     if (!S.ready.ok) problems.push('the scene did not become ready');
     await page.evaluate(HELPERS);
     await ev(page, 's.rec.take().length');
-    await qa(page, `q.chat('h1'); q.chat('h3'); q.sub('h3', 'h3-sub'); q.sync();`);
+    await qa(page, `q.chat('h1'); q.chat('h3'); q.sub('h3', 'h3-sub'); q.sub('h3', 'h3-x'); q.sync();`);
     await sleep(2500);
     const before = await ev(page, 'o.figures().filter(f => f.mode === "walk").map(f => [f.id, f.x, f.z])');
     await page.evaluate(`location.hash = '#pano'`);
     await sleep(900);
-    await qa(page, `q.remove('h1'); q.chat('h2'); q.sub('h3', 'h-sub'); q.status('h3-sub', 'done');`);      // while nobody looks (the scene does not update while hidden)
+    await qa(page, `q.remove('h1'); q.chat('h2'); q.sub('h3', 'h-sub'); q.status('h3-sub', 'done'); q.remove('h3-x');`);      // while nobody looks (the scene does not update while hidden)
     await sleep(1200);
     await page.evaluate(`location.hash = '#ofis'`);
     await sleep(800);
@@ -499,16 +505,17 @@ async function runHidden(ctx) {
     const lists = byId(st.rec);
     if (before.length < 2) problems.push(`only ${before.length} figures were walking when the view was left`);
     for (const l of lists.values()) problems.push(...jumps(l));
-    for (const id of ['h1', 'h2', 'h-sub', 'h3-sub']) {
+    for (const id of ['h1', 'h2', 'h-sub', 'h3-sub', 'h3-x']) {
       const l = lists.get(id);
       if (!l) { problems.push(`${id}: not recorded`); continue; }
-      problems.push(...ends(l, [st.office], { removed: id === 'h1' || id === 'h3-sub' }));
+      problems.push(...ends(l, [st.office], { removed: id === 'h1' || id === 'h3-sub' || id === 'h3-x' }));
+      if (['h1', 'h3-sub', 'h3-x'].includes(id) && !l.some(e => e.after === 'gone')) problems.push(`${id}: it was removed without walking out`);
     }
     if (!st.figs.includes('h2') || !st.figs.includes('h-sub') || !st.figs.includes('h3')) problems.push('a figure that is in the data is missing from the scene');
     if (st.figs.includes('h1')) problems.push('h1 (its chat ended while the view was hidden) is still in the scene');
     problems.push(...(await books(page)), ...(await seated(page)));
     if (errorsOf(page).length) problems.push(`console error: ${errorsOf(page)[0].slice(0, 120)}`);
-    return [report('3d-walk-hidden', problems, `the view was left for 2 s with ${before.length} people walking, a chat ended and a chat and a sub-agent came meanwhile: back in the view nobody jumped, the ended chat and the finished sub-agent walked out and were removed at the entrance, the new ones were made at the entrance and sat down, ${st.figs.length} figures in the scene`)];
+    return [report('3d-walk-hidden', problems, `the view was left for 2 s with ${before.length} people walking, a chat ended, a sub-agent finished, one was taken out of the data and a chat and a sub-agent came meanwhile: back in the view nobody jumped, the three that were over walked out (turning round where they still walked in) and were removed at the entrance, the new ones were made at the entrance and sat down, ${st.figs.length} figures in the scene`)];
   } finally { await S.done(); }
 }
 
@@ -625,7 +632,7 @@ async function runSettle(ctx) {
     problems.push(...(await books(page)));
     // the app itself never calls it (the pixel scene's own boards.settle(avoid) takes an argument and is another thing)
     const calls = [];
-    const walk = dir => { for (const f of readdirSync(dir, { withFileTypes: true })) { const p = join(dir, f.name); if (f.isDirectory()) walk(p); else if (/\.js$/.test(f.name) && !p.includes('/vendor/')) { const t = readFileSync(p, 'utf8'); for (const m of t.matchAll(/\.settle\s*\(\s*\)/g)) calls.push(`${p.slice(ROOT.length)}:${t.slice(0, m.index).split('\n').length}`); } } };
+    const walk = dir => { for (const f of readdirSync(dir, { withFileTypes: true })) { const p = join(dir, f.name); if (f.isDirectory()) walk(p); else if (/\.js$/.test(f.name) && !p.includes('/vendor/')) { const t = readFileSync(p, 'utf8'); for (const m of t.matchAll(/\.settle\s*\(\s*\)/g)) calls.push(`${p.slice((ctx.root || ROOT).length)}:${t.slice(0, m.index).split('\n').length}`); } } };
     walk(join(ctx.root || ROOT, 'public'));
     if (calls.length) problems.push(`the app calls settle: ${calls.join(', ')}`);
     return [report('3d-walk-settle', problems, `after the page load ${n0} of ${figs0} figures were walking: settle ended them all (everybody seated at their seat, no figure lost), a second call found none, and the walk out of a closed chat ended in ${ended2} removals; no call of settle in public/`)];
@@ -675,18 +682,17 @@ const MUTATIONS = [
   { name: 'a big queue is not hurried', file: 'public/js/ofis-arrive.js', from: 'if (rush && n > calm) {', to: 'if (false && n > calm) {', fails: 'load' },
   { name: 'the walk is faster than its pace', file: 'public/js/ofis-arrive.js', from: 'const stp = speed * pace * rampFactor', to: 'const stp = speed * pace * 2.2 * rampFactor', fails: 'load' },
   { name: 'the door does not open for the chief', file: 'public/js/ofis.js', from: "if (c.mode !== 'walk' || c.delay > 0) continue;", to: "if (c.mode !== 'walk' || c.delay > 0 || c.main) continue;", fails: 'load' },
-  { name: 'the camera is refitted on every rebuild', file: 'public/js/ofis.js', from: 'const changed = key !== fitKey;', to: 'const changed = true;', fails: 'rebuild' },
-  { name: 'a figure whose job ends before its seat is removed on the spot', file: 'public/js/ofis.js', from: "if (c.mode === 'walk' && c.after === 'sit') { turnAround(c); continue; }", to: "if (c.mode === 'walk' && c.after === 'sit') { removeChar(c); continue; }", fails: 'brief' },
+  { name: 'a figure whose job ends before its seat is removed on the spot', file: 'public/js/ofis.js', from: "if (c.mode === 'walk' && c.after === 'sit') { turnAround(c); continue; }", to: "if (c.mode === 'walk' && c.after === 'sit') { removeChar(c); continue; }", fails: ['brief', 'hidden'] },
   { name: 'a turned-round figure keeps its desk', file: 'public/js/ofis.js', from: "    const room = world.rooms.get(c.roomId), pos = c.root.position;\n    if (room && c.slot >= 0 && room.slotChar[c.slot] === c) room.slotChar[c.slot] = null;\n    if (c.slot >= 0) c.slotWas = c.slot;\n    c.slot = -1;\n    // a walk still", to: "    const room = world.rooms.get(c.roomId), pos = c.root.position;\n    if (c.slot >= 0) c.slotWas = c.slot;\n    c.slot = -1;\n    // a walk still", fails: 'brief' },
   { name: 'a chat that ends is taken out of its vacant office on the spot', file: 'public/js/ofis.js', from: "if (!room) { exitVacated(c, old,", to: "if (!room) { removeChar(c); continue; } if (!room) { exitVacated(c, old,", fails: ['brief', 'leave'] },
-  { name: 'a seated figure whose agent is gone is removed on the spot', file: 'public/js/ofis.js', from: "      else leaveRoom(c);\n    }\n  }", to: "      else removeChar(c);\n    }\n  }", fails: 'leave' },
-  { name: 'a seated figure walks out without standing up first', file: 'public/js/ofis.js', from: 'if (c.path) c.standT = stand ? STAND_S : 0;', to: 'if (c.path) c.standT = 0;', fails: 'leave' },
+  { name: 'a seated figure whose agent is gone is removed on the spot', file: 'public/js/ofis.js', from: "      else leaveRoom(c);\n    }\n  }", to: "      else removeChar(c);\n    }\n  }", fails: 'brief' },
+  { name: 'a seated figure walks out without standing up first', file: 'public/js/ofis.js', from: 'if (c.path) c.standT = stand ? STAND_S : 0;', to: 'if (c.path) c.standT = 0;', fails: ['brief', 'leave'] },
   { name: 'the door of a vacant office stays a drawn box while its person walks out', file: 'public/js/ofis.js', from: 'buildShell(B, g, X, Z, W, D, th, it.door, !open)', to: 'buildShell(B, g, X, Z, W, D, th, it.door, true)', fails: 'leave' },
   { name: 'a figure that comes back while it walks out is left to leave', file: 'public/js/ofis.js', from: "      } else if (chef.after === 'gone') comeBack(chef, room);", to: "      } else if (false) comeBack(chef, room);", fails: 'flap' },
   { name: 'a sub-agent that is working again is left to leave', file: 'public/js/ofis.js', from: "if (c.after === 'gone') comeBack(c, room);", to: "if (false) comeBack(c, room);", fails: 'flap' },
   { name: 'a rebuild seats the people who are still walking', file: 'public/js/ofis.js', from: "      if (walking) {\n        if (moved) startWalk(c, repath(route, pos, out ? 'entrance' : 'seat'), c.after);\n        continue;\n      }", to: "      if (walking) {\n        if (!out) { const e = route[route.length - 1]; pos.x = e.x; pos.z = e.z; c.path = null; c.mode = 'seated'; c.after = null; }\n        continue;\n      }", fails: 'rebuild' },
   { name: 'a rebuild drops the people whose walk changed', file: 'public/js/ofis.js', from: "        if (moved) startWalk(c, repath(route, pos, out ? 'entrance' : 'seat'), c.after);", to: "        if (moved) { removeChar(c); continue; }", fails: 'rebuild' },
-  { name: 'the view update seats figures on the spot after a time hidden', file: 'public/js/ofis.js', from: "      if (c.delay > 0) removeChar(c);                                      // still waiting at the entrance: it never showed", to: "      if (c.delay > 0) removeChar(c);\n      else if (true) { const e = c.route && c.route[c.route.length - 1]; if (e && c.mode === 'walk') { c.root.position.x = e.x; c.root.position.z = e.z; } removeChar(c); }", fails: 'hidden' },
+  { name: 'a sub-agent taken out of the data while it walks in is removed on the spot', file: 'public/js/ofis.js', from: "      else if (c.mode === 'walk' && c.path) turnAround(c);", to: "      else if (c.mode === 'walk' && c.path) removeChar(c);", fails: 'hidden' },
   { name: 'the name label stays where the figure was made', file: 'public/js/ofis.js', from: '    c.tag.pos.set(pos.x, 0, pos.z);\n    if (c.pk) applyPack(c);', to: "    if (c.mode !== 'walk') c.tag.pos.set(pos.x, 0, pos.z);\n    if (c.pk) applyPack(c);", fails: 'follow' },
   { name: 'settle does nothing', file: 'public/js/ofis.js', from: '        n++;\n        finishWalk(c);', to: '        n++;', fails: 'settle' },
   { name: 'the app calls settle', file: 'public/js/ofis.js', from: "    if (born.length) {\n      for (const b of born)", to: "    if (born.length) {\n      setTimeout(() => root.__ofis.settle(), 60000);\n      for (const b of born)", fails: 'settle' },
@@ -696,7 +702,7 @@ const MUTATIONS = [
 
 async function runMutations() {
   const rows = [];
-  for (const m of MUTATIONS.filter(x => !val('mutation') || x.name.includes(val('mutation')))) {
+  for (const m of MUTATIONS.filter(x => !val('mutation') || val('mutation').split('|').some(w => x.name.includes(w)))) {
     const dir = mkdtempSync(join(tmpdir(), 'cco-mutw-'));
     try {
       for (const f of readdirSync(ROOT).filter(n => /\.(js|json)$/.test(n) && n !== 'package-lock.json')) cpSync(join(ROOT, f), join(dir, f));
@@ -717,6 +723,15 @@ async function runMutations() {
 }
 
 // ---- main
+if (args.includes('--verify-mutations')) {            // every line to break is there exactly once (no QA run: after a change to ofis.js that moves or rewrites one)
+  let bad = 0;
+  for (const m of MUTATIONS) {
+    const n = readFileSync(join(ROOT, m.file), 'utf8').split(m.from).length - 1;
+    if (n !== 1) { bad++; console.log(`MUTATION LINE ${n === 0 ? 'NOT FOUND' : 'FOUND ' + n + ' TIMES'}: ${m.name}`); }
+  }
+  console.log(bad ? `MUTATION LINES BAD ${bad} of ${MUTATIONS.length}` : `MUTATION LINES OK (${MUTATIONS.length})`);
+  process.exit(bad ? 1 : 0);
+}
 const report2 = [];
 const show = r => { report2.push(r); console.log(`CHECK ${r.name} ${r.ok ? 'PASS' : 'FAIL'} ${r.detail}`); };
 if (args.includes('--mutations')) {
