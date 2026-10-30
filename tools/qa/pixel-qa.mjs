@@ -1513,7 +1513,7 @@ if (want('settings')) {
       weather: s3.weather === 'rain' && s3.wcount >= 100 && s3.wcount <= 120,
       time: fixedBtn && s4.fixed && s4.clock === '22:00' && s4.settings.time === '22:00',
       hemisphere: s5.settings.hemisphere === 'south' && s5.clock === '22:00',
-      noReload: noReload && s5.url === `?proj=${proj}`,
+      noReload: noReload && s5.url.replace('&scene=pixel', '') === `?proj=${proj}`,       // the harness adds scene=pixel to every address
       camera: camBtn && s6.proj === 'front' && s6b.proj === 'iso',
       stored: same(s7.settings, ES) && same(JSON.parse(s7.stored), E) && s7.shelfSel === '20' && s7.settings.shelf === 20 && s7.from.shelf === 'user',
       reload: same(s8.settings, ES) && fromAll(s8.from, 'stored') && s8.season === 'autumn' && s8.weather === 'snow' && s8.wcount > 0 && s8.clock === '06:30' && s8.fixed && !s8.open,
