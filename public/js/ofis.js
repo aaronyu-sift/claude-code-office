@@ -20,7 +20,7 @@ import * as AS from './ofis-assets.js';
 import * as PL from './ofis-polish.js';
 import { makePalette, PALETTES, chooseOutfit, poseBones, seatPose } from './ofis-rig.js';
 import { isShelved } from './pixel/shelf.js';
-import { WALK, STAGGER_S, STAND_S, TURN_S, arrivalPlan, pathLength, stepWalk, turnBack, rejoin, leadOut, routeSig } from './ofis-arrive.js';
+import { WALK, STAGGER_S, STAND_S, TURN_S, ARRIVE_T_S, arrivalPlan, paceFor, pathLength, stepWalk, turnBack, rejoin, leadOut, routeSig } from './ofis-arrive.js';
 import {
   WALL_T, ROOM_D, FRONT_M, GAP, HALL_D, HALL_GAP, PLINTH_M, CAP, roomW,
   VACANT_CLS, minRoomsFrom, buildingPlan, classFor, nextClass, createSlots,
@@ -2078,10 +2078,12 @@ export function createOfis(root, ctx, opts = {}) {
     if (p && Math.hypot(p.x - pos.x, p.z - pos.z) > 1e-4) c.th = headingTo(pos, p);
   };
   // `path` begins where the figure stands; `after` is what it does at the end of it: 'sit' (on its seat) or 'gone' (it is removed: the entrance)
-  function startWalk(c, path, after) {
+  // the step a walker takes at speed v (units per second): 0.691 at the normal walk (2.2), growing slowly with speed, so a runner's cadence stays natural
+  const strideAt = v => 0.691 * Math.pow(Math.max(v, 1.5) / WALK, 0.35);
+  function startWalk(c, path, after, pace) {
     c.path = path; c.pi = 1; c.mode = 'walk'; c.after = after;
-    if (after === 'gone') c.pace = 1;                    // only a queue that comes in on a page load is hurried: every walk out is at the normal pace
     c.travelled = 0; c.plen = pathLength(path); c.standT = c.turnT = 0;
+    c.pace = pace !== undefined ? pace : paceFor(c.plen);          // PROPOSAL: every walk is aimed at ARRIVE_T_S
     if (path.length < 2) finishWalk(c);
   }
   function finishWalk(c) {
@@ -2101,10 +2103,9 @@ export function createOfis(root, ctx, opts = {}) {
     c.root.position.set(route[0].x, 0, route[0].z);
     c.sit = 0;
     c.heading = c.th = headingTo(route[0], route[1]);
-    c.pace = plan ? plan.pace : 1;
     c.delay = plan ? plan.delay : 0;
     c.root.visible = c.delay <= 0;
-    startWalk(c, route.slice(), 'sit');
+    startWalk(c, route.slice(), 'sit', plan ? plan.pace : undefined);
     if (chars.get(c.id) === c) note('create', c);
   }
   // The job is over, or the chat is: a seated figure stands up (it is on its seat: the end of its route) and walks the way it came, to the entrance
@@ -2293,7 +2294,7 @@ export function createOfis(root, ctx, opts = {}) {
     // all are seated within about 10 s (?arrive=calm keeps the normal pace)
     if (born.length) {
       for (const b of born) b.route = routeFor(b.c, b.room);
-      const plan = arrivalPlan(born.map(b => pathLength(b.route)), { rush: instant && !CALM_LOAD, start: entranceFreeIn() });
+      const plan = arrivalPlan(born.map(b => pathLength(b.route)), { rush: instant && !CALM_LOAD, start: entranceFreeIn(), T: CALM_LOAD && instant ? Infinity : ARRIVE_T_S });
       born.forEach((b, i) => enter(b.c, b.room, plan[i], b.route));
     }
     // a figure whose agent is gone from the data (the chat ended, the job is over) is never taken out of the scene on the spot: it walks out, or turns around if it is still coming in
@@ -2406,7 +2407,7 @@ export function createOfis(root, ctx, opts = {}) {
         const r = stepWalk(WK, dt, { pace: c.pace });
         pos.x = WK.x; pos.z = WK.z; c.pi = WK.pi; c.travelled = WK.travelled;
         moving = r.moved > 1e-6;
-        c.walkPh += r.moved * (10 / WALK);              // the legs are paced by the distance, so the feet do not slide
+        c.walkPh += r.moved * Math.PI / strideAt(WALK * c.pace);   // the legs are paced by the distance, so the feet do not slide; a faster walker takes longer steps (strideAt), so its legs do not whirl
         if (r.done) { finishWalk(c); if (!chars.has(c.id)) return; }
         else if (Math.hypot(r.hx, r.hz) > 1e-6) c.th = Math.atan2(r.hx, r.hz);
       }
@@ -2428,9 +2429,10 @@ export function createOfis(root, ctx, opts = {}) {
     c.sit = lerp(c.sit, c.mode === 'seated' ? 1 : 0, Math.min(1, dt * 7));
 
     const ph = c.ph, sw = Math.sin(c.walkPh);
+    const gb = pose === 'walk' ? clamp((WALK * c.pace - WALK) / 3.8, 0, 1) : 0;      // how much faster than the normal walk: swing, bounce and lean grow with it
     tgt.lx = tgt.rx = -0.25; tgt.lz = -0.06; tgt.rz = 0.06; tgt.up = 0; tgt.hx = 0; tgt.hz = 0;
     if (pose === 'walk') {
-      tgt.lx = sw * 0.55; tgt.rx = -sw * 0.55; tgt.up = 0.05;
+      tgt.lx = sw * (0.55 + 0.4 * gb); tgt.rx = -sw * (0.55 + 0.4 * gb); tgt.up = 0.05 + 0.12 * gb;
     } else if (pose === 'type') {
       tgt.lx = -1.05 + Math.sin(T * 15 + ph) * 0.1; tgt.rx = -1.05 + Math.sin(T * 15 + ph + 2.4) * 0.1;
       tgt.lz = -0.16; tgt.rz = 0.16; tgt.up = 0.12; tgt.hx = 0.1 + Math.sin(T * 2 + ph) * 0.03;
@@ -2454,11 +2456,11 @@ export function createOfis(root, ctx, opts = {}) {
     c.upper.rotation.x = lerp(c.upper.rotation.x, tgt.up, k);
     c.head.rotation.x = lerp(c.head.rotation.x, tgt.hx, k);
     c.head.rotation.z = lerp(c.head.rotation.z, tgt.hz, k);
-    const legSwing = pose === 'walk' ? sw * 0.6 : 0;
+    const legSwing = pose === 'walk' ? sw * (0.6 + 0.35 * gb) : 0;
     c.legL.rotation.x = sp.legs * c.sit + legSwing * (1 - c.sit);
     c.legR.rotation.x = sp.legs * c.sit - legSwing * (1 - c.sit);
     // a walk is information, not decoration: with reduced motion the figure still walks, at the same pace, only without the bounce of its step
-    c.hip.position.y = lerp(0.42, seatHip(c) + 0.03, c.sit) + (pose === 'walk' && !atmosphere.state.reducedMotion ? Math.abs(Math.cos(c.walkPh)) * 0.03 : 0);
+    c.hip.position.y = lerp(0.42, seatHip(c) + 0.03, c.sit) + (pose === 'walk' && !atmosphere.state.reducedMotion ? Math.abs(Math.cos(c.walkPh)) * (0.03 + 0.025 * gb) : 0);
 
     const sc = c.force ? c.force.scale : c.mode === 'walk' ? clamp((world.entryX + 0.15 - pos.x) / 0.9, 0.02, 1) : 1;
     c.root.scale.setScalar(sc);
@@ -2525,6 +2527,7 @@ export function createOfis(root, ctx, opts = {}) {
   }
 
   // The door opens for anybody who walks through it (an agent coming in or going out, the chief included, or a person of a local add-on: api.openDoorsNear)
+  const DOOR_LEAD_S = [0.275, 0.55];
   function stepDoor(room, dt) {
     if (!room.doorPivot) return;
     let near = false;
@@ -2532,6 +2535,18 @@ export function createOfis(root, ctx, opts = {}) {
       if (c.mode !== 'walk' || c.delay > 0) continue;
       const p = c.root.position;
       if (Math.abs(p.x - room.doorPt.x) < 0.9 && Math.abs(p.z - room.doorPt.z) < 1.15) { near = true; break; }
+      const q = c.path && c.path[c.pi];                  // where it is in 0.275 s and 0.55 s along its leg (the door needs about 0.55 s to open: 96 percent at rate 6)
+      if (q) {
+        const dx = q.x - p.x, dz = q.z - p.z, d = Math.hypot(dx, dz);
+        if (d > 1e-4) {
+          const v = WALK * c.pace;
+          for (const t of DOOR_LEAD_S) {
+            const m = Math.min(d, v * t);
+            if (Math.abs(p.x + dx / d * m - room.doorPt.x) < 0.9 && Math.abs(p.z + dz / d * m - room.doorPt.z) < 1.15) { near = true; break; }
+          }
+          if (near) break;
+        }
+      }
     }
     for (let i = 0; !near && i < doorWalkers.length; i += 2) {
       if (Math.abs(doorWalkers[i] - room.doorPt.x) < 0.9 && Math.abs(doorWalkers[i + 1] - room.doorPt.z) < 1.15) near = true;

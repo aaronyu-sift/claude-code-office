@@ -63,29 +63,27 @@ export function etaSeconds(len, pace = 1, speed = WALK) {
   return s;
 }
 
-// A queue of figures that are all to come in now (a page load, a scene switch, a burst of sub-agents): `lengths` are the lengths of their walks, in any order.
-// The longest walks leave first, so that the nearest rooms are the last to be reached and everybody arrives at about the same time; each leaves STAGGER_S after the one before.
-// With `rush` and more than CALM_QUEUE figures every walk that would not be over within `budget` seconds is sped up (at most PACE_MAX), and a queue of more than
-// SPREAD_MAX_S / STAGGER_S figures is released within SPREAD_MAX_S (the stagger shrinks, but never below MIN_STAGGER_S); without `rush` everybody walks at pace 1 and leaves
-// STAGGER_S after the one before, however many they are. `start` is when the first leaves (0: now): the entrance clock of ofis.js passes the time at which the entrance is free
-// again, so that a second queue (the sub-agents that come in the next poll) does not leave together with the first.
-// The figures of a queue share the hall, so none is faster than the ones that left before it: it would catch up and walk through them. Each walks at the fastest pace
-// that it or any figure after it needs (a longer walk with an earlier start never needs less), so everybody still makes the budget.
-// Returns { delay, pace } for each figure, in the order of `lengths`.
-export function arrivalPlan(lengths, { rush = false, budget = LOAD_BUDGET_S, stagger = STAGGER_S, spread = SPREAD_MAX_S, minStagger = MIN_STAGGER_S, speed = WALK, paceMax = PACE_MAX, calm = CALM_QUEUE, start = 0 } = {}) {
+// ---- fixed-time pace (the proposal under test): every walk is aimed at ARRIVE_T_S seconds from the entrance to the seat, within [V_MIN, V_MAX] units a second
+export const ARRIVE_T_S = 7;
+export const V_MIN = WALK;
+export const V_MAX = 6.0;
+const cacheK = new Map();
+const K = len => { const k = Math.round(len * 100); let v = cacheK.get(k); if (v === undefined) cacheK.set(k, v = etaSeconds(len, 1, 1)); return v; };
+export function paceFor(len, T = ARRIVE_T_S, { speed = WALK, vMin = V_MIN, vMax = V_MAX } = {}) {
+  if (!(len > 0)) return 1;
+  const v = Number.isFinite(T) && T > 0 ? clamp(K(len) / T, vMin, vMax) : vMin;
+  return v / speed;
+}
+export function arrivalPlan(lengths, { rush = false, budget = LOAD_BUDGET_S, stagger = STAGGER_S, spread = SPREAD_MAX_S, minStagger = MIN_STAGGER_S, speed = WALK, calm = CALM_QUEUE, start = 0, T = ARRIVE_T_S, vMin = V_MIN, vMax = V_MAX } = {}) {
   const n = lengths.length;
   const st = n > 1 ? (rush ? Math.max(Math.min(stagger, minStagger), Math.min(stagger, spread / (n - 1))) : stagger) : 0;
   const order = lengths.map((_, i) => i).sort((a, b) => lengths[b] - lengths[a] || a - b);
   const delay = order.map((_, rank) => Math.max(0, start) + rank * st);
   const pace = order.map((i, rank) => {
-    let p = 1;
-    if (rush && n > calm) {
-      const room = Math.max(budget - delay[rank], 1);
-      for (let k = 0; k < 24 && p < paceMax && etaSeconds(lengths[i], p, speed) > room; k++) p = Math.min(paceMax, p * 1.1);
-    }
-    return p;
+    const t = rush && n > calm ? Math.min(T, Math.max(budget - delay[rank], 1)) : T;
+    return paceFor(lengths[i], t, { speed, vMin, vMax });
   });
-  for (let r = n - 2; r >= 0; r--) pace[r] = Math.max(pace[r], pace[r + 1]);        // nobody overtakes
+  for (let r = n - 2; r >= 0; r--) pace[r] = Math.max(pace[r], pace[r + 1]);
   const out = new Array(n);
   order.forEach((i, rank) => { out[i] = { delay: +delay[rank].toFixed(4), pace: +pace[rank].toFixed(3) }; });
   return out;

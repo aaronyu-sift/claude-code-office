@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  WALK, STAGGER_S, SPREAD_MAX_S, MIN_STAGGER_S, LOAD_BUDGET_S, CALM_QUEUE, PACE_MAX, RAMP_UNITS, RAMP_FLOOR,
+  WALK, STAGGER_S, SPREAD_MAX_S, MIN_STAGGER_S, LOAD_BUDGET_S, CALM_QUEUE, PACE_MAX, RAMP_UNITS, RAMP_FLOOR, ARRIVE_T_S, V_MIN, V_MAX, paceFor,
   pathLength, compact, rampFactor, etaSeconds, arrivalPlan, stepWalk, turnBack, nearestOnPath, repath, routeSig, dist, sharedUpTo, sameHall, meet, leadOut, rejoin,
 } from '../public/js/ofis-arrive.js';
 
@@ -72,10 +72,24 @@ test('etaSeconds: a bit longer than length over speed, and shorter at a higher p
 
 // ---------------------------------------------------------------- the queue
 
-test('arrivalPlan: a few figures leave the entrance 0.35 s apart and walk at pace 1', () => {
+test('paceFor: every walk is aimed at ARRIVE_T_S seconds, within [V_MIN, V_MAX]: a near room is not hurried, a far one is capped', () => {
+  assert.equal(paceFor(13.9), 1, 'the nearest room walks at the normal pace');
+  for (const len of [20, 27.3, 35.5, 40.5]) {
+    const pace = paceFor(len);
+    assert.ok(Math.abs(etaSeconds(len, pace) - ARRIVE_T_S) < 0.1, `${len} units take ${etaSeconds(len, pace).toFixed(2)} s`);
+    assert.ok(pace >= 1 && pace * WALK <= V_MAX + 1e-9);
+  }
+  assert.ok(Math.abs(paceFor(57.1) * WALK - V_MAX) < 1e-9, 'a far room is capped at V_MAX');
+  assert.ok(etaSeconds(57.1, paceFor(57.1)) > ARRIVE_T_S && etaSeconds(57.1, paceFor(57.1)) < 10.5, 'and takes a little longer than T');
+  assert.equal(paceFor(40, Infinity), 1, 'T infinite (?arrive=calm): the normal walk');
+  assert.equal(paceFor(0), 1);
+  assert.equal(V_MIN, WALK);
+});
+
+test('arrivalPlan: a few figures leave the entrance 0.35 s apart, each aimed at the same travel time', () => {
   const plan = arrivalPlan([30, 30, 30]);
   assert.deepEqual(plan.map(p => p.delay), [0, STAGGER_S, STAGGER_S * 2]);
-  assert.ok(plan.every(p => p.pace === 1));
+  assert.ok(plan.every(p => Math.abs(p.pace - paceFor(30)) < 1e-3));
   assert.deepEqual(arrivalPlan([12]), [{ delay: 0, pace: 1 }]);
   assert.deepEqual(arrivalPlan([]), []);
 });
@@ -90,19 +104,21 @@ test('arrivalPlan: more than four with a rush are sped up so that all are in the
   const plan = arrivalPlan(lengths, { rush: true });
   lengths.forEach((len, i) => {
     const t = plan[i].delay + etaSeconds(len, plan[i].pace);
-    assert.ok(t <= LOAD_BUDGET_S + 0.35, `walk ${i} (${len} units): delay ${plan[i].delay}, pace ${plan[i].pace}, arrives at ${t.toFixed(1)} s`);
-    assert.ok(plan[i].pace >= 1 && plan[i].pace <= PACE_MAX);
+    const floor = plan[i].delay + etaSeconds(len, V_MAX / WALK);            // the fastest this walk can be
+    assert.ok(t <= Math.max(LOAD_BUDGET_S + 0.35, floor + 0.01), `walk ${i} (${len} units): delay ${plan[i].delay}, pace ${plan[i].pace}, arrives at ${t.toFixed(1)} s`);
+    assert.ok(plan[i].pace >= 1 && plan[i].pace <= V_MAX / WALK + 1e-9);
   });
-  assert.ok(plan[0].pace > 2 && plan[0].pace <= PACE_MAX, 'the longest walk is hurried most');
+  assert.ok(plan[0].pace > 2 && plan[0].pace <= V_MAX / WALK + 1e-9, 'the longest walk is hurried most');
   assert.ok(plan[9].pace > 1 && plan[9].pace < plan[0].pace, 'a middle walk is hurried less');
   assert.equal(plan[10].pace, 1, 'a short walk is not hurried');
   assert.equal(plan[11].pace, 1);
 });
 
-test('arrivalPlan: four or fewer are never hurried, and a calm reload never is', () => {
-  assert.ok(arrivalPlan([66, 60, 55, 50], { rush: true }).every(p => p.pace === 1), `up to ${CALM_QUEUE} walk at pace 1`);
+test('arrivalPlan: four or fewer get the plain travel time, a calm reload (T infinite) walks at pace 1', () => {
+  const four = [66, 60, 55, 50];
+  assert.deepEqual(arrivalPlan(four, { rush: true }).map(p => p.pace), arrivalPlan(four).map(p => p.pace), `up to ${CALM_QUEUE}: the rush changes nothing`);
   const many = Array.from({ length: 20 }, (_, i) => 20 + i * 2);
-  assert.ok(arrivalPlan(many).every(p => p.pace === 1), 'without a rush: pace 1');
+  assert.ok(arrivalPlan(many, { T: Infinity }).every(p => p.pace === 1), 'T infinite: pace 1');
   assert.ok(arrivalPlan(many, { rush: true }).some(p => p.pace > 1));
 });
 
@@ -111,18 +127,18 @@ test('arrivalPlan: a hurried queue that fits is released within SPREAD_MAX_S, a 
   const plan = arrivalPlan(lens, { rush: true });
   const last = Math.max(...plan.map(p => p.delay));
   assert.ok(last <= SPREAD_MAX_S + 1e-6 && last > SPREAD_MAX_S - 0.3, `last delay ${last}`);
-  assert.ok(plan.every((p, i) => p.delay + etaSeconds(lens[i], p.pace) <= LOAD_BUDGET_S + 0.6), 'a queue of 16 is in within the budget (long walks first)');
+  assert.ok(plan.every((p, i) => p.delay + etaSeconds(lens[i], p.pace) <= Math.max(LOAD_BUDGET_S + 0.6, p.delay + etaSeconds(lens[i], V_MAX / WALK) + 0.01)), 'a queue of 16 is in within the budget, or as soon as V_MAX allows (long walks first)');
   const big = arrivalPlan(Array.from({ length: 40 }, (_, i) => 66 - i), { rush: true });
   const delays = big.map(p => p.delay).sort((a, b) => a - b), gaps = delays.slice(1).map((d, i) => d - delays[i]);
   assert.ok(Math.min(...gaps) >= MIN_STAGGER_S - 1e-3, `the closest two leave ${Math.min(...gaps)} s apart`);
-  assert.ok(Math.max(...big.map(p => p.pace)) <= PACE_MAX + 1e-9);
+  assert.ok(Math.max(...big.map(p => p.pace)) <= V_MAX / WALK + 1e-9 && V_MAX / WALK <= PACE_MAX);
 });
 
 test('arrivalPlan: a calm queue is not squeezed however long it is (the stagger shrinks only for a hurried one)', () => {
   const plan = arrivalPlan(Array.from({ length: 30 }, () => 30));
   const delays = plan.map(p => p.delay).sort((a, b) => a - b);
   assert.ok(delays.slice(1).every((d, i) => Math.abs(d - delays[i] - STAGGER_S) < 1e-3), 'every figure leaves 0.35 s after the one before');
-  assert.ok(plan.every(p => p.pace === 1));
+  assert.ok(plan.every(p => Math.abs(p.pace - paceFor(30)) < 1e-3), 'and each is aimed at the same travel time');
 });
 
 test('arrivalPlan: start is when the first figure leaves (the entrance clock of a second queue)', () => {
