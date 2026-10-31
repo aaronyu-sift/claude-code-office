@@ -89,6 +89,8 @@ cd claude-code-office
 npm start            # or double-click start-windows.bat  (macOS/Linux: ./start-macos-linux.sh)
 ```
 
+**As an app:** the page ships a web app manifest and a 👾 icon (`public/manifest.webmanifest`, `public/icons/`), and `127.0.0.1` counts as a secure context, so Chrome offers to install it from the address bar or from Cast, save and share, "Install page as app". The installed app opens `http://127.0.0.1:<port>/#ofis` in its own window, so it works only while the server runs, and it is tied to the port it was installed from.
+
 **Options:**
 
 | Flag | Default | What it does |

@@ -1,0 +1,16 @@
+{
+  "id": "/",
+  "name": "Claude Code Office",
+  "short_name": "Office",
+  "description": "A 3D office where every Claude Code chat is a person at a desk.",
+  "start_url": "/#ofis",
+  "scope": "/",
+  "display": "standalone",
+  "background_color": "#12161d",
+  "theme_color": "#12161d",
+  "icons": [
+    { "src": "icons/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "icons/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
+    { "src": "icons/maskable-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ]
+}
