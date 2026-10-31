@@ -1,5 +1,5 @@
 'use strict';
-// Read-only bridge: agentchat database -> Claude Code Office events.
+// Read-only bridge: agentchat database -> Minion Office events.
 // Opt-in (--chat-db <file> or CCO_CHAT_DB). The database is read through chat-source.js (docs/chat-source.md), which opens it read-only, uses only
 // the columns of its contract and keeps working across an upgrade of the chat; nothing here knows how the board is stored.
 //

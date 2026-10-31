@@ -1,5 +1,5 @@
 'use strict';
-// Claude Code Office — live, local visualizer for your Claude Code sessions.
+// Minion Office — live, local visualizer for your Claude Code sessions.
 // Sources: ~/.claude/sessions/*.json (live sessions) + projects/**/<sessionId>.jsonl
 // (transcripts) + <sessionId>/subagents/agent-*.jsonl (subagents). Read-only.
 // Zero dependencies. Standalone it binds to 127.0.0.1 only; it can also be mounted
@@ -24,7 +24,7 @@ const PUBLIC = path.join(__dirname, 'public');
 const VERSION = (() => { try { return require('./package.json').version; } catch { return '0.0.0'; } })();
 const expandHome = p => (p && p.startsWith('~') ? path.join(HOME, p.slice(1)) : p);
 
-// Set by configure(); defaults match a plain `npx claude-code-office`.
+// Set by configure(); defaults match a plain `npx minion-office`.
 let CLAUDE_DIR = path.join(HOME, '.claude');
 let SESS_DIR = path.join(CLAUDE_DIR, 'sessions');
 let PROJ_DIR = path.join(CLAUDE_DIR, 'projects');
@@ -902,7 +902,7 @@ function createOffice(opts = {}) {
       start();
       const srv = http.createServer((req, res) => handler(req, res));
       srv.on('error', e => {
-        if (e.code === 'EADDRINUSE') { console.error(`Port ${port} is busy. Is Claude Code Office already running? Try --port.`); process.exit(1); }
+        if (e.code === 'EADDRINUSE') { console.error(`Port ${port} is busy. Is Minion Office already running? Try --port.`); process.exit(1); }
         throw e;
       });
       srv.listen(port, host, () => cb && cb(`http://${host}:${port}/`));
@@ -922,9 +922,9 @@ function cli(argv) {
   const has = f => argv.includes('--' + f);
   const val = f => { const i = argv.indexOf('--' + f); return i >= 0 ? argv[i + 1] : undefined; };
   if (has('help') || argv.includes('-h')) {
-    console.log(`Claude Code Office ${VERSION}
+    console.log(`Minion Office ${VERSION}
 
-  npx claude-code-office [options]
+  npx minion-office [options]
 
   --port <n>          Port to listen on (default 7321)
   --open              Open the browser after start
@@ -952,7 +952,7 @@ function cli(argv) {
   const port = Number(val('port') || process.env.CCO_PORT || files.port) || 7321;
   const office = createOffice(opts);
   office.listen(port, HOST, url => {
-    console.log(`Claude Code Office ${VERSION}${opts.demo ? ' (demo)' : ''} → ${url}`);
+    console.log(`Minion Office ${VERSION}${opts.demo ? ' (demo)' : ''} → ${url}`);
     if (has('open') || files.open) openBrowser(url);
   });
 }

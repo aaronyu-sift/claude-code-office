@@ -34,7 +34,7 @@ export default {
   chooseTitle: 'Choose your language',
   server: SERVER,
   messages: {
-    'app.name': 'Claude Code Office',
+    'app.name': 'Minion Office',
     'lang.tip': p => `Language: ${p.cur} · click to change`,
   'lang.close': 'Close',
 
@@ -319,7 +319,7 @@ export default {
     'weather.off': 'Off', 'weather.auto': 'Auto (by date)', 'weather.clear': 'Clear', 'weather.cloudy': 'Cloudy', 'weather.rain': 'Rain', 'weather.snow': 'Snow', 'weather.fog': 'Fog',
     'of.noWebgl': 'WebGL isn’t available in this browser, so the office can’t be drawn.',
     'of.noAtlas': 'The pixel office could not be loaded (public/pixel/ may be missing).',
-    'of.lobby': 'CLAUDE CODE OFFICE · LOBBY',
+    'of.lobby': 'MINION OFFICE · LOBBY',
     'of.lobbyWorking': 'working',
     'of.lobbyWaiting': 'need you',
     'of.lobbyRooms': { one: 'room', other: 'rooms' },

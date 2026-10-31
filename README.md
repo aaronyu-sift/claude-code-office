@@ -1,4 +1,4 @@
-# Claude Code Office
+# Minion Office
 
 **A live dashboard, 3D isometric office and cost tracker for your local Claude Code sessions and subagents.**
 See at a glance which terminal is waiting for you, what every agent and subagent is doing right now, and what your usage would cost at API prices. Runs on `localhost`, reads your local Claude Code data read-only, zero dependencies.
@@ -8,21 +8,21 @@ See at a glance which terminal is waiting for you, what every agent and subagent
 ![Zero dependencies](https://img.shields.io/badge/dependencies-0-199e70)
 ![Local only](https://img.shields.io/badge/data-stays%20on%20your%20machine-fab219)
 
-![Claude Code Office: 3D isometric office where every Claude Code session is a room](docs/screenshots/office.png)
+![Minion Office: 3D isometric office where every Claude Code session is a room](docs/screenshots/office.png)
 
 ```bash
-npx github:azorkai/claude-code-office
+npx github:aaronyu-sift/minion-office
 ```
 
 That's it: the server starts on <http://127.0.0.1:7321> and your browser opens. No API key, no account, no setup.
 
-> Just want to look? Run `npx github:azorkai/claude-code-office --demo` for a fictional, self-running office.
+> Just want to look? Run `npx github:aaronyu-sift/minion-office --demo` for a fictional, self-running office.
 
-> **About this fork.** This is a fork of [azorkai/claude-code-office](https://github.com/azorkai/claude-code-office) (MIT) with these additions:
+> **About this fork.** This is a fork of [azorkai/claude-code-office](https://github.com/azorkai/claude-code-office) (MIT), renamed Minion Office here (upstream calls it Claude Code Office; the name is generic on purpose, and today it still reads Claude Code sessions), with these additions:
 > an optional [agent chat bridge](#agent-chat-bridge-optional), optional [Vertex AI pricing](#pricing-like-a-vertex-ai-bill-optional) for the cost tab (and each message id counted once across transcript files),
 > the current tool and its description on the avatar tag, an "Open in VS Code" link in the session drawer, English fallback labels for tool events,
 > and a [pixel-art Office view](#pixel-office) (isometric and front views, time of day, a sprite gallery) that stays available at `?scene=pixel`; the three.js 3D scene is the default Office view again.
-> Run it with `npx github:aaronyu-sift/claude-code-office`. Everything below is the upstream README, extended where the fork differs.
+> Run it with `npx github:aaronyu-sift/minion-office#pixel-scene`. Everything below is the upstream README, extended where the fork differs.
 
 ---
 
@@ -34,7 +34,7 @@ If you run five, ten, fifteen Claude Code terminals at once, you lose track fast
 - *What are those twelve background subagents actually doing?*
 - *How big has that context grown, and how much would all of this cost on the API?*
 
-Claude Code Office answers those questions live, from the data Claude Code already writes to `~/.claude`.
+Minion Office answers those questions live, from the data Claude Code already writes to `~/.claude`.
 
 ## Features
 
@@ -77,15 +77,15 @@ Claude Code Office answers those questions live, from the data Claude Code alrea
 **One command (Node.js 18+):**
 
 ```bash
-npx github:azorkai/claude-code-office           # start + open the browser
-npx github:azorkai/claude-code-office --demo    # fictional demo office
+npx github:aaronyu-sift/minion-office           # start + open the browser
+npx github:aaronyu-sift/minion-office --demo    # fictional demo office
 ```
 
 **From source / double-click:**
 
 ```bash
-git clone https://github.com/aaronyu-sift/claude-code-office.git
-cd claude-code-office
+git clone https://github.com/aaronyu-sift/minion-office.git
+cd minion-office
 npm start            # or double-click start-windows.bat  (macOS/Linux: ./start-macos-linux.sh)
 ```
 
@@ -321,7 +321,7 @@ If a chat works through a task list, the office can show how far it is: a bar un
 The server is also a plain request handler, so you can mount it into an existing Express/Connect app:
 
 ```js
-const { createOffice } = require('./claude-code-office/server.js');
+const { createOffice } = require('./minion-office/server.js');
 
 const office = createOffice({
   site: { name: 'My Portal', home: '/', links: [{ label: 'Home', href: '/' }, { label: 'Agents', href: '/agents/', current: true }] },
@@ -350,7 +350,7 @@ No. It reads, but never writes to `~/.claude`, and it only reads new bytes after
 
 ## Türkçe
 
-**Claude Code Office (Ajan Ofisi)**, bilgisayarında aynı anda çalışan Claude Code oturumlarını ve alt ajanlarını canlı gösteren yerel bir paneldir:
+**Minion Office (Ajan Ofisi)**, bilgisayarında aynı anda çalışan Claude Code oturumlarını ve alt ajanlarını canlı gösteren yerel bir paneldir:
 
 - hangi terminalin seni beklediğini ("Sıra sende")
 - her ajanın şu an ne yaptığını
@@ -364,8 +364,8 @@ Görünümler:
 - **Maliyet:** günlük ve saatlik grafikler, model ve proje kırılımı.
 
 ```bash
-npx github:azorkai/claude-code-office          # başlat ve tarayıcıyı aç
-npx github:azorkai/claude-code-office --demo   # uydurma verili demo ofis
+npx github:aaronyu-sift/minion-office          # başlat ve tarayıcıyı aç
+npx github:aaronyu-sift/minion-office --demo   # uydurma verili demo ofis
 ```
 
 - Yalnızca `127.0.0.1`'e bağlanır, `~/.claude` altını salt okur, hiçbir yere veri göndermez.

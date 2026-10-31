@@ -1,5 +1,5 @@
 {
-  "name": "claude-code-office",
+  "name": "minion-office",
   "version": "0.1.0",
   "description": "Live dashboard, 3D isometric office and cost tracker for your local Claude Code sessions and subagents. Zero dependencies, runs on localhost.",
   "keywords": [
@@ -19,19 +19,19 @@
     "developer-tools",
     "localhost"
   ],
-  "homepage": "https://github.com/azorkai/claude-code-office#readme",
+  "homepage": "https://github.com/aaronyu-sift/minion-office#readme",
   "bugs": {
-    "url": "https://github.com/azorkai/claude-code-office/issues"
+    "url": "https://github.com/aaronyu-sift/minion-office/issues"
   },
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/azorkai/claude-code-office.git"
+    "url": "git+https://github.com/aaronyu-sift/minion-office.git"
   },
   "license": "MIT",
   "author": "azorkai",
   "main": "server.js",
   "bin": {
-    "claude-code-office": "bin/claude-code-office.js"
+    "minion-office": "bin/minion-office.js"
   },
   "files": [
     "bin/",

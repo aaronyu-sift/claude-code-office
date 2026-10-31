@@ -1,8 +1,8 @@
 {
   "id": "/",
-  "name": "Claude Code Office",
-  "short_name": "Office",
-  "description": "A 3D office where every Claude Code chat is a person at a desk.",
+  "name": "Minion Office",
+  "short_name": "Minion Office",
+  "description": "A 3D office where every agent chat is a person at a desk.",
   "start_url": "/#ofis",
   "scope": "/",
   "display": "standalone",
